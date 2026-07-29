@@ -1,0 +1,8 @@
+[default]
+description = "Default permissions for the plugin"
+permissions = [
+    "allow-getPlatformCallCapabilities",
+    "allow-startPlatformCallLifecycle",
+    "allow-stopPlatformCallLifecycle",
+    "allow-getPlatformCallState",
+]

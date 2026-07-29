@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all --check
+      - run: cargo test
+
+  guest-js:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: dist-js must be up to date
+        run: git diff --exit-code dist-js
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+      - name: Provide tauri-android project
+        run: |
+          git clone --depth 1 --branch tauri-v2.11.3 https://github.com/tauri-apps/tauri /tmp/tauri
+          cp -r /tmp/tauri/crates/tauri/mobile/android android/.tauri/tauri-api
+      - name: Compile Kotlin sources
+        run: gradle -p android assembleDebug
+
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Provide Tauri Swift package
+        run: |
+          git clone --depth 1 --branch tauri-v2.11.3 https://github.com/tauri-apps/tauri /tmp/tauri
+          mkdir -p .tauri
+          cp -r /tmp/tauri/crates/tauri/mobile/ios-api .tauri/tauri-api
+      - name: Build Swift package for iOS
+        run: |
+          xcodebuild -scheme tauri-plugin-call-lifecycle \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO build
+        working-directory: ios

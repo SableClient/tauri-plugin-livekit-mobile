@@ -1,0 +1,26 @@
+[package]
+name = "tauri-plugin-call-lifecycle"
+version = "0.1.0"
+authors = [ "Sable Contributors" ]
+description = "Platform call lifecycle for Tauri mobile apps: Android foreground service and iOS audio session for WebView-owned calls."
+license = "AGPL-3.0-only"
+repository = "https://github.com/SableClient/tauri-plugin-call-lifecycle"
+homepage = "https://github.com/SableClient/tauri-plugin-call-lifecycle"
+documentation = "https://github.com/SableClient/tauri-plugin-call-lifecycle"
+edition = "2021"
+rust-version = "1.85"
+exclude = ["/examples", "/dist-js", "/guest-js", "/node_modules"]
+links = "tauri-plugin-call-lifecycle"
+
+[dependencies]
+tauri = { version = "2.11.3", default-features = false }
+serde = "1.0"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
+
+[build-dependencies]
+tauri-plugin = { version = "2.6.3", features = ["build"] }
+
+[dev-dependencies]
+serde_json = "1.0"
+tauri = { version = "2.11.3", default-features = false, features = ["test"] }
