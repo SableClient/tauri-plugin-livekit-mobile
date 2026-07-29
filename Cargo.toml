@@ -1,16 +1,16 @@
 [package]
-name = "tauri-plugin-call-lifecycle"
-version = "0.1.0"
+name = "tauri-plugin-livekit-mobile"
+version = "0.2.0"
 authors = [ "Sable Contributors" ]
-description = "Platform call lifecycle for Tauri mobile apps: Android foreground service and iOS audio session for WebView-owned calls."
+description = "Native LiveKit audio-room bridge for Tauri mobile apps (Android/iOS): the room runs natively, owned and coordinated from Rust."
 license = "AGPL-3.0-only"
-repository = "https://github.com/SableClient/tauri-plugin-call-lifecycle"
-homepage = "https://github.com/SableClient/tauri-plugin-call-lifecycle"
-documentation = "https://github.com/SableClient/tauri-plugin-call-lifecycle"
+repository = "https://github.com/SableClient/tauri-plugin-livekit-mobile"
+homepage = "https://github.com/SableClient/tauri-plugin-livekit-mobile"
+documentation = "https://github.com/SableClient/tauri-plugin-livekit-mobile"
 edition = "2021"
 rust-version = "1.85"
 exclude = ["/examples", "/dist-js", "/guest-js", "/node_modules"]
-links = "tauri-plugin-call-lifecycle"
+links = "tauri-plugin-livekit-mobile"
 
 [dependencies]
 tauri = { version = "2.11.3", default-features = false }

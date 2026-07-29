@@ -1,8 +1,11 @@
 [default]
 description = "Default permissions for the plugin"
 permissions = [
-    "allow-getPlatformCallCapabilities",
-    "allow-startPlatformCallLifecycle",
-    "allow-stopPlatformCallLifecycle",
-    "allow-getPlatformCallState",
+    "allow-getNativeCallCapabilities",
+    "allow-connectNativeCall",
+    "allow-disconnectNativeCall",
+    "allow-setNativeCallMicrophoneEnabled",
+    "allow-setNativeCallCameraEnabled",
+    "allow-switchNativeCallCamera",
+    "allow-getNativeCallState",
 ]

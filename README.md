@@ -1,31 +1,57 @@
-# tauri-plugin-call-lifecycle
+# tauri-plugin-livekit-mobile
 
-A Tauri v2 plugin that owns the platform call lifecycle for calls whose media
-is owned by the WebView: an Android foreground service (microphone /
-media-playback types, so mic use survives backgrounding) and an iOS
-`AVAudioSession` (category, activation, interruption and route events).
+A Tauri v2 plugin that bridges a WebView-hosted call (e.g. a MatrixRTC call
+in Sable) to a **native LiveKit audio room** on Android and iOS. The room —
+connection, tracks, reconnections, encoding — lives in the native plugin
+(LiveKit Kotlin/Swift SDK, plus an Android foreground service so audio
+survives backgrounding). The native side is the single source of truth for
+room state; the Rust crate is a thin transport that validates basic input,
+forwards time-bounded invocations, and delivers native snapshots and events
+to the owning webview.
 
-Rust mediates a single session-scoped state machine (`idle` / `active`)
-over a Tokio actor, and forwards bounded platform
-audio events to JavaScript.
+> **Breaking:** 0.2.0 replaces the lifecycle-only `getPlatformCallCapabilities`
+> / `startPlatformCallLifecycle` / `stopPlatformCallLifecycle` /
+> `getPlatformCallState` API with the native call bridge below. There is no
+> compatibility shim.
 
 ## Non-goals
 
 The plugin does **not**:
 
-- own WebRTC, a LiveKit `Room`, or any media rendering; tracks are created
-  and owned by JavaScript running in the WebView;
-- touch the camera or screen capture;
-- provide its own signaling, transport, or network stack;
+- mint, refresh, validate, log, echo, or persist LiveKit access tokens;
+- provide MatrixRTC or any other signaling, focus negotiation, or transport
+  beyond the LiveKit room itself;
+- run the LiveKit `Room`, WebRTC, or any media in the WebView;
+- touch screen capture;
 - run background JavaScript.
+
+## MatrixRTC host responsibility
+
+The host application owns everything around the room. For each call it must:
+
+1. pick the LiveKit focus/server and obtain an access token (JWT) from its
+   MatrixRTC LiveKit auth service, with a TTL that covers the call;
+2. call `connectNativeCall` with `{ callId, url, token, microphoneEnabled }`,
+   choosing an opaque `callId` (e.g. the Matrix call id);
+3. refresh or rotate tokens out-of-band — if a token expires mid-call the
+   native bridge reports a bounded failure and the host disconnects and
+   reconnects with a fresh token.
+
+The token crosses the bridge only inside the connect payload. Rust-side
+`Debug` implementations redact it, and neither native plugin logs or
+re-emits it.
 
 ## Supported platforms
 
 | Platform      | Support |
 | ------------- | ------- |
-| Android       | Yes     |
-| iOS           | Yes     |
-| Desktop (any) | No — calls report `supported: false` and start fails with `platform_call_unsupported` |
+| Android       | Yes |
+| iOS           | Yes |
+| Desktop (any) | No — `getNativeCallCapabilities` reports `supported: false, nativeRoom: false, camera: false`; room commands fail with `unavailable` |
+
+`NativeCallCapabilities.camera` advertises per platform whether the native
+lane accepts the camera commands (`setNativeCallCameraEnabled` /
+`switchNativeCallCamera`).
 
 ## Install
 
@@ -36,30 +62,30 @@ Rust:
 
 ```toml
 [dependencies]
-tauri-plugin-call-lifecycle = { git = "https://github.com/SableClient/tauri-plugin-call-lifecycle.git" }
+tauri-plugin-livekit-mobile = { git = "https://github.com/SableClient/tauri-plugin-livekit-mobile.git" }
 ```
 
 JavaScript (build output in `dist-js/` is committed, so consumers do not need
 a build step):
 
 ```sh
-pnpm add git+https://github.com/SableClient/tauri-plugin-call-lifecycle.git
+pnpm add git+https://github.com/SableClient/tauri-plugin-livekit-mobile.git
 ```
 
 Once published, the registry equivalents will be
-`cargo add tauri-plugin-call-lifecycle` and
-`pnpm add @sable-client/tauri-plugin-call-lifecycle`.
+`cargo add tauri-plugin-livekit-mobile` and
+`pnpm add @sable-client/tauri-plugin-livekit-mobile`.
 
 Register the plugin in `src-tauri/src/lib.rs` (or `main.rs`):
 
 ```rust
 tauri::Builder::default()
-    .plugin(tauri_plugin_call_lifecycle::init())
+    .plugin(tauri_plugin_livekit_mobile::init())
 ```
 
 Tauri v2 registers the Android Kotlin and iOS Swift sources declared by this
 crate (`build.rs`: `android_path("android")`, `ios_path("ios")`). On iOS the
-plugin is bound via `ios_plugin_binding!(init_plugin_call_lifecycle)`; rebuild
+plugin is bound via `ios_plugin_binding!(init_plugin_livekit_mobile)`; rebuild
 the mobile scaffold (`tauri android init` / `tauri ios init`) after adding the
 dependency.
 
@@ -69,107 +95,172 @@ Allow the default permission set in `src-tauri/capabilities/default.json`:
 
 ```json
 {
-  "permissions": ["call-lifecycle:default"]
+  "permissions": ["livekit-mobile:default"]
 }
 ```
 
-This grants `getPlatformCallCapabilities`, `startPlatformCallLifecycle`,
-`stopPlatformCallLifecycle`, and `getPlatformCallState`.
+This grants `getNativeCallCapabilities`, `connectNativeCall`,
+`disconnectNativeCall`, `setNativeCallMicrophoneEnabled`,
+`setNativeCallCameraEnabled`, `switchNativeCallCamera`, and
+`getNativeCallState`.
 
 ## Host app setup
 
 ### Android
 
 The plugin's library manifest merges the required permissions
-(`RECORD_AUDIO`, `MODIFY_AUDIO_SETTINGS`, `FOREGROUND_SERVICE`,
-`FOREGROUND_SERVICE_MICROPHONE`, `FOREGROUND_SERVICE_MEDIA_PLAYBACK`,
-`POST_NOTIFICATIONS`) and declares the foreground service. No manifest edits
-are required in the host app. `RECORD_AUDIO` is a runtime permission and is
-requested by the plugin when a session is started with `microphone: true`.
+(`RECORD_AUDIO`, `FOREGROUND_SERVICE*`, `POST_NOTIFICATIONS`) and declares
+the foreground service. No manifest edits are required in the host app.
+`RECORD_AUDIO` is a runtime permission and is requested by the plugin when
+connecting with `microphoneEnabled: true` (or when enabling the microphone
+mid-call) if it is not granted yet.
 
-While a session is active, the foreground service shows a single ongoing,
-low-importance notification on the stable channel `call_lifecycle_audio`
+While a call is active, the foreground service shows a single ongoing,
+low-importance notification on the stable channel `livekit_mobile_audio`
 (created once at service creation). The notification uses the host
 application's launcher icon and label; there is no configuration API for its
 content.
+
+`CAMERA` is a runtime permission; the plugin requests it when enabling the
+camera without a grant. Declining the prompt rejects
+`setNativeCallCameraEnabled` with the bounded `permission_denied` code and
+surfaces the same code in snapshot `lastError`.
 
 On Android 13 (API 33) and above, `POST_NOTIFICATIONS` is a runtime
 permission. Requesting it is the host app's responsibility (the plugin
 declares the permission in its manifest but never asks at runtime). Without
 the grant, the foreground-service notice is absent from the notification
-drawer but remains visible in Task Manager; service behavior, including all
-lifecycle guarantees, is unaffected.
+drawer but remains visible in Task Manager; service behavior is unaffected.
 
 ### iOS
 
 Add to the host app's `Info.plist`:
 
-- `NSMicrophoneUsageDescription` — required when starting a session with
-  `microphone: true`; the plugin requests record permission before
-  configuring the audio session.
-- `UIBackgroundModes` containing `audio` — required for call audio to
+- `NSMicrophoneUsageDescription` — required when connecting with
+  `microphoneEnabled: true` or turning the microphone on mid-call; the
+  plugin requests record permission before enabling the microphone.
+- `UIBackgroundModes` containing `audio` — required for room audio to
   continue while the app is backgrounded.
 
 ## JavaScript usage
 
 ```ts
 import {
-  getPlatformCallCapabilities,
-  startPlatformCallLifecycle,
-  stopPlatformCallLifecycle,
-  listenPlatformCallEvent,
-} from '@sable-client/tauri-plugin-call-lifecycle';
+  getNativeCallCapabilities,
+  connectNativeCall,
+  disconnectNativeCall,
+  setNativeCallMicrophoneEnabled,
+  setNativeCallCameraEnabled,
+  switchNativeCallCamera,
+  getNativeCallState,
+  listenNativeCallSnapshot,
+} from '@sable-client/tauri-plugin-livekit-mobile';
 
-const capabilities = await getPlatformCallCapabilities();
-if (!capabilities.supported) {
-  // Desktop or unsupported platform: run the call without platform lifecycle.
+const capabilities = await getNativeCallCapabilities();
+if (!capabilities.supported || !capabilities.nativeRoom) {
+  // Desktop or unsupported platform: there is no native room.
 }
 
-const unlisten = await listenPlatformCallEvent((event) => {
-  // Bounded events: focus_changed, route_changed, interrupted,
-  // media_reset, failed.
+const unlisten = await listenNativeCallSnapshot((snapshot) => {
+  // Every event is one full NativeCallSnapshot with a native-owned revision.
 });
 
-const state = await startPlatformCallLifecycle({
-  sessionId: 'call-123',
-  microphone: true,
-  playback: true,
+// Every command resolves with the same NativeCallSnapshot shape.
+const state = await connectNativeCall({
+  callId: 'mxc-call-id',
+  url: 'wss://livekit.example',
+  token: livekitJwt,
+  microphoneEnabled: true,
 });
+
+await setNativeCallMicrophoneEnabled({ callId: 'mxc-call-id', enabled: false });
+if (capabilities.camera) {
+  await setNativeCallCameraEnabled({ callId: 'mxc-call-id', enabled: true });
+  await switchNativeCallCamera({ callId: 'mxc-call-id' });
+}
 
 // On call end:
-await stopPlatformCallLifecycle({ sessionId: 'call-123' });
+await disconnectNativeCall({ callId: 'mxc-call-id' });
 await unlisten();
 ```
 
-## Lifecycle semantics
+## Bridge semantics
 
-- `sessionId` is an opaque, caller-chosen identifier. One platform session
-  exists at a time; a `start` with a different session while active fails
-  with `busy`.
-- `start` with the same `sessionId` and identical media flags is idempotent
-  and returns the current state.
-- `stop` with the `sessionId` of the most recently stopped session is
-  idempotent and returns the current state. A `stop` naming any other session
-  (e.g. one replaced by a newer session, or an unknown one) is rejected with
-  a `platform_call_stale_session` command error and can never tear down the
-  active session.
-- Every state transition and event carries a monotonically increasing
-  `revision` so consumers can drop out-of-order events.
-- Events are delivered on `plugin:call-lifecycle://platform-event`, exposed
-  as `listenPlatformCallEvent`.
+- **The native side owns the room.** Connection state, idempotency (repeated
+  disconnects), busy handling (a second connect while one is active) and
+  stale-call rejection are all decided natively. Rust never predicts, mirrors
+  or replays room state: it validates basic input, forwards invocations and
+  returns or forwards native snapshots.
+- Every command — `connectNativeCall`, `disconnectNativeCall`,
+  `setNativeCallMicrophoneEnabled`, `setNativeCallCameraEnabled`,
+  `switchNativeCallCamera`, `getNativeCallState` — resolves with the
+  authoritative `NativeCallSnapshot`:
+
+  ```ts
+  {
+    revision: number; // native-owned, bumped on every change
+    callId: string | null;
+    connectionState: 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'failed';
+    microphoneEnabled: boolean;
+    cameraEnabled: boolean;
+    participantCount: number;
+    lastError?: { code: NativeCallFailureCode; message: string };
+  }
+  ```
+
+  `revision` passes through the bridge untouched (Rust never creates one), so
+  consumers can drop out-of-order snapshots by comparing revisions.
+- Every native invocation is time-bounded (60s for connect, 30s for the
+  rest) so a hung native call cannot wedge the bridge. An elapsed bound
+  surfaces as an error with code `timeout`. A timed-out connect is **not**
+  dropped: the bridge internally cancels the pending connect on the native
+  side, reconciles with `getNativeCallState`, keeps event delivery alive
+  until the native snapshot is known, and resolves with that reconciled
+  snapshot (or `timeout` if the native side cannot be reached at all). The
+  channel is never merely abandoned, so a room that survives cancellation is
+  never orphaned from its events.
+
+### Owner webview event delivery
+
+`connectNativeCall` records the calling webview as the call's owner. Snapshot
+events are emitted on `plugin:livekit-mobile://native-call-event` **targeted
+at the owner webview only** (`EventTarget::webview(label)`) — there is no
+global broadcast, so parallel webviews never receive another call's events. A
+`listenNativeCallSnapshot` in any other webview stays silent.
+
+If the owner webview is destroyed without calling `disconnectNativeCall`
+while the native room survives, the room is orphaned: its owner label points
+at a dead context. The first webview to call `getNativeCallState` while such
+an otherwise unowned room is reported live becomes its new owner and receives
+subsequent snapshots.
+
+Limitations to be aware of:
+
+- Ownership is tracked by **webview label** (the only stable identity
+  Tauri command arguments expose); if an app runs two webviews sharing one
+  label, both are the target. Keep webview labels unique.
+- If the owner webview is destroyed without calling
+  `disconnectNativeCall`, the native room keeps running until the native
+  side tears it down, `getNativeCallState` is used to take over, or the
+  next connect replaces it.
+
+### Events
+
+The native side emits one channel event shape — `{ event: "snapshot_changed",
+snapshot }` — and the bridge forwards the `snapshot` payload to the owner
+webview. There are no separate participant, state or failure event kinds:
+connection changes, participant counts, microphone/camera flips and failures
+(via `lastError`) all surface as snapshots.
 
 ### Errors
 
-Command errors serialize as `{ code, message }` with these stable codes:
-`platform_call_unsupported`, `platform_call_busy`,
-`platform_call_stale_session`, `platform_call_start_failed`,
-`platform_call_stop_failed`, `actor_unavailable`. Native error details are
-never included.
-
-Asynchronous `failed` events carry a bounded `PlatformCallFailureCode` mapped
-from the native payloads: `busy`, `permission_denied`, `audio_unavailable`,
-`start_failed`, `stop_failed`. Raw native error strings are never forwarded
-to JavaScript.
+Command rejections serialize as `{ code, message }`. Codes come from one
+bounded vocabulary shared with snapshot `lastError`: `invalid_request`,
+`busy`, `permission_denied`, `connect_failed`, `media_failed`,
+`disconnected`, `cancelled`, `unavailable`, `unexpected` — plus the
+bridge-level `timeout`. Messages are static strings derived from the code;
+raw native error strings and platform-specific codes are folded into this
+vocabulary at the boundary and never forwarded to JavaScript.
 
 ## `dist-js` policy
 

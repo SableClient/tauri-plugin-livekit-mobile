@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-setNativeCallCameraEnabled"
+description = "Enables the setNativeCallCameraEnabled command without any pre-configured scope."
+commands.allow = ["setNativeCallCameraEnabled"]
+
+[[permission]]
+identifier = "deny-setNativeCallCameraEnabled"
+description = "Denies the setNativeCallCameraEnabled command without any pre-configured scope."
+commands.deny = ["setNativeCallCameraEnabled"]

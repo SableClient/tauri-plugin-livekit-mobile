@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-switchNativeCallCamera"
+description = "Enables the switchNativeCallCamera command without any pre-configured scope."
+commands.allow = ["switchNativeCallCamera"]
+
+[[permission]]
+identifier = "deny-switchNativeCallCamera"
+description = "Denies the switchNativeCallCamera command without any pre-configured scope."
+commands.deny = ["switchNativeCallCamera"]

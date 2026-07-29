@@ -1,0 +1,476 @@
+package app.tauri.livekit_mobile
+
+import android.content.Context
+import android.content.Intent
+import android.os.Build
+import androidx.core.content.ContextCompat
+import app.tauri.plugin.Channel
+import app.tauri.plugin.Invoke
+import app.tauri.plugin.JSObject
+import io.livekit.android.LiveKit
+import io.livekit.android.events.RoomEvent
+import io.livekit.android.events.collect
+import io.livekit.android.room.Room
+import io.livekit.android.room.track.LocalVideoTrack
+import io.livekit.android.room.track.Track
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import org.json.JSONObject
+
+/**
+ * Serialized owner of the LiveKit room and the native-call wire contract.
+ *
+ * All room access and snapshot mutation happen on a single daemon-thread
+ * dispatcher, and every command settles its invoke exactly once. The snapshot
+ * (with its native-owned revision) is authoritative; LiveKit events only feed
+ * it. A monotonic attempt counter plus the connect job make an in-flight
+ * connect cancellable and guard against callbacks from superseded attempts.
+ * Room tokens and raw native errors never cross the bridge.
+ */
+internal class NativeCallController(
+    private val appContext: Context,
+    private val hasMicrophonePermission: () -> Boolean,
+    private val hasCameraPermission: () -> Boolean = { false },
+) {
+    private val dispatcher =
+        Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "native-call-bridge").apply { isDaemon = true }
+        }.asCoroutineDispatcher()
+    private val scope = CoroutineScope(SupervisorJob() + dispatcher)
+
+    /** Authoritative snapshot; only mutated on the bridge thread. */
+    @Volatile
+    private var snapshot = NativeCallSnapshot()
+
+    private var channel: Channel? = null
+    private var room: Room? = null
+    private var eventJob: Job? = null
+    private var connectJob: Job? = null
+    private var attempt = 0L
+    private var intentionalDisconnect = false
+
+    fun snapshotJson(): JSObject {
+        val current = snapshot
+        return JSObject().apply {
+            put("revision", current.revision)
+            val id = current.callId
+            if (id != null) put("callId", id) else put("callId", JSONObject.NULL)
+            put("connectionState", current.connectionState)
+            put("microphoneEnabled", current.microphoneEnabled)
+            put("cameraEnabled", current.cameraEnabled)
+            put("participantCount", current.participantCount)
+            current.lastErrorCode?.let { code ->
+                put(
+                    "lastError",
+                    JSObject()
+                        .put("code", code)
+                        .put("message", NativeCallWire.messageFor(code)),
+                )
+            }
+        }
+    }
+
+    fun isBusy(requestedCallId: String): Boolean =
+        snapshot.isActive && snapshot.callId != requestedCallId
+
+    fun isActiveCall(callId: String): Boolean =
+        snapshot.isActive && snapshot.callId == callId
+
+    fun connect(
+        callId: String,
+        url: String,
+        token: String,
+        microphoneEnabled: Boolean,
+        callChannel: Channel,
+        invoke: Invoke,
+    ) {
+        connectJob =
+            scope.launch {
+                val currentAttempt = ++attempt
+                intentionalDisconnect = false
+                channel = callChannel
+                transition {
+                    copy(
+                        callId = callId,
+                        connectionState = NativeCallWire.STATE_CONNECTING,
+                        microphoneEnabled = false,
+                        cameraEnabled = false,
+                        participantCount = 0,
+                        lastErrorCode = null,
+                    )
+                }
+                startCallForegroundService(preferMicrophone = microphoneEnabled)
+                emitSnapshotChanged()
+
+                val newRoom =
+                    try {
+                        LiveKit.create(appContext)
+                    } catch (_: Exception) {
+                        failConnect(currentAttempt, null, invoke, NativeCallWire.ERR_CONNECT_FAILED)
+                        return@launch
+                    }
+                room = newRoom
+                eventJob =
+                    launch {
+                        newRoom.events.collect { event ->
+                            if (currentAttempt == attempt && room === newRoom) {
+                                handleRoomEvent(event)
+                            }
+                        }
+                    }
+                try {
+                    newRoom.connect(url, token)
+                } catch (cancelled: CancellationException) {
+                    // A cancel/disconnect raced this attempt; it already owns
+                    // the snapshot. Settle this invoke and drop the orphan room.
+                    runCatching { newRoom.disconnect() }
+                    runCatching { newRoom.release() }
+                    reject(invoke, NativeCallWire.ERR_CANCELLED)
+                    return@launch
+                } catch (_: Exception) {
+                    failConnect(currentAttempt, newRoom, invoke, NativeCallWire.ERR_CONNECT_FAILED)
+                    return@launch
+                }
+                if (currentAttempt != attempt || room !== newRoom) {
+                    // Superseded while connecting; the superseder owns the state.
+                    runCatching { newRoom.disconnect() }
+                    runCatching { newRoom.release() }
+                    reject(invoke, NativeCallWire.ERR_CANCELLED)
+                    return@launch
+                }
+
+                var microphoneActive = false
+                var microphoneError: String? = null
+                if (microphoneEnabled && hasMicrophonePermission()) {
+                    microphoneActive =
+                        try {
+                            newRoom.localParticipant.setMicrophoneEnabled(true)
+                            true
+                        } catch (_: CancellationException) {
+                            reject(invoke, NativeCallWire.ERR_CANCELLED)
+                            return@launch
+                        } catch (_: Exception) {
+                            microphoneError = NativeCallWire.ERR_MEDIA_FAILED
+                            false
+                        }
+                } else if (microphoneEnabled) {
+                    microphoneError = NativeCallWire.ERR_PERMISSION_DENIED
+                }
+                if (currentAttempt != attempt || room !== newRoom) {
+                    reject(invoke, NativeCallWire.ERR_CANCELLED)
+                    return@launch
+                }
+
+                transition {
+                    copy(
+                        connectionState = NativeCallWire.STATE_CONNECTED,
+                        microphoneEnabled = microphoneActive,
+                        lastErrorCode = microphoneError?.let(NativeCallWire::sanitize),
+                        participantCount = newRoom.remoteParticipants.size,
+                    )
+                }
+                emitSnapshotChanged()
+                invoke.resolve(snapshotJson())
+            }
+    }
+
+    fun disconnect(callId: String, invoke: Invoke) = endCall(callId, invoke)
+
+    fun cancelConnect(callId: String, invoke: Invoke) = endCall(callId, invoke)
+
+    /** Cancels any in-flight connect and tears the matching room down; safe to
+     * run while a connect is suspended. Settles with an idle snapshot. */
+    private fun endCall(callId: String, invoke: Invoke) {
+        scope.launch {
+            ++attempt
+            if (snapshot.callId != callId) {
+                // A stale request must never tear down a replacement call.
+                invoke.resolve(snapshotJson())
+                return@launch
+            }
+            intentionalDisconnect = true
+            connectJob?.cancel()
+            teardownRoom()
+            stopCallForegroundService()
+            transition { toIdle() }
+            emitSnapshotChanged()
+            channel = null
+            invoke.resolve(snapshotJson())
+        }
+    }
+
+    fun setMicrophoneEnabled(callId: String, enabled: Boolean, invoke: Invoke) {
+        scope.launch {
+            if (snapshot.callId != callId) {
+                invoke.resolve(snapshotJson())
+                return@launch
+            }
+            val currentRoom = room
+            if (currentRoom == null) {
+                reject(invoke, NativeCallWire.ERR_UNAVAILABLE)
+                return@launch
+            }
+            if (snapshot.microphoneEnabled == enabled) {
+                invoke.resolve(snapshotJson())
+                return@launch
+            }
+            if (enabled && !hasMicrophonePermission()) {
+                reject(invoke, NativeCallWire.ERR_PERMISSION_DENIED)
+                return@launch
+            }
+            try {
+                currentRoom.localParticipant.setMicrophoneEnabled(enabled)
+            } catch (_: Exception) {
+                transition { copy(lastErrorCode = NativeCallWire.ERR_MEDIA_FAILED) }
+                emitSnapshotChanged()
+                reject(invoke, NativeCallWire.ERR_MEDIA_FAILED)
+                return@launch
+            }
+            transition { copy(microphoneEnabled = enabled) }
+            if (enabled) startCallForegroundService(preferMicrophone = true)
+            emitSnapshotChanged()
+            invoke.resolve(snapshotJson())
+        }
+    }
+
+    fun setCameraEnabled(callId: String, enabled: Boolean, invoke: Invoke) {
+        scope.launch {
+            if (snapshot.callId != callId) {
+                invoke.resolve(snapshotJson())
+                return@launch
+            }
+            val currentRoom = room
+            if (currentRoom == null) {
+                reject(invoke, NativeCallWire.ERR_UNAVAILABLE)
+                return@launch
+            }
+            if (snapshot.cameraEnabled == enabled) {
+                invoke.resolve(snapshotJson())
+                return@launch
+            }
+            if (enabled && !hasCameraPermission()) {
+                reject(invoke, NativeCallWire.ERR_PERMISSION_DENIED)
+                return@launch
+            }
+            try {
+                currentRoom.localParticipant.setCameraEnabled(enabled)
+            } catch (_: Exception) {
+                transition { copy(lastErrorCode = NativeCallWire.ERR_MEDIA_FAILED) }
+                emitSnapshotChanged()
+                reject(invoke, NativeCallWire.ERR_MEDIA_FAILED)
+                return@launch
+            }
+            transition { copy(cameraEnabled = enabled) }
+            emitSnapshotChanged()
+            invoke.resolve(snapshotJson())
+        }
+    }
+
+    fun switchCamera(callId: String, invoke: Invoke) {
+        scope.launch {
+            if (snapshot.callId != callId) {
+                invoke.resolve(snapshotJson())
+                return@launch
+            }
+            val currentRoom = room
+            if (currentRoom == null) {
+                reject(invoke, NativeCallWire.ERR_UNAVAILABLE)
+                return@launch
+            }
+            val cameraTrack =
+                currentRoom.localParticipant
+                    .getTrackPublication(Track.Source.CAMERA)
+                    ?.track as? LocalVideoTrack
+            if (cameraTrack == null) {
+                // No published camera track yet; enabling must happen first.
+                transition { copy(lastErrorCode = NativeCallWire.ERR_MEDIA_FAILED) }
+                emitSnapshotChanged()
+                reject(invoke, NativeCallWire.ERR_MEDIA_FAILED)
+                return@launch
+            }
+            try {
+                cameraTrack.switchCamera()
+            } catch (_: Exception) {
+                transition { copy(lastErrorCode = NativeCallWire.ERR_MEDIA_FAILED) }
+                emitSnapshotChanged()
+                reject(invoke, NativeCallWire.ERR_MEDIA_FAILED)
+                return@launch
+            }
+            invoke.resolve(snapshotJson())
+        }
+    }
+
+    /** Queues teardown on the bridge thread and blocks the caller briefly so
+     * onDestroy guarantees the room is released before the scope is cancelled. */
+    fun dispose() {
+        val done = CountDownLatch(1)
+        scope.launch {
+            ++attempt
+            intentionalDisconnect = true
+            connectJob?.cancel()
+            channel = null
+            teardownRoom()
+            stopCallForegroundService()
+            transition { toIdle() }
+            done.countDown()
+        }
+        done.await(DISPOSE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        scope.cancel()
+    }
+
+    private fun failConnect(
+        currentAttempt: Long,
+        failedRoom: Room?,
+        invoke: Invoke,
+        code: String,
+    ) {
+        if (currentAttempt != attempt) {
+            if (failedRoom != null) {
+                runCatching { failedRoom.disconnect() }
+                runCatching { failedRoom.release() }
+            }
+            reject(invoke, NativeCallWire.ERR_CANCELLED)
+            return
+        }
+        transition {
+            copy(
+                connectionState = NativeCallWire.STATE_FAILED,
+                lastErrorCode = NativeCallWire.sanitize(code),
+            )
+        }
+        teardownRoom()
+        stopCallForegroundService()
+        emitSnapshotChanged()
+        reject(invoke, code)
+    }
+
+    private fun handleRoomEvent(event: RoomEvent) {
+        when (event) {
+            is RoomEvent.Connected -> {
+                transition {
+                    copy(
+                        connectionState = NativeCallWire.STATE_CONNECTED,
+                        participantCount = room?.remoteParticipants?.size ?: 0,
+                    )
+                }
+                emitSnapshotChanged()
+            }
+            is RoomEvent.Reconnecting -> {
+                if (snapshot.connectionState != NativeCallWire.STATE_CONNECTED) return
+                transition { copy(connectionState = NativeCallWire.STATE_RECONNECTING) }
+                emitSnapshotChanged()
+            }
+            is RoomEvent.Reconnected -> {
+                transition {
+                    copy(
+                        connectionState = NativeCallWire.STATE_CONNECTED,
+                        participantCount = room?.remoteParticipants?.size ?: 0,
+                    )
+                }
+                emitSnapshotChanged()
+            }
+            is RoomEvent.Disconnected -> {
+                if (intentionalDisconnect) return
+                transition {
+                    copy(
+                        connectionState = NativeCallWire.STATE_FAILED,
+                        lastErrorCode = NativeCallWire.ERR_DISCONNECTED,
+                    )
+                }
+                teardownRoom()
+                stopCallForegroundService()
+                emitSnapshotChanged()
+            }
+            is RoomEvent.ParticipantConnected -> {
+                transition {
+                    copy(participantCount = room?.remoteParticipants?.size ?: 0)
+                }
+                emitSnapshotChanged()
+            }
+            is RoomEvent.ParticipantDisconnected -> {
+                transition {
+                    copy(participantCount = room?.remoteParticipants?.size ?: 0)
+                }
+                emitSnapshotChanged()
+            }
+            else -> Unit
+        }
+    }
+
+    private fun transition(transform: NativeCallSnapshot.() -> NativeCallSnapshot) {
+        val current = snapshot
+        val next = current.transform()
+        snapshot =
+            next.copy(revision = if (current.revision == Long.MAX_VALUE) 1L else current.revision + 1L)
+    }
+
+    private fun teardownRoom() {
+        eventJob?.cancel()
+        eventJob = null
+        val endingRoom = room
+        room = null
+        if (endingRoom != null) {
+            runCatching { endingRoom.disconnect() }
+            runCatching { endingRoom.release() }
+        }
+    }
+
+    private fun emitSnapshotChanged() {
+        val activeChannel = channel ?: return
+        activeChannel.send(
+            JSObject().apply {
+                put("event", NativeCallWire.EVENT_SNAPSHOT_CHANGED)
+                put("snapshot", snapshotJson())
+            },
+        )
+    }
+
+    private fun reject(invoke: Invoke, code: String) {
+        val safeCode = NativeCallWire.sanitize(code)
+        invoke.reject(NativeCallWire.messageFor(safeCode), safeCode)
+    }
+
+    /** The microphone service type is only requested once RECORD_AUDIO has
+     * already been granted, or startForeground throws on Android 14+. */
+    private fun startCallForegroundService(preferMicrophone: Boolean) {
+        val intent =
+            Intent(appContext, LivekitMobileForegroundService::class.java)
+                .putExtra(
+                    LivekitMobileForegroundService.EXTRA_MICROPHONE,
+                    preferMicrophone && hasMicrophonePermission(),
+                )
+                .putExtra(LivekitMobileForegroundService.EXTRA_PLAYBACK, true)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                ContextCompat.startForegroundService(appContext, intent)
+            } else {
+                @Suppress("DEPRECATION")
+                appContext.startService(intent)
+            }
+        } catch (_: SecurityException) {
+            transition { copy(lastErrorCode = NativeCallWire.ERR_UNAVAILABLE) }
+        } catch (_: IllegalStateException) {
+            transition { copy(lastErrorCode = NativeCallWire.ERR_UNAVAILABLE) }
+        } catch (_: RuntimeException) {
+            transition { copy(lastErrorCode = NativeCallWire.ERR_UNAVAILABLE) }
+        }
+    }
+
+    private fun stopCallForegroundService() {
+        runCatching {
+            appContext.stopService(Intent(appContext, LivekitMobileForegroundService::class.java))
+        }
+    }
+
+    private companion object {
+        const val DISPOSE_TIMEOUT_MS = 3_000L
+    }
+}

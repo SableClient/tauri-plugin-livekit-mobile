@@ -1,15 +1,15 @@
 {
-  "name": "@sable-client/tauri-plugin-call-lifecycle",
-  "version": "0.1.0",
+  "name": "@sable-client/tauri-plugin-livekit-mobile",
+  "version": "0.2.0",
   "author": "Sable Contributors",
-  "description": "Platform call lifecycle for Tauri mobile apps (Android foreground service, iOS audio session) for WebView-owned calls.",
+  "description": "Native LiveKit audio-room bridge for Tauri mobile apps (Android/iOS); the room runs natively, coordinated from Rust.",
   "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
-    "url": "https://github.com/SableClient/tauri-plugin-call-lifecycle"
+    "url": "https://github.com/SableClient/tauri-plugin-livekit-mobile"
   },
-  "homepage": "https://github.com/SableClient/tauri-plugin-call-lifecycle",
-  "bugs": "https://github.com/SableClient/tauri-plugin-call-lifecycle/issues",
+  "homepage": "https://github.com/SableClient/tauri-plugin-livekit-mobile",
+  "bugs": "https://github.com/SableClient/tauri-plugin-livekit-mobile/issues",
   "type": "module",
   "packageManager": "pnpm@10.32.1",
   "types": "./dist-js/index.d.ts",

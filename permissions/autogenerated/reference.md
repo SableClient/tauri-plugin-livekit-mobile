@@ -4,10 +4,13 @@ Default permissions for the plugin
 
 #### This default permission set includes the following:
 
-- `allow-getPlatformCallCapabilities`
-- `allow-startPlatformCallLifecycle`
-- `allow-stopPlatformCallLifecycle`
-- `allow-getPlatformCallState`
+- `allow-getNativeCallCapabilities`
+- `allow-connectNativeCall`
+- `allow-disconnectNativeCall`
+- `allow-setNativeCallMicrophoneEnabled`
+- `allow-setNativeCallCameraEnabled`
+- `allow-switchNativeCallCamera`
+- `allow-getNativeCallState`
 
 ## Permission Table
 
@@ -21,25 +24,12 @@ Default permissions for the plugin
 <tr>
 <td>
 
-`call-lifecycle:allow-getPlatformCallCapabilities`
+`livekit-mobile:allow-connectNativeCall`
 
 </td>
 <td>
 
-Enables the getPlatformCallCapabilities command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`call-lifecycle:deny-getPlatformCallCapabilities`
-
-</td>
-<td>
-
-Denies the getPlatformCallCapabilities command without any pre-configured scope.
+Enables the connectNativeCall command without any pre-configured scope.
 
 </td>
 </tr>
@@ -47,25 +37,12 @@ Denies the getPlatformCallCapabilities command without any pre-configured scope.
 <tr>
 <td>
 
-`call-lifecycle:allow-getPlatformCallState`
+`livekit-mobile:deny-connectNativeCall`
 
 </td>
 <td>
 
-Enables the getPlatformCallState command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`call-lifecycle:deny-getPlatformCallState`
-
-</td>
-<td>
-
-Denies the getPlatformCallState command without any pre-configured scope.
+Denies the connectNativeCall command without any pre-configured scope.
 
 </td>
 </tr>
@@ -73,25 +50,12 @@ Denies the getPlatformCallState command without any pre-configured scope.
 <tr>
 <td>
 
-`call-lifecycle:allow-startPlatformCallLifecycle`
+`livekit-mobile:allow-disconnectNativeCall`
 
 </td>
 <td>
 
-Enables the startPlatformCallLifecycle command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`call-lifecycle:deny-startPlatformCallLifecycle`
-
-</td>
-<td>
-
-Denies the startPlatformCallLifecycle command without any pre-configured scope.
+Enables the disconnectNativeCall command without any pre-configured scope.
 
 </td>
 </tr>
@@ -99,12 +63,12 @@ Denies the startPlatformCallLifecycle command without any pre-configured scope.
 <tr>
 <td>
 
-`call-lifecycle:allow-stopPlatformCallLifecycle`
+`livekit-mobile:deny-disconnectNativeCall`
 
 </td>
 <td>
 
-Enables the stopPlatformCallLifecycle command without any pre-configured scope.
+Denies the disconnectNativeCall command without any pre-configured scope.
 
 </td>
 </tr>
@@ -112,12 +76,129 @@ Enables the stopPlatformCallLifecycle command without any pre-configured scope.
 <tr>
 <td>
 
-`call-lifecycle:deny-stopPlatformCallLifecycle`
+`livekit-mobile:allow-getNativeCallCapabilities`
 
 </td>
 <td>
 
-Denies the stopPlatformCallLifecycle command without any pre-configured scope.
+Enables the getNativeCallCapabilities command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:deny-getNativeCallCapabilities`
+
+</td>
+<td>
+
+Denies the getNativeCallCapabilities command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:allow-getNativeCallState`
+
+</td>
+<td>
+
+Enables the getNativeCallState command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:deny-getNativeCallState`
+
+</td>
+<td>
+
+Denies the getNativeCallState command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:allow-setNativeCallCameraEnabled`
+
+</td>
+<td>
+
+Enables the setNativeCallCameraEnabled command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:deny-setNativeCallCameraEnabled`
+
+</td>
+<td>
+
+Denies the setNativeCallCameraEnabled command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:allow-setNativeCallMicrophoneEnabled`
+
+</td>
+<td>
+
+Enables the setNativeCallMicrophoneEnabled command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:deny-setNativeCallMicrophoneEnabled`
+
+</td>
+<td>
+
+Denies the setNativeCallMicrophoneEnabled command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:allow-switchNativeCallCamera`
+
+</td>
+<td>
+
+Enables the switchNativeCallCamera command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:deny-switchNativeCallCamera`
+
+</td>
+<td>
+
+Denies the switchNativeCallCamera command without any pre-configured scope.
 
 </td>
 </tr>

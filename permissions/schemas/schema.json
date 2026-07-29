@@ -295,58 +295,94 @@
       "type": "string",
       "oneOf": [
         {
-          "description": "Enables the getPlatformCallCapabilities command without any pre-configured scope.",
+          "description": "Enables the connectNativeCall command without any pre-configured scope.",
           "type": "string",
-          "const": "allow-getPlatformCallCapabilities",
-          "markdownDescription": "Enables the getPlatformCallCapabilities command without any pre-configured scope."
+          "const": "allow-connectNativeCall",
+          "markdownDescription": "Enables the connectNativeCall command without any pre-configured scope."
         },
         {
-          "description": "Denies the getPlatformCallCapabilities command without any pre-configured scope.",
+          "description": "Denies the connectNativeCall command without any pre-configured scope.",
           "type": "string",
-          "const": "deny-getPlatformCallCapabilities",
-          "markdownDescription": "Denies the getPlatformCallCapabilities command without any pre-configured scope."
+          "const": "deny-connectNativeCall",
+          "markdownDescription": "Denies the connectNativeCall command without any pre-configured scope."
         },
         {
-          "description": "Enables the getPlatformCallState command without any pre-configured scope.",
+          "description": "Enables the disconnectNativeCall command without any pre-configured scope.",
           "type": "string",
-          "const": "allow-getPlatformCallState",
-          "markdownDescription": "Enables the getPlatformCallState command without any pre-configured scope."
+          "const": "allow-disconnectNativeCall",
+          "markdownDescription": "Enables the disconnectNativeCall command without any pre-configured scope."
         },
         {
-          "description": "Denies the getPlatformCallState command without any pre-configured scope.",
+          "description": "Denies the disconnectNativeCall command without any pre-configured scope.",
           "type": "string",
-          "const": "deny-getPlatformCallState",
-          "markdownDescription": "Denies the getPlatformCallState command without any pre-configured scope."
+          "const": "deny-disconnectNativeCall",
+          "markdownDescription": "Denies the disconnectNativeCall command without any pre-configured scope."
         },
         {
-          "description": "Enables the startPlatformCallLifecycle command without any pre-configured scope.",
+          "description": "Enables the getNativeCallCapabilities command without any pre-configured scope.",
           "type": "string",
-          "const": "allow-startPlatformCallLifecycle",
-          "markdownDescription": "Enables the startPlatformCallLifecycle command without any pre-configured scope."
+          "const": "allow-getNativeCallCapabilities",
+          "markdownDescription": "Enables the getNativeCallCapabilities command without any pre-configured scope."
         },
         {
-          "description": "Denies the startPlatformCallLifecycle command without any pre-configured scope.",
+          "description": "Denies the getNativeCallCapabilities command without any pre-configured scope.",
           "type": "string",
-          "const": "deny-startPlatformCallLifecycle",
-          "markdownDescription": "Denies the startPlatformCallLifecycle command without any pre-configured scope."
+          "const": "deny-getNativeCallCapabilities",
+          "markdownDescription": "Denies the getNativeCallCapabilities command without any pre-configured scope."
         },
         {
-          "description": "Enables the stopPlatformCallLifecycle command without any pre-configured scope.",
+          "description": "Enables the getNativeCallState command without any pre-configured scope.",
           "type": "string",
-          "const": "allow-stopPlatformCallLifecycle",
-          "markdownDescription": "Enables the stopPlatformCallLifecycle command without any pre-configured scope."
+          "const": "allow-getNativeCallState",
+          "markdownDescription": "Enables the getNativeCallState command without any pre-configured scope."
         },
         {
-          "description": "Denies the stopPlatformCallLifecycle command without any pre-configured scope.",
+          "description": "Denies the getNativeCallState command without any pre-configured scope.",
           "type": "string",
-          "const": "deny-stopPlatformCallLifecycle",
-          "markdownDescription": "Denies the stopPlatformCallLifecycle command without any pre-configured scope."
+          "const": "deny-getNativeCallState",
+          "markdownDescription": "Denies the getNativeCallState command without any pre-configured scope."
         },
         {
-          "description": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-getPlatformCallCapabilities`\n- `allow-startPlatformCallLifecycle`\n- `allow-stopPlatformCallLifecycle`\n- `allow-getPlatformCallState`",
+          "description": "Enables the setNativeCallCameraEnabled command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-setNativeCallCameraEnabled",
+          "markdownDescription": "Enables the setNativeCallCameraEnabled command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the setNativeCallCameraEnabled command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-setNativeCallCameraEnabled",
+          "markdownDescription": "Denies the setNativeCallCameraEnabled command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the setNativeCallMicrophoneEnabled command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-setNativeCallMicrophoneEnabled",
+          "markdownDescription": "Enables the setNativeCallMicrophoneEnabled command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the setNativeCallMicrophoneEnabled command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-setNativeCallMicrophoneEnabled",
+          "markdownDescription": "Denies the setNativeCallMicrophoneEnabled command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the switchNativeCallCamera command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-switchNativeCallCamera",
+          "markdownDescription": "Enables the switchNativeCallCamera command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the switchNativeCallCamera command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-switchNativeCallCamera",
+          "markdownDescription": "Denies the switchNativeCallCamera command without any pre-configured scope."
+        },
+        {
+          "description": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-getNativeCallCapabilities`\n- `allow-connectNativeCall`\n- `allow-disconnectNativeCall`\n- `allow-setNativeCallMicrophoneEnabled`\n- `allow-setNativeCallCameraEnabled`\n- `allow-switchNativeCallCamera`\n- `allow-getNativeCallState`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-getPlatformCallCapabilities`\n- `allow-startPlatformCallLifecycle`\n- `allow-stopPlatformCallLifecycle`\n- `allow-getPlatformCallState`"
+          "markdownDescription": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-getNativeCallCapabilities`\n- `allow-connectNativeCall`\n- `allow-disconnectNativeCall`\n- `allow-setNativeCallMicrophoneEnabled`\n- `allow-setNativeCallCameraEnabled`\n- `allow-switchNativeCallCamera`\n- `allow-getNativeCallState`"
         }
       ]
     }

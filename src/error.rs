@@ -1,21 +1,52 @@
 use serde::{ser::SerializeStruct, ser::Serializer, Serialize};
 
+use crate::models::{NativeCallError, NativeCallFailureCode};
+
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// Command errors: the bounded failure vocabulary plus the bridge-level
+/// `timeout` (a native invocation exceeded its time bound).
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("call lifecycle actor unavailable")]
-    ActorUnavailable,
-    #[error("platform call lifecycle is not supported on this platform")]
-    PlatformCallUnsupported,
-    #[error("platform call lifecycle is already active")]
-    PlatformCallBusy,
-    #[error("platform call session does not match the active session")]
-    PlatformCallStaleSession,
-    #[error("platform call lifecycle failed to start")]
-    PlatformCallStartFailed,
-    #[error("platform call lifecycle failed to stop")]
-    PlatformCallStopFailed,
+    #[error("the native call bridge did not respond in time")]
+    Timeout,
+    #[error("{0}")]
+    Native(NativeCallError),
+}
+
+impl From<NativeCallError> for Error {
+    fn from(error: NativeCallError) -> Self {
+        Self::Native(error)
+    }
+}
+
+impl Error {
+    pub(crate) fn failure(code: NativeCallFailureCode) -> Self {
+        Self::Native(NativeCallError::from_code(code))
+    }
+
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Timeout => "timeout",
+            Self::Native(error) => error.code.code(),
+        }
+    }
+
+    pub fn message(&self) -> &'static str {
+        match self {
+            Self::Timeout => "the native call bridge did not respond in time",
+            Self::Native(error) => error.code.message(),
+        }
+    }
+}
+
+#[cfg(mobile)]
+impl From<tauri::plugin::mobile::PluginInvokeError> for Error {
+    fn from(_: tauri::plugin::mobile::PluginInvokeError) -> Self {
+        // Setup-time failure: the native bridge was never registered, so the
+        // native call APIs are unavailable.
+        Self::failure(NativeCallFailureCode::Unavailable)
+    }
 }
 
 impl Serialize for Error {
@@ -30,60 +61,34 @@ impl Serialize for Error {
     }
 }
 
-impl Error {
-    pub fn code(&self) -> &'static str {
-        match self {
-            Self::ActorUnavailable => "actor_unavailable",
-            Self::PlatformCallUnsupported => "platform_call_unsupported",
-            Self::PlatformCallBusy => "platform_call_busy",
-            Self::PlatformCallStaleSession => "platform_call_stale_session",
-            Self::PlatformCallStartFailed => "platform_call_start_failed",
-            Self::PlatformCallStopFailed => "platform_call_stop_failed",
-        }
-    }
-
-    pub fn message(&self) -> &'static str {
-        match self {
-            Self::ActorUnavailable => "call lifecycle unavailable",
-            Self::PlatformCallUnsupported => {
-                "platform call lifecycle is not supported on this platform"
-            }
-            Self::PlatformCallBusy => "platform call lifecycle is already active",
-            Self::PlatformCallStaleSession => {
-                "platform call session does not match the active session"
-            }
-            Self::PlatformCallStartFailed => "platform call lifecycle failed to start",
-            Self::PlatformCallStopFailed => "platform call lifecycle failed to stop",
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn platform_errors_have_stable_sanitized_shapes() {
-        let error = serde_json::to_value(Error::PlatformCallStaleSession).unwrap();
+    fn errors_serialize_to_the_bounded_vocabulary_with_static_messages() {
         assert_eq!(
-            error,
+            serde_json::to_value(Error::Timeout).unwrap(),
             serde_json::json!({
-                "code": "platform_call_stale_session",
-                "message": "platform call session does not match the active session"
+                "code": "timeout",
+                "message": "the native call bridge did not respond in time"
             })
         );
-        assert_eq!(
-            Error::PlatformCallUnsupported.code(),
-            "platform_call_unsupported"
-        );
-        assert_eq!(Error::PlatformCallBusy.code(), "platform_call_busy");
-        assert_eq!(
-            Error::PlatformCallStartFailed.message(),
-            "platform call lifecycle failed to start"
-        );
-        assert_eq!(
-            Error::PlatformCallStopFailed.code(),
-            "platform_call_stop_failed"
-        );
+
+        for (code, wire) in [
+            (NativeCallFailureCode::InvalidRequest, "invalid_request"),
+            (NativeCallFailureCode::Busy, "busy"),
+            (NativeCallFailureCode::PermissionDenied, "permission_denied"),
+            (NativeCallFailureCode::ConnectFailed, "connect_failed"),
+            (NativeCallFailureCode::MediaFailed, "media_failed"),
+            (NativeCallFailureCode::Disconnected, "disconnected"),
+            (NativeCallFailureCode::Cancelled, "cancelled"),
+            (NativeCallFailureCode::Unavailable, "unavailable"),
+            (NativeCallFailureCode::Unexpected, "unexpected"),
+        ] {
+            let error = serde_json::to_value(Error::failure(code)).unwrap();
+            assert_eq!(error["code"], wire);
+            assert_eq!(error["message"], code.message());
+        }
     }
 }

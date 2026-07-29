@@ -1,51 +1,83 @@
 import { type UnlistenFn } from '@tauri-apps/api/event';
-export type PlatformCallStateKind = 'idle' | 'active';
-export type PlatformCallRoute = 'earpiece' | 'speaker' | 'wired' | 'bluetooth' | 'unknown';
-export type PlatformCallInterruption = 'began' | 'ended';
-export type PlatformCallFailureCode = 'permission_denied' | 'audio_unavailable' | 'start_failed' | 'stop_failed' | 'busy';
-export interface PlatformCallCapabilities {
+export type NativeCallConnectionState = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'failed';
+/**
+ * Bounded failure vocabulary shared by snapshot `lastError` and command
+ * rejections. Raw native error strings and platform-specific codes never
+ * cross the bridge.
+ */
+export type NativeCallFailureCode = 'invalid_request' | 'busy' | 'permission_denied' | 'connect_failed' | 'media_failed' | 'disconnected' | 'cancelled' | 'unavailable' | 'unexpected';
+/**
+ * Command rejection code: the bounded failure vocabulary plus the
+ * bridge-level `timeout` (a native invocation exceeded its time bound).
+ */
+export type NativeCallErrorCode = NativeCallFailureCode | 'timeout';
+export interface NativeCallError {
+    code: NativeCallFailureCode;
+    message: string;
+}
+export interface NativeCallCapabilities {
     supported: boolean;
     microphone: boolean;
-    playback: boolean;
+    backgroundAudio: boolean;
+    nativeRoom: boolean;
+    camera: boolean;
 }
-export interface StartPlatformCallLifecycleRequest {
-    sessionId: string;
-    microphone: boolean;
-    playback: boolean;
+/**
+ * `url` is the LiveKit server URL and `token` a LiveKit access token (JWT),
+ * both supplied by the host app (e.g. MatrixRTC focus negotiation). The
+ * plugin never mints, refreshes, logs, or echoes the token.
+ */
+export interface ConnectNativeCallRequest {
+    callId: string;
+    url: string;
+    token: string;
+    microphoneEnabled: boolean;
 }
-export interface StopPlatformCallLifecycleRequest {
-    sessionId: string;
+export interface DisconnectNativeCallRequest {
+    callId: string;
 }
-export interface PlatformCallState {
+export interface SetNativeCallMicrophoneEnabledRequest {
+    callId: string;
+    enabled: boolean;
+}
+export interface SetNativeCallCameraEnabledRequest {
+    callId: string;
+    enabled: boolean;
+}
+export interface SwitchNativeCallCameraRequest {
+    callId: string;
+}
+/**
+ * The single authoritative shape of the native room, resolved by every
+ * command and delivered by every event. `revision` is owned and bumped by
+ * the native side on every change and passes through the bridge untouched;
+ * consumers can drop out-of-order snapshots by comparing it.
+ */
+export interface NativeCallSnapshot {
     revision: number;
-    state: PlatformCallStateKind;
-    sessionId: string | null;
-    microphone: boolean;
-    playback: boolean;
-    capabilities: PlatformCallCapabilities;
+    callId: string | null;
+    connectionState: NativeCallConnectionState;
+    microphoneEnabled: boolean;
+    cameraEnabled: boolean;
+    participantCount: number;
+    lastError?: NativeCallError;
 }
-export type PlatformCallEventKind = {
-    type: 'focus_changed';
-    focused: boolean;
-} | {
-    type: 'route_changed';
-    route: PlatformCallRoute;
-} | {
-    type: 'interrupted';
-    state: PlatformCallInterruption;
-} | {
-    type: 'media_reset';
-} | {
-    type: 'failed';
-    code: PlatformCallFailureCode;
-};
-export type PlatformCallEvent = {
-    revision: number;
-    sessionId: string;
-} & PlatformCallEventKind;
-export declare const PLATFORM_CALL_EVENT = "plugin:call-lifecycle://platform-event";
-export declare function getPlatformCallCapabilities(): Promise<PlatformCallCapabilities>;
-export declare function startPlatformCallLifecycle(request: StartPlatformCallLifecycleRequest): Promise<PlatformCallState>;
-export declare function stopPlatformCallLifecycle(request: StopPlatformCallLifecycleRequest): Promise<PlatformCallState>;
-export declare function getPlatformCallState(): Promise<PlatformCallState>;
-export declare function listenPlatformCallEvent(handler: (event: PlatformCallEvent) => void): Promise<UnlistenFn>;
+/**
+ * Snapshots are delivered only to the webview that connected (or reclaimed)
+ * the call: a `listen` on this name in any other webview stays silent.
+ */
+export declare const NATIVE_CALL_EVENT = "plugin:livekit-mobile://native-call-event";
+export declare function getNativeCallCapabilities(): Promise<NativeCallCapabilities>;
+export declare function connectNativeCall(request: ConnectNativeCallRequest): Promise<NativeCallSnapshot>;
+export declare function disconnectNativeCall(request: DisconnectNativeCallRequest): Promise<NativeCallSnapshot>;
+export declare function setNativeCallMicrophoneEnabled(request: SetNativeCallMicrophoneEnabledRequest): Promise<NativeCallSnapshot>;
+export declare function setNativeCallCameraEnabled(request: SetNativeCallCameraEnabledRequest): Promise<NativeCallSnapshot>;
+export declare function switchNativeCallCamera(request: SwitchNativeCallCameraRequest): Promise<NativeCallSnapshot>;
+export declare function getNativeCallState(): Promise<NativeCallSnapshot>;
+/**
+ * Listens for native room snapshots. Every native change — connection state,
+ * participant count, microphone/camera flips, failures (via `lastError`) —
+ * arrives as one full `NativeCallSnapshot`; there are no separate event
+ * kinds.
+ */
+export declare function listenNativeCallSnapshot(handler: (snapshot: NativeCallSnapshot) => void): Promise<UnlistenFn>;

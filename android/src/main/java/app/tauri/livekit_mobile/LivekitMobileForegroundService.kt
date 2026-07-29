@@ -1,4 +1,4 @@
-package app.tauri.call_lifecycle
+package app.tauri.livekit_mobile
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -11,16 +11,10 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 
 /**
- * Owns only the Android foreground-service notification for a JS-owned room.
- * The WebView and LiveKit JS remain the owners of the room and its tracks.
+ * Foreground-service notification shown while a native room exists. Audio
+ * focus and routing are owned by the LiveKit SDK, not by this plugin.
  */
-class CallLifecycleForegroundService : Service() {
-    /** Positive acknowledgement of foreground promotion for the owning plugin. */
-    interface StartListener {
-        fun onServiceStarted()
-        fun onServiceStartFailed()
-    }
-
+class LivekitMobileForegroundService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
@@ -28,7 +22,7 @@ class CallLifecycleForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val wantsMicrophone = intent?.getBooleanExtra(EXTRA_MICROPHONE, false) ?: false
-        val wantsPlayback = intent?.getBooleanExtra(EXTRA_PLAYBACK, false) ?: false
+        val wantsPlayback = intent?.getBooleanExtra(EXTRA_PLAYBACK, true) ?: true
         val started = try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 var types = 0
@@ -50,11 +44,8 @@ class CallLifecycleForegroundService : Service() {
         } catch (_: IllegalStateException) {
             false
         }
-        if (started) {
-            activeStartListener?.onServiceStarted()
-        } else {
+        if (!started) {
             stopSelfResult(startId)
-            activeStartListener?.onServiceStartFailed()
         }
         return START_NOT_STICKY
     }
@@ -96,13 +87,10 @@ class CallLifecycleForegroundService : Service() {
     }
 
     companion object {
-        const val EXTRA_MICROPHONE = "app.tauri.call_lifecycle.extra.MICROPHONE"
-        const val EXTRA_PLAYBACK = "app.tauri.call_lifecycle.extra.PLAYBACK"
+        const val EXTRA_MICROPHONE = "app.tauri.livekit_mobile.extra.MICROPHONE"
+        const val EXTRA_PLAYBACK = "app.tauri.livekit_mobile.extra.PLAYBACK"
 
-        @Volatile
-        var activeStartListener: StartListener? = null
-
-        private const val CHANNEL_ID = "call_lifecycle_audio"
+        private const val CHANNEL_ID = "livekit_mobile_audio"
         private const val NOTIFICATION_ID = 1396
     }
 }

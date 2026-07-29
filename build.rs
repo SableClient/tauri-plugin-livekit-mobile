@@ -1,8 +1,11 @@
 const COMMANDS: &[&str] = &[
-    "getPlatformCallCapabilities",
-    "startPlatformCallLifecycle",
-    "stopPlatformCallLifecycle",
-    "getPlatformCallState",
+    "getNativeCallCapabilities",
+    "connectNativeCall",
+    "disconnectNativeCall",
+    "setNativeCallMicrophoneEnabled",
+    "setNativeCallCameraEnabled",
+    "switchNativeCallCamera",
+    "getNativeCallState",
 ];
 
 fn main() {

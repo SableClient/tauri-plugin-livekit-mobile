@@ -1,172 +1,97 @@
+//! Thin transport between the guest commands and the native room plugins.
+//!
+//! Only validation, time-bounded invocation forwarding, and owner-webview
+//! event delivery live here; the contract itself is documented in the README.
+
 use std::marker::PhantomData;
 
 use tauri::{async_runtime, AppHandle, Runtime};
 use tokio::sync::{mpsc, oneshot};
 
 #[cfg(mobile)]
-use tauri::Emitter;
+use tauri::{Emitter, EventTarget};
 
 #[cfg(mobile)]
 use crate::mobile::{
-    MobileBackend, NativePlatformCallEvent, NativeStartPlatformCallLifecycleRequest,
-    NativeStopPlatformCallLifecycleRequest,
+    MobileBackend, NativeConnectCallRequest, NativeDisconnectCallRequest, NativeSetCameraRequest,
+    NativeSetMicrophoneRequest, NativeSwitchCameraRequest,
 };
 
 use crate::error::{Error, Result};
-#[cfg(mobile)]
-use crate::models::{NativePlatformStartFields, PlatformCallEvent, PlatformCallEventKind};
+#[cfg(not(mobile))]
+use crate::models::NativeCallConnectionState;
 use crate::models::{
-    PlatformCallCapabilities, PlatformCallState, PlatformCallStateKind,
-    StartPlatformCallLifecycleRequest, StopPlatformCallLifecycleRequest,
+    ConnectNativeCallRequest, DisconnectNativeCallRequest, NativeCallCapabilities,
+    NativeCallFailureCode, NativeCallSnapshot, SetNativeCallCameraEnabledRequest,
+    SetNativeCallMicrophoneEnabledRequest, SwitchNativeCallCameraRequest,
+};
+#[cfg(mobile)]
+use crate::models::{
+    NativeCallChannelEvent, NativeConnectCallFields, NativeDisconnectCallFields,
+    NativeSetCameraFields, NativeSetMicrophoneFields,
 };
 
 #[cfg(mobile)]
-pub(crate) const PLATFORM_CALL_EVENT: &str = "plugin:call-lifecycle://platform-event";
+pub(crate) const NATIVE_CALL_EVENT: &str = "plugin:livekit-mobile://native-call-event";
 
 pub(crate) enum Command {
-    GetPlatformCallCapabilities(oneshot::Sender<Result<PlatformCallCapabilities>>),
-    StartPlatformCallLifecycle(
-        StartPlatformCallLifecycleRequest,
-        oneshot::Sender<Result<PlatformCallState>>,
+    GetNativeCallCapabilities(oneshot::Sender<Result<NativeCallCapabilities>>),
+    ConnectNativeCall(
+        ConnectNativeCallRequest,
+        String,
+        oneshot::Sender<Result<NativeCallSnapshot>>,
     ),
-    StopPlatformCallLifecycle(
-        StopPlatformCallLifecycleRequest,
-        oneshot::Sender<Result<PlatformCallState>>,
+    DisconnectNativeCall(
+        DisconnectNativeCallRequest,
+        oneshot::Sender<Result<NativeCallSnapshot>>,
     ),
-    GetPlatformCallState(oneshot::Sender<Result<PlatformCallState>>),
+    SetNativeCallMicrophoneEnabled(
+        SetNativeCallMicrophoneEnabledRequest,
+        oneshot::Sender<Result<NativeCallSnapshot>>,
+    ),
+    SetNativeCallCameraEnabled(
+        SetNativeCallCameraEnabledRequest,
+        oneshot::Sender<Result<NativeCallSnapshot>>,
+    ),
+    SwitchNativeCallCamera(
+        SwitchNativeCallCameraRequest,
+        oneshot::Sender<Result<NativeCallSnapshot>>,
+    ),
+    GetNativeCallState(String, oneshot::Sender<Result<NativeCallSnapshot>>),
+}
+
+#[cfg(any(mobile, test))]
+fn connect_request_is_valid(request: &ConnectNativeCallRequest) -> bool {
+    !(request.call_id.trim().is_empty()
+        || request.url.trim().is_empty()
+        || request.token.trim().is_empty())
+}
+
+#[cfg(any(mobile, test))]
+fn call_id_is_valid(call_id: &str) -> bool {
+    !call_id.trim().is_empty()
 }
 
 #[cfg(mobile)]
-enum InternalMessage {
-    PlatformCallEvent(NativePlatformCallEvent),
+fn invalid_request<T>() -> Result<T> {
+    Err(Error::failure(NativeCallFailureCode::InvalidRequest))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PlatformStartDecision {
-    Start,
-    Idempotent,
-    Busy,
-    Unsupported,
-    InvalidSession,
+#[cfg(not(mobile))]
+fn unavailable<T>() -> Result<T> {
+    Err(Error::failure(NativeCallFailureCode::Unavailable))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PlatformStopDecision {
-    Stop,
-    Idempotent,
-    Stale,
-    Unsupported,
-    InvalidSession,
-}
-
-#[derive(Debug, Clone)]
-struct PlatformStateMachine {
-    revision: u64,
-    state: PlatformCallStateKind,
-    session_id: Option<String>,
-    microphone: bool,
-    playback: bool,
-    capabilities: PlatformCallCapabilities,
-    last_session_id: Option<String>,
-}
-
-impl Default for PlatformStateMachine {
-    fn default() -> Self {
-        Self {
-            revision: 0,
-            state: PlatformCallStateKind::Idle,
-            session_id: None,
-            microphone: false,
-            playback: false,
-            capabilities: PlatformCallCapabilities::current(),
-            last_session_id: None,
-        }
-    }
-}
-
-impl PlatformStateMachine {
-    fn snapshot(&self) -> PlatformCallState {
-        PlatformCallState {
-            revision: self.revision,
-            state: self.state,
-            session_id: self.session_id.clone(),
-            microphone: self.microphone,
-            playback: self.playback,
-            capabilities: self.capabilities,
-        }
-    }
-
-    fn start_decision(&self, request: &StartPlatformCallLifecycleRequest) -> PlatformStartDecision {
-        if !self.capabilities.supported {
-            return PlatformStartDecision::Unsupported;
-        }
-        if request.session_id.is_empty() {
-            return PlatformStartDecision::InvalidSession;
-        }
-        if (request.microphone && !self.capabilities.microphone)
-            || (request.playback && !self.capabilities.playback)
-        {
-            return PlatformStartDecision::Unsupported;
-        }
-        match self.session_id.as_deref() {
-            None => PlatformStartDecision::Start,
-            Some(session_id)
-                if session_id == request.session_id
-                    && self.microphone == request.microphone
-                    && self.playback == request.playback =>
-            {
-                PlatformStartDecision::Idempotent
-            }
-            Some(_) => PlatformStartDecision::Busy,
-        }
-    }
-
-    fn stop_decision(&self, session_id: &str) -> PlatformStopDecision {
-        if !self.capabilities.supported {
-            return PlatformStopDecision::Unsupported;
-        }
-        if session_id.is_empty() {
-            return PlatformStopDecision::InvalidSession;
-        }
-        match self.session_id.as_deref() {
-            Some(current) if current == session_id => PlatformStopDecision::Stop,
-            Some(_) => PlatformStopDecision::Stale,
-            None if self.last_session_id.as_deref() == Some(session_id) => {
-                PlatformStopDecision::Idempotent
-            }
-            None => PlatformStopDecision::Stale,
-        }
-    }
-
-    fn activate(&mut self, request: &StartPlatformCallLifecycleRequest) {
-        self.revision += 1;
-        self.state = PlatformCallStateKind::Active;
-        self.session_id = Some(request.session_id.clone());
-        self.last_session_id = Some(request.session_id.clone());
-        self.microphone = request.microphone;
-        self.playback = request.playback;
-    }
-
-    fn stop(&mut self) {
-        self.revision += 1;
-        self.state = PlatformCallStateKind::Idle;
-        self.session_id = None;
-        self.microphone = false;
-        self.playback = false;
-    }
-
-    #[cfg(mobile)]
-    fn next_event_revision(&mut self) -> u64 {
-        self.revision += 1;
-        self.revision
-    }
-
-    #[cfg(mobile)]
-    fn fail(&mut self) {
-        self.state = PlatformCallStateKind::Idle;
-        self.session_id = None;
-        self.microphone = false;
-        self.playback = false;
+#[cfg(not(mobile))]
+fn idle_snapshot() -> NativeCallSnapshot {
+    NativeCallSnapshot {
+        revision: 0,
+        call_id: None,
+        connection_state: NativeCallConnectionState::Idle,
+        microphone_enabled: false,
+        camera_enabled: false,
+        participant_count: 0,
+        last_error: None,
     }
 }
 
@@ -177,22 +102,22 @@ struct Actor<R: Runtime> {
     app: AppHandle<R>,
     commands: mpsc::Receiver<Command>,
     #[cfg(mobile)]
-    internal_tx: mpsc::UnboundedSender<InternalMessage>,
+    internal_tx: mpsc::UnboundedSender<NativeCallChannelEvent>,
     #[cfg(mobile)]
-    internal_rx: mpsc::UnboundedReceiver<InternalMessage>,
+    internal_rx: mpsc::UnboundedReceiver<NativeCallChannelEvent>,
     #[cfg(mobile)]
     mobile: MobileBackend<R>,
-    platform: PlatformStateMachine,
+    /// Webview label that currently receives snapshot events.
     #[cfg(mobile)]
-    platform_events_task: Option<async_runtime::JoinHandle<()>>,
+    owner_label: Option<String>,
 }
 
-pub struct CallLifecycle<R: Runtime> {
+pub struct NativeCallBridge<R: Runtime> {
     commands: mpsc::Sender<Command>,
     _runtime: PhantomData<fn() -> R>,
 }
 
-impl<R: Runtime> CallLifecycle<R> {
+impl<R: Runtime> NativeCallBridge<R> {
     #[cfg(not(mobile))]
     pub(crate) fn new(_app: AppHandle<R>) -> Self {
         let (commands, command_rx) = mpsc::channel(32);
@@ -214,46 +139,68 @@ impl<R: Runtime> CallLifecycle<R> {
         }
     }
 
-    pub async fn get_platform_call_capabilities(&self) -> Result<PlatformCallCapabilities> {
-        let (response, result) = oneshot::channel();
-        self.commands
-            .send(Command::GetPlatformCallCapabilities(response))
-            .await
-            .map_err(|_| Error::ActorUnavailable)?;
-        result.await.map_err(|_| Error::ActorUnavailable)?
-    }
-
-    pub async fn start_platform_call_lifecycle(
+    async fn send<T>(
         &self,
-        request: StartPlatformCallLifecycleRequest,
-    ) -> Result<PlatformCallState> {
+        command: impl FnOnce(oneshot::Sender<Result<T>>) -> Command,
+    ) -> Result<T> {
         let (response, result) = oneshot::channel();
         self.commands
-            .send(Command::StartPlatformCallLifecycle(request, response))
+            .send(command(response))
             .await
-            .map_err(|_| Error::ActorUnavailable)?;
-        result.await.map_err(|_| Error::ActorUnavailable)?
+            .map_err(|_| Error::failure(NativeCallFailureCode::Unavailable))?;
+        result
+            .await
+            .map_err(|_| Error::failure(NativeCallFailureCode::Unavailable))?
     }
 
-    pub async fn stop_platform_call_lifecycle(
+    pub async fn get_native_call_capabilities(&self) -> Result<NativeCallCapabilities> {
+        self.send(Command::GetNativeCallCapabilities).await
+    }
+
+    pub async fn connect_native_call(
         &self,
-        request: StopPlatformCallLifecycleRequest,
-    ) -> Result<PlatformCallState> {
-        let (response, result) = oneshot::channel();
-        self.commands
-            .send(Command::StopPlatformCallLifecycle(request, response))
+        request: ConnectNativeCallRequest,
+        owner_label: String,
+    ) -> Result<NativeCallSnapshot> {
+        self.send(|response| Command::ConnectNativeCall(request, owner_label, response))
             .await
-            .map_err(|_| Error::ActorUnavailable)?;
-        result.await.map_err(|_| Error::ActorUnavailable)?
     }
 
-    pub async fn get_platform_call_state(&self) -> Result<PlatformCallState> {
-        let (response, result) = oneshot::channel();
-        self.commands
-            .send(Command::GetPlatformCallState(response))
+    pub async fn disconnect_native_call(
+        &self,
+        request: DisconnectNativeCallRequest,
+    ) -> Result<NativeCallSnapshot> {
+        self.send(|response| Command::DisconnectNativeCall(request, response))
             .await
-            .map_err(|_| Error::ActorUnavailable)?;
-        result.await.map_err(|_| Error::ActorUnavailable)?
+    }
+
+    pub async fn set_native_call_microphone_enabled(
+        &self,
+        request: SetNativeCallMicrophoneEnabledRequest,
+    ) -> Result<NativeCallSnapshot> {
+        self.send(|response| Command::SetNativeCallMicrophoneEnabled(request, response))
+            .await
+    }
+
+    pub async fn set_native_call_camera_enabled(
+        &self,
+        request: SetNativeCallCameraEnabledRequest,
+    ) -> Result<NativeCallSnapshot> {
+        self.send(|response| Command::SetNativeCallCameraEnabled(request, response))
+            .await
+    }
+
+    pub async fn switch_native_call_camera(
+        &self,
+        request: SwitchNativeCallCameraRequest,
+    ) -> Result<NativeCallSnapshot> {
+        self.send(|response| Command::SwitchNativeCallCamera(request, response))
+            .await
+    }
+
+    pub async fn get_native_call_state(&self, caller_label: String) -> Result<NativeCallSnapshot> {
+        self.send(|response| Command::GetNativeCallState(caller_label, response))
+            .await
     }
 }
 
@@ -262,24 +209,18 @@ async fn run_actor<R: Runtime>(commands: mpsc::Receiver<Command>) {
     let mut actor: Actor<R> = Actor {
         _runtime: PhantomData,
         commands,
-        platform: PlatformStateMachine::default(),
     };
-    loop {
-        let Some(command) = actor.commands.recv().await else {
-            break;
-        };
+    while let Some(command) = actor.commands.recv().await {
         actor.handle_command(command).await;
     }
-
-    actor.cleanup().await;
 }
 
 #[cfg(mobile)]
 async fn run_actor<R: Runtime>(
     app: AppHandle<R>,
     commands: mpsc::Receiver<Command>,
-    internal_tx: mpsc::UnboundedSender<InternalMessage>,
-    internal_rx: mpsc::UnboundedReceiver<InternalMessage>,
+    internal_tx: mpsc::UnboundedSender<NativeCallChannelEvent>,
+    internal_rx: mpsc::UnboundedReceiver<NativeCallChannelEvent>,
     mobile: MobileBackend<R>,
 ) {
     let mut actor = Actor {
@@ -288,8 +229,7 @@ async fn run_actor<R: Runtime>(
         internal_tx,
         internal_rx,
         mobile,
-        platform: PlatformStateMachine::default(),
-        platform_events_task: None,
+        owner_label: None,
     };
     loop {
         tokio::select! {
@@ -299,47 +239,119 @@ async fn run_actor<R: Runtime>(
             }
             internal = actor.internal_rx.recv() => {
                 let Some(internal) = internal else { break };
-                actor.handle_internal(internal).await;
+                actor.handle_channel_event(internal);
             }
         }
     }
-
-    actor.cleanup().await;
 }
 
 impl<R: Runtime> Actor<R> {
     async fn handle_command(&mut self, command: Command) {
         match command {
-            Command::GetPlatformCallCapabilities(response) => {
-                self.handle_get_platform_call_capabilities(response).await
+            Command::GetNativeCallCapabilities(response) => {
+                self.handle_get_native_call_capabilities(response).await
             }
-            Command::StartPlatformCallLifecycle(request, response) => {
-                self.handle_start_platform_call_lifecycle(request, response)
+            Command::ConnectNativeCall(request, owner_label, response) => {
+                self.handle_connect_native_call(request, owner_label, response)
                     .await
             }
-            Command::StopPlatformCallLifecycle(request, response) => {
-                self.handle_stop_platform_call_lifecycle(request, response)
+            Command::DisconnectNativeCall(request, response) => {
+                self.handle_disconnect_native_call(request, response).await
+            }
+            Command::SetNativeCallMicrophoneEnabled(request, response) => {
+                self.handle_set_native_call_microphone_enabled(request, response)
                     .await
             }
-            Command::GetPlatformCallState(response) => {
-                let _ = response.send(Ok(self.platform.snapshot()));
+            Command::SetNativeCallCameraEnabled(request, response) => {
+                self.handle_set_native_call_camera_enabled(request, response)
+                    .await
+            }
+            Command::SwitchNativeCallCamera(request, response) => {
+                self.handle_switch_native_call_camera(request, response)
+                    .await
+            }
+            Command::GetNativeCallState(caller_label, response) => {
+                self.handle_get_native_call_state(caller_label, response)
+                    .await
             }
         }
     }
 
-    async fn handle_get_platform_call_capabilities(
+    async fn handle_get_native_call_capabilities(
         &mut self,
-        response: oneshot::Sender<Result<PlatformCallCapabilities>>,
+        response: oneshot::Sender<Result<NativeCallCapabilities>>,
     ) {
         #[cfg(mobile)]
-        let result = self.mobile.get_platform_call_capabilities().await;
+        let result = self.mobile.get_native_call_capabilities().await;
         #[cfg(not(mobile))]
-        let result = Ok(PlatformCallCapabilities::current());
+        let result = Ok(NativeCallCapabilities::current());
+
+        let _ = response.send(result);
+    }
+
+    #[cfg(mobile)]
+    async fn handle_connect_native_call(
+        &mut self,
+        request: ConnectNativeCallRequest,
+        owner_label: String,
+        response: oneshot::Sender<Result<NativeCallSnapshot>>,
+    ) {
+        if !connect_request_is_valid(&request) {
+            let _ = response.send(invalid_request());
+            return;
+        }
+
+        // The channel hands snapshot events directly to the actor queue; the
+        // sender half outlives this handler inside the native invoke payload.
+        let channel = MobileBackend::<R>::native_call_event_channel(self.internal_tx.clone());
+        let result = self
+            .mobile
+            .connect_native_call(NativeConnectCallRequest {
+                fields: NativeConnectCallFields {
+                    call_id: &request.call_id,
+                    url: &request.url,
+                    token: &request.token,
+                    microphone_enabled: request.microphone_enabled,
+                },
+                channel,
+            })
+            .await;
+
+        let result = match result {
+            Ok(snapshot) => Ok(snapshot),
+            Err(Error::Timeout) => {
+                // Timeout recovery: the native connect may still be resolving,
+                // so cancel it natively and reconcile against the native-truth
+                // snapshot instead of just abandoning the channel (which would
+                // orphan a room that survives cancellation from its events).
+                let _ = self
+                    .mobile
+                    .cancel_native_call_connect(NativeDisconnectCallRequest {
+                        fields: NativeDisconnectCallFields {
+                            call_id: &request.call_id,
+                        },
+                    })
+                    .await;
+                match self.mobile.get_native_call_state().await {
+                    Ok(snapshot) => Ok(snapshot),
+                    Err(_) => Err(Error::Timeout),
+                }
+            }
+            Err(error) => Err(error),
+        };
 
         match result {
-            Ok(capabilities) => {
-                self.platform.capabilities = capabilities;
-                let _ = response.send(Ok(capabilities));
+            Ok(snapshot) => {
+                if snapshot.is_live() {
+                    self.owner_label = Some(owner_label);
+                }
+                let _ = response.send(Ok(snapshot));
+            }
+            Err(Error::Timeout) => {
+                // Native state stayed unknown; keep ownership so a still
+                // running room keeps delivering events.
+                self.owner_label = Some(owner_label);
+                let _ = response.send(Err(Error::Timeout));
             }
             Err(error) => {
                 let _ = response.send(Err(error));
@@ -347,318 +359,225 @@ impl<R: Runtime> Actor<R> {
         }
     }
 
-    async fn handle_start_platform_call_lifecycle(
+    #[cfg(not(mobile))]
+    async fn handle_connect_native_call(
         &mut self,
-        request: StartPlatformCallLifecycleRequest,
-        response: oneshot::Sender<Result<PlatformCallState>>,
+        request: ConnectNativeCallRequest,
+        owner_label: String,
+        response: oneshot::Sender<Result<NativeCallSnapshot>>,
     ) {
-        match self.platform.start_decision(&request) {
-            PlatformStartDecision::Idempotent => {
-                let _ = response.send(Ok(self.platform.snapshot()));
-            }
-            PlatformStartDecision::Unsupported => {
-                let _ = response.send(Err(Error::PlatformCallUnsupported));
-            }
-            PlatformStartDecision::Busy => {
-                let _ = response.send(Err(Error::PlatformCallBusy));
-            }
-            PlatformStartDecision::InvalidSession => {
-                let _ = response.send(Err(Error::PlatformCallStaleSession));
-            }
-            PlatformStartDecision::Start => {
-                #[cfg(mobile)]
-                let result = {
-                    let (events_sender, mut events) = mpsc::channel(32);
-                    let channel = MobileBackend::platform_event_channel(events_sender);
-                    let internal_tx = self.internal_tx.clone();
-                    let forwarder = async_runtime::spawn(async move {
-                        while let Some(event) = events.recv().await {
-                            let _ = internal_tx.send(InternalMessage::PlatformCallEvent(event));
-                        }
-                    });
-                    let result = self
-                        .mobile
-                        .start_platform_call_lifecycle(NativeStartPlatformCallLifecycleRequest {
-                            fields: NativePlatformStartFields {
-                                session_id: &request.session_id,
-                                microphone: request.microphone,
-                                playback: request.playback,
-                            },
-                            channel,
-                        })
-                        .await;
-                    if result.is_err() {
-                        forwarder.abort();
-                        let _ = forwarder.await;
-                    } else {
-                        if let Some(stale) = self.platform_events_task.take() {
-                            stale.abort();
-                        }
-                        self.platform_events_task = Some(forwarder);
-                    }
-                    result
-                };
-                #[cfg(not(mobile))]
-                let result: Result<()> = Err(Error::PlatformCallUnsupported);
-
-                match result {
-                    Ok(()) => {
-                        self.platform.activate(&request);
-                        let _ = response.send(Ok(self.platform.snapshot()));
-                    }
-                    Err(error) => {
-                        let _ = response.send(Err(error));
-                    }
-                }
-            }
-        }
-    }
-
-    async fn handle_stop_platform_call_lifecycle(
-        &mut self,
-        request: StopPlatformCallLifecycleRequest,
-        response: oneshot::Sender<Result<PlatformCallState>>,
-    ) {
-        match self.platform.stop_decision(&request.session_id) {
-            PlatformStopDecision::Idempotent => {
-                let _ = response.send(Ok(self.platform.snapshot()));
-            }
-            PlatformStopDecision::Unsupported => {
-                let _ = response.send(Err(Error::PlatformCallUnsupported));
-            }
-            PlatformStopDecision::Stale | PlatformStopDecision::InvalidSession => {
-                let _ = response.send(Err(Error::PlatformCallStaleSession));
-            }
-            PlatformStopDecision::Stop => {
-                #[cfg(mobile)]
-                let result = self
-                    .mobile
-                    .stop_platform_call_lifecycle(NativeStopPlatformCallLifecycleRequest {
-                        session_id: &request.session_id,
-                    })
-                    .await;
-                #[cfg(not(mobile))]
-                let result: Result<()> = Err(Error::PlatformCallUnsupported);
-
-                match result {
-                    Ok(()) => {
-                        #[cfg(mobile)]
-                        if let Some(task) = self.platform_events_task.take() {
-                            task.abort();
-                            let _ = task.await;
-                        }
-                        self.platform.stop();
-                        let _ = response.send(Ok(self.platform.snapshot()));
-                    }
-                    Err(error) => {
-                        let _ = response.send(Err(error));
-                    }
-                }
-            }
-        }
+        let _ = (&request, &owner_label);
+        let _ = response.send(unavailable());
     }
 
     #[cfg(mobile)]
-    async fn handle_internal(&mut self, message: InternalMessage) {
-        match message {
-            InternalMessage::PlatformCallEvent(event) => self.handle_platform_call_event(event),
+    async fn handle_disconnect_native_call(
+        &mut self,
+        request: DisconnectNativeCallRequest,
+        response: oneshot::Sender<Result<NativeCallSnapshot>>,
+    ) {
+        if !call_id_is_valid(&request.call_id) {
+            let _ = response.send(invalid_request());
+            return;
         }
+        let result = self
+            .mobile
+            .disconnect_native_call(NativeDisconnectCallRequest {
+                fields: NativeDisconnectCallFields {
+                    call_id: &request.call_id,
+                },
+            })
+            .await;
+        if matches!(&result, Ok(snapshot) if !snapshot.is_live()) {
+            self.owner_label = None;
+        }
+        let _ = response.send(result);
+    }
+
+    #[cfg(not(mobile))]
+    async fn handle_disconnect_native_call(
+        &mut self,
+        request: DisconnectNativeCallRequest,
+        response: oneshot::Sender<Result<NativeCallSnapshot>>,
+    ) {
+        let _ = &request;
+        let _ = response.send(unavailable());
     }
 
     #[cfg(mobile)]
-    fn handle_platform_call_event(&mut self, event: NativePlatformCallEvent) {
-        if self.platform.session_id.as_deref() != Some(event.session_id.as_str()) {
+    async fn handle_set_native_call_microphone_enabled(
+        &mut self,
+        request: SetNativeCallMicrophoneEnabledRequest,
+        response: oneshot::Sender<Result<NativeCallSnapshot>>,
+    ) {
+        if !call_id_is_valid(&request.call_id) {
+            let _ = response.send(invalid_request());
             return;
         }
-        let Some(kind) = event.to_kind() else {
-            return;
-        };
-        if matches!(kind, PlatformCallEventKind::Failed { .. }) {
-            self.platform.fail();
-            if let Some(task) = self.platform_events_task.take() {
-                task.abort();
-            }
-        }
-        let payload = PlatformCallEvent {
-            revision: self.platform.next_event_revision(),
-            session_id: event.session_id,
-            kind,
-        };
-        let _ = self.app.emit(PLATFORM_CALL_EVENT, payload);
+        let result = self
+            .mobile
+            .set_native_call_microphone_enabled(NativeSetMicrophoneRequest {
+                fields: NativeSetMicrophoneFields {
+                    call_id: &request.call_id,
+                    enabled: request.enabled,
+                },
+            })
+            .await;
+        let _ = response.send(result);
     }
 
-    async fn cleanup(&mut self) {
+    #[cfg(not(mobile))]
+    async fn handle_set_native_call_microphone_enabled(
+        &mut self,
+        request: SetNativeCallMicrophoneEnabledRequest,
+        response: oneshot::Sender<Result<NativeCallSnapshot>>,
+    ) {
+        let _ = &request;
+        let _ = response.send(unavailable());
+    }
+
+    #[cfg(mobile)]
+    async fn handle_set_native_call_camera_enabled(
+        &mut self,
+        request: SetNativeCallCameraEnabledRequest,
+        response: oneshot::Sender<Result<NativeCallSnapshot>>,
+    ) {
+        if !call_id_is_valid(&request.call_id) {
+            let _ = response.send(invalid_request());
+            return;
+        }
+        let result = self
+            .mobile
+            .set_native_call_camera_enabled(NativeSetCameraRequest {
+                fields: NativeSetCameraFields {
+                    call_id: &request.call_id,
+                    enabled: request.enabled,
+                },
+            })
+            .await;
+        let _ = response.send(result);
+    }
+
+    #[cfg(not(mobile))]
+    async fn handle_set_native_call_camera_enabled(
+        &mut self,
+        request: SetNativeCallCameraEnabledRequest,
+        response: oneshot::Sender<Result<NativeCallSnapshot>>,
+    ) {
+        let _ = &request;
+        let _ = response.send(unavailable());
+    }
+
+    #[cfg(mobile)]
+    async fn handle_switch_native_call_camera(
+        &mut self,
+        request: SwitchNativeCallCameraRequest,
+        response: oneshot::Sender<Result<NativeCallSnapshot>>,
+    ) {
+        if !call_id_is_valid(&request.call_id) {
+            let _ = response.send(invalid_request());
+            return;
+        }
+        let result = self
+            .mobile
+            .switch_native_call_camera(NativeSwitchCameraRequest {
+                fields: NativeDisconnectCallFields {
+                    call_id: &request.call_id,
+                },
+            })
+            .await;
+        let _ = response.send(result);
+    }
+
+    #[cfg(not(mobile))]
+    async fn handle_switch_native_call_camera(
+        &mut self,
+        request: SwitchNativeCallCameraRequest,
+        response: oneshot::Sender<Result<NativeCallSnapshot>>,
+    ) {
+        let _ = &request;
+        let _ = response.send(unavailable());
+    }
+
+    async fn handle_get_native_call_state(
+        &mut self,
+        caller_label: String,
+        response: oneshot::Sender<Result<NativeCallSnapshot>>,
+    ) {
         #[cfg(mobile)]
-        if let Some(task) = self.platform_events_task.take() {
-            task.abort();
-            let _ = task.await;
+        let result = {
+            let result = self.mobile.get_native_call_state().await;
+            if let Ok(snapshot) = &result {
+                // Ownership reclaim: the first webview to query an unowned
+                // live room (e.g. after its owner webview was destroyed)
+                // becomes the new event owner.
+                if snapshot.is_live() && self.owner_label.is_none() && !caller_label.is_empty() {
+                    self.owner_label = Some(caller_label.clone());
+                }
+            }
+            result
+        };
+        #[cfg(not(mobile))]
+        let result = {
+            let _ = &caller_label;
+            Ok(idle_snapshot())
+        };
+
+        let _ = response.send(result);
+    }
+
+    #[cfg(mobile)]
+    fn handle_channel_event(&mut self, event: NativeCallChannelEvent) {
+        match event {
+            NativeCallChannelEvent::SnapshotChanged { snapshot } => {
+                // Targeted delivery: only the owner webview receives
+                // snapshots; nothing is broadcast.
+                let Some(label) = self.owner_label.clone() else {
+                    return;
+                };
+                let live = snapshot.is_live();
+                let _ = self
+                    .app
+                    .emit_to(EventTarget::webview(label), NATIVE_CALL_EVENT, snapshot);
+                if !live {
+                    self.owner_label = None;
+                }
+            }
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{PlatformStartDecision, PlatformStateMachine, PlatformStopDecision};
-    use crate::models::{
-        PlatformCallCapabilities, PlatformCallStateKind, StartPlatformCallLifecycleRequest,
-    };
+    use super::{call_id_is_valid, connect_request_is_valid};
+    use crate::models::ConnectNativeCallRequest;
 
-    #[test]
-    fn platform_lifecycle_has_opaque_session_and_idempotent_stop_semantics() {
-        let mut machine = PlatformStateMachine::default();
-        assert_eq!(
-            machine.start_decision(&StartPlatformCallLifecycleRequest {
-                session_id: "session".into(),
-                microphone: true,
-                playback: true,
-            }),
-            PlatformStartDecision::Unsupported
-        );
-
-        machine.capabilities = PlatformCallCapabilities {
-            supported: true,
-            microphone: true,
-            playback: true,
-        };
-        let request = StartPlatformCallLifecycleRequest {
-            session_id: "opaque-session".into(),
-            microphone: true,
-            playback: true,
-        };
-        assert_eq!(
-            machine.start_decision(&request),
-            PlatformStartDecision::Start
-        );
-        machine.activate(&request);
-        assert_eq!(
-            machine.start_decision(&request),
-            PlatformStartDecision::Idempotent
-        );
-        assert_eq!(
-            machine.start_decision(&StartPlatformCallLifecycleRequest {
-                session_id: "another-session".into(),
-                microphone: true,
-                playback: true,
-            }),
-            PlatformStartDecision::Busy
-        );
-        assert_eq!(
-            machine.stop_decision("another-session"),
-            PlatformStopDecision::Stale
-        );
-        assert_eq!(
-            machine.stop_decision("opaque-session"),
-            PlatformStopDecision::Stop
-        );
-        machine.stop();
-        assert_eq!(
-            machine.stop_decision("opaque-session"),
-            PlatformStopDecision::Idempotent
-        );
-        assert_eq!(machine.snapshot().session_id, None);
-    }
-
-    #[test]
-    fn platform_stop_protects_against_replacement_session() {
-        let mut machine = PlatformStateMachine::default();
-        machine.capabilities = PlatformCallCapabilities {
-            supported: true,
-            microphone: true,
-            playback: true,
-        };
-        machine.activate(&StartPlatformCallLifecycleRequest {
-            session_id: "first".into(),
-            microphone: true,
-            playback: true,
-        });
-        machine.stop();
-        machine.activate(&StartPlatformCallLifecycleRequest {
-            session_id: "second".into(),
-            microphone: true,
-            playback: true,
-        });
-
-        // A stop targeted at the replaced session must not touch the active one.
-        assert_eq!(machine.stop_decision("first"), PlatformStopDecision::Stale);
-        assert_eq!(machine.stop_decision("second"), PlatformStopDecision::Stop);
-        machine.stop();
-        assert_eq!(
-            machine.stop_decision("never-seen"),
-            PlatformStopDecision::Stale
-        );
-    }
-
-    #[test]
-    fn empty_session_ids_are_rejected_before_any_transition() {
-        let mut machine = PlatformStateMachine::default();
-        machine.capabilities = PlatformCallCapabilities {
-            supported: true,
-            microphone: true,
-            playback: true,
-        };
-        assert_eq!(
-            machine.start_decision(&StartPlatformCallLifecycleRequest {
-                session_id: String::new(),
-                microphone: true,
-                playback: true,
-            }),
-            PlatformStartDecision::InvalidSession
-        );
-        assert_eq!(
-            machine.stop_decision(""),
-            PlatformStopDecision::InvalidSession
-        );
-        assert_eq!(machine.snapshot().revision, 0);
-        assert_eq!(machine.snapshot().state, PlatformCallStateKind::Idle);
-    }
-
-    #[test]
-    fn media_flags_must_be_supported_by_the_platform() {
-        let mut machine = PlatformStateMachine::default();
-        machine.capabilities = PlatformCallCapabilities {
-            supported: true,
-            microphone: true,
-            playback: false,
-        };
-        assert_eq!(
-            machine.start_decision(&StartPlatformCallLifecycleRequest {
-                session_id: "session".into(),
-                microphone: false,
-                playback: true,
-            }),
-            PlatformStartDecision::Unsupported
-        );
-        assert_eq!(
-            machine.start_decision(&StartPlatformCallLifecycleRequest {
-                session_id: "session".into(),
-                microphone: true,
-                playback: false,
-            }),
-            PlatformStartDecision::Start
-        );
-    }
-
-    #[test]
-    fn desktop_reports_truthful_unsupported_state() {
-        assert_eq!(
-            PlatformCallCapabilities::current().supported,
-            cfg!(any(target_os = "android", target_os = "ios"))
-        );
-        #[cfg(not(mobile))]
-        {
-            let machine = PlatformStateMachine::default();
-            assert_eq!(
-                machine.start_decision(&StartPlatformCallLifecycleRequest {
-                    session_id: "session".into(),
-                    microphone: true,
-                    playback: true,
-                }),
-                PlatformStartDecision::Unsupported
-            );
-            assert_eq!(
-                machine.stop_decision("session"),
-                PlatformStopDecision::Unsupported
-            );
+    fn connect_request(call_id: &str) -> ConnectNativeCallRequest {
+        ConnectNativeCallRequest {
+            call_id: call_id.into(),
+            url: "wss://livekit.example".into(),
+            token: "jwt".into(),
+            microphone_enabled: true,
         }
+    }
+
+    #[test]
+    fn connect_validation_requires_nonempty_fields() {
+        assert!(connect_request_is_valid(&connect_request("call")));
+
+        assert!(!connect_request_is_valid(&connect_request(" ")));
+        let mut blank_url = connect_request("call");
+        blank_url.url = String::new();
+        assert!(!connect_request_is_valid(&blank_url));
+        let mut blank_token = connect_request("call");
+        blank_token.token = "  ".into();
+        assert!(!connect_request_is_valid(&blank_token));
+    }
+
+    #[test]
+    fn call_id_validation_rejects_empty_and_blank() {
+        assert!(call_id_is_valid("call"));
+        assert!(!call_id_is_valid(""));
+        assert!(!call_id_is_valid("   "));
     }
 }

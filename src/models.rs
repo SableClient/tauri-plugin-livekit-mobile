@@ -1,399 +1,557 @@
 use serde::{Deserialize, Serialize};
 
+/// Bounded connection-state vocabulary. `connectionState` on every native
+/// snapshot deserializes into this enum, so an out-of-vocabulary native state
+/// drops the payload instead of crossing the bridge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum PlatformCallStateKind {
+pub enum NativeCallConnectionState {
     Idle,
-    Active,
+    Connecting,
+    Connected,
+    Reconnecting,
+    Failed,
 }
 
+/// Bounded failure vocabulary shared by command errors and snapshot
+/// `lastError`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum PlatformCallRoute {
-    Earpiece,
-    Speaker,
-    Wired,
-    Bluetooth,
-    Unknown,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PlatformCallInterruption {
-    Began,
-    Ended,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PlatformCallFailureCode {
-    PermissionDenied,
-    AudioUnavailable,
-    StartFailed,
-    StopFailed,
+pub enum NativeCallFailureCode {
+    InvalidRequest,
     Busy,
+    PermissionDenied,
+    ConnectFailed,
+    MediaFailed,
+    Disconnected,
+    Cancelled,
+    Unavailable,
+    Unexpected,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum PlatformCallEventKind {
-    FocusChanged { focused: bool },
-    RouteChanged { route: PlatformCallRoute },
-    Interrupted { state: PlatformCallInterruption },
-    MediaReset,
-    Failed { code: PlatformCallFailureCode },
-}
+impl NativeCallFailureCode {
+    /// Wire code string.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::InvalidRequest => "invalid_request",
+            Self::Busy => "busy",
+            Self::PermissionDenied => "permission_denied",
+            Self::ConnectFailed => "connect_failed",
+            Self::MediaFailed => "media_failed",
+            Self::Disconnected => "disconnected",
+            Self::Cancelled => "cancelled",
+            Self::Unavailable => "unavailable",
+            Self::Unexpected => "unexpected",
+        }
+    }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PlatformCallEvent {
-    pub revision: u64,
-    pub session_id: String,
-    #[serde(flatten)]
-    pub kind: PlatformCallEventKind,
-}
-
-/// Raw platform lifecycle event as emitted by the Android/iOS native plugins.
-///
-/// Native fields stay as strings at the boundary; the bridge maps them into the
-/// bounded guest enums below, dropping unknown values instead of forwarding raw
-/// native errors or device names.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativePlatformCallEvent {
-    pub session_id: String,
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub revision: Option<u64>,
-    pub event: String,
-    #[serde(default)]
-    pub focus: Option<String>,
-    #[serde(default)]
-    pub route: Option<String>,
-    #[serde(default)]
-    pub interruption: Option<String>,
-    #[serde(default)]
-    pub code: Option<String>,
-}
-
-impl NativePlatformCallEvent {
-    pub fn to_kind(&self) -> Option<PlatformCallEventKind> {
-        match self.event.as_str() {
-            // Android reports "gained"|"lost"|"ducked"; iOS reports "active"|"lost"|"regained".
-            "focus" => Some(PlatformCallEventKind::FocusChanged {
-                focused: matches!(
-                    self.focus.as_deref(),
-                    Some("gained" | "active" | "regained")
-                ),
-            }),
-            // Union of Android (earpiece|speaker|wired|bluetooth|usb|unknown)
-            // and iOS (receiver|speaker|bluetooth|wired|other|none) routes.
-            "route" => Some(PlatformCallEventKind::RouteChanged {
-                route: match self.route.as_deref() {
-                    Some("earpiece" | "receiver") => PlatformCallRoute::Earpiece,
-                    Some("speaker") => PlatformCallRoute::Speaker,
-                    Some("wired") => PlatformCallRoute::Wired,
-                    Some("bluetooth") => PlatformCallRoute::Bluetooth,
-                    _ => PlatformCallRoute::Unknown,
-                },
-            }),
-            "interruption" => Some(PlatformCallEventKind::Interrupted {
-                state: match self.interruption.as_deref() {
-                    Some("began") => PlatformCallInterruption::Began,
-                    _ => PlatformCallInterruption::Ended,
-                },
-            }),
-            "media_services_reset" => Some(PlatformCallEventKind::MediaReset),
-            // Android: invalid_request|busy|not_visible|permission_denied|
-            // audio_focus_failed|service_start_failed. iOS: busy|
-            // permission_denied|audio_session_failed|stop_failed.
-            "failure" => Some(PlatformCallEventKind::Failed {
-                code: match self.code.as_deref() {
-                    Some("busy") => PlatformCallFailureCode::Busy,
-                    Some("permission_denied") => PlatformCallFailureCode::PermissionDenied,
-                    Some("audio_focus_failed" | "audio_session_failed") => {
-                        PlatformCallFailureCode::AudioUnavailable
-                    }
-                    Some("stop_failed") => PlatformCallFailureCode::StopFailed,
-                    _ => PlatformCallFailureCode::StartFailed,
-                },
-            }),
-            _ => None,
+    /// Static, safe message for the code. Native error strings are never
+    /// forwarded.
+    pub fn message(&self) -> &'static str {
+        match self {
+            Self::InvalidRequest => "the call request was invalid",
+            Self::Busy => "another call is already active",
+            Self::PermissionDenied => "a microphone or camera permission was denied",
+            Self::ConnectFailed => "the call failed to connect",
+            Self::MediaFailed => "a microphone or camera update failed",
+            Self::Disconnected => "the call connection ended unexpectedly",
+            Self::Cancelled => "the operation was cancelled",
+            Self::Unavailable => "the native call controller is unavailable",
+            Self::Unexpected => "the call failed unexpectedly",
         }
     }
 }
 
-/// The media flags forwarded to the native platform-lifecycle plugins.
-///
-/// Kept in `models.rs` (not `mobile.rs`, which only compiles on mobile
-/// targets) so the wire shape is regression-tested on the host.
-#[derive(Debug, Clone, Copy, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativePlatformStartFields<'a> {
-    pub session_id: &'a str,
-    pub microphone: bool,
-    pub playback: bool,
+/// Sanitizes a native failure-code string into the bounded vocabulary.
+/// Anything unrecognized degrades to [`NativeCallFailureCode::Unexpected`].
+pub fn failure_code_from_raw(raw: Option<&str>) -> NativeCallFailureCode {
+    match raw {
+        Some("invalid_request") => NativeCallFailureCode::InvalidRequest,
+        Some("busy") => NativeCallFailureCode::Busy,
+        Some("permission_denied") => NativeCallFailureCode::PermissionDenied,
+        Some("connect_failed") => NativeCallFailureCode::ConnectFailed,
+        Some("media_failed") => NativeCallFailureCode::MediaFailed,
+        Some("disconnected") => NativeCallFailureCode::Disconnected,
+        Some("cancelled") => NativeCallFailureCode::Cancelled,
+        Some("unavailable") => NativeCallFailureCode::Unavailable,
+        Some("unexpected") => NativeCallFailureCode::Unexpected,
+        _ => NativeCallFailureCode::Unexpected,
+    }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+/// Stable `{ code, message }` failure shape embedded in snapshots as
+/// `lastError` and serialized for command errors. The message always comes
+/// from the bounded code.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct StartPlatformCallLifecycleRequest {
-    pub session_id: String,
-    pub microphone: bool,
-    pub playback: bool,
+pub struct NativeCallError {
+    pub code: NativeCallFailureCode,
+    pub message: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StopPlatformCallLifecycleRequest {
-    pub session_id: String,
+impl NativeCallError {
+    pub fn from_code(code: NativeCallFailureCode) -> Self {
+        Self {
+            code,
+            message: code.message().into(),
+        }
+    }
+}
+
+impl std::fmt::Display for NativeCallError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PlatformCallCapabilities {
+pub struct NativeCallCapabilities {
     pub supported: bool,
     pub microphone: bool,
-    pub playback: bool,
+    pub background_audio: bool,
+    pub native_room: bool,
+    pub camera: bool,
 }
 
-impl PlatformCallCapabilities {
+impl NativeCallCapabilities {
+    /// Truthful host capabilities: desktop has no native LiveKit room.
     pub fn current() -> Self {
         let supported = cfg!(any(target_os = "android", target_os = "ios"));
         Self {
             supported,
             microphone: supported,
-            playback: supported,
+            background_audio: supported,
+            native_room: supported,
+            camera: supported,
         }
     }
 }
 
+/// Raw `{ code, message? }` pair as it may arrive inside native payloads. The
+/// raw message is never forwarded: the guest-visible message is derived from
+/// the bounded code alone.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawNativeCallError {
+    code: String,
+    #[serde(default)]
+    #[allow(dead_code)]
+    message: Option<String>,
+}
+
+fn deserialize_bounded_last_error<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<NativeCallError>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = Option::<RawNativeCallError>::deserialize(deserializer)?;
+    Ok(raw.map(|raw| NativeCallError::from_code(failure_code_from_raw(Some(&raw.code)))))
+}
+
+/// Wire shape of the native room snapshot resolved by native commands and
+/// announced over the connect channel. `revision` is native-owned and passed
+/// through unchanged.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PlatformCallState {
+pub struct NativeCallSnapshot {
+    #[serde(default)]
     pub revision: u64,
-    pub state: PlatformCallStateKind,
-    pub session_id: Option<String>,
-    pub microphone: bool,
-    pub playback: bool,
-    pub capabilities: PlatformCallCapabilities,
+    #[serde(default)]
+    pub call_id: Option<String>,
+    pub connection_state: NativeCallConnectionState,
+    #[serde(default)]
+    pub microphone_enabled: bool,
+    #[serde(default)]
+    pub camera_enabled: bool,
+    #[serde(default)]
+    pub participant_count: u32,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_bounded_last_error"
+    )]
+    pub last_error: Option<NativeCallError>,
+}
+
+impl NativeCallSnapshot {
+    /// True while the native side reports anything but an idle room.
+    pub fn is_live(&self) -> bool {
+        self.connection_state != NativeCallConnectionState::Idle
+    }
+}
+
+/// The only channel event kind: snapshot announcements. Anything else fails
+/// to deserialize here and is dropped by the channel.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "event", rename_all = "snake_case")]
+pub enum NativeCallChannelEvent {
+    SnapshotChanged { snapshot: NativeCallSnapshot },
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectNativeCallRequest {
+    pub call_id: String,
+    pub url: String,
+    pub token: String,
+    pub microphone_enabled: bool,
+}
+
+// Token must never land in logs: redact it in `Debug`.
+impl std::fmt::Debug for ConnectNativeCallRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConnectNativeCallRequest")
+            .field("call_id", &self.call_id)
+            .field("url", &self.url)
+            .field("token", &"[redacted]")
+            .field("microphone_enabled", &self.microphone_enabled)
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DisconnectNativeCallRequest {
+    pub call_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetNativeCallMicrophoneEnabledRequest {
+    pub call_id: String,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetNativeCallCameraEnabledRequest {
+    pub call_id: String,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwitchNativeCallCameraRequest {
+    pub call_id: String,
+}
+
+/// The connect payload fields forwarded to the native room plugins.
+///
+/// Kept in `models.rs` (not `mobile.rs`, which only compiles on mobile
+/// targets) so the wire shape is regression-tested on the host.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeConnectCallFields<'a> {
+    pub call_id: &'a str,
+    pub url: &'a str,
+    pub token: &'a str,
+    pub microphone_enabled: bool,
+}
+
+// Token must never land in logs: redact it in `Debug`.
+impl std::fmt::Debug for NativeConnectCallFields<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NativeConnectCallFields")
+            .field("call_id", &self.call_id)
+            .field("url", &self.url)
+            .field("token", &"[redacted]")
+            .field("microphone_enabled", &self.microphone_enabled)
+            .finish()
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeDisconnectCallFields<'a> {
+    pub call_id: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeSetMicrophoneFields<'a> {
+    pub call_id: &'a str,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeSetCameraFields<'a> {
+    pub call_id: &'a str,
+    pub enabled: bool,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn native_event(event: &str) -> NativePlatformCallEvent {
-        NativePlatformCallEvent {
-            session_id: "session".into(),
-            revision: None,
-            event: event.into(),
-            focus: None,
-            route: None,
-            interruption: None,
-            code: None,
-        }
-    }
-
     #[test]
-    fn native_focus_maps_to_bounded_focused_flag() {
-        for (raw, focused) in [
-            ("gained", true),
-            ("active", true),
-            ("regained", true),
-            ("lost", false),
-            ("ducked", false),
+    fn connection_states_are_bounded_wire_values() {
+        for (state, wire) in [
+            (NativeCallConnectionState::Idle, "idle"),
+            (NativeCallConnectionState::Connecting, "connecting"),
+            (NativeCallConnectionState::Connected, "connected"),
+            (NativeCallConnectionState::Reconnecting, "reconnecting"),
+            (NativeCallConnectionState::Failed, "failed"),
         ] {
-            let mut event = native_event("focus");
-            event.focus = Some(raw.into());
+            assert_eq!(serde_json::to_value(state).unwrap(), wire);
             assert_eq!(
-                event.to_kind(),
-                Some(PlatformCallEventKind::FocusChanged { focused }),
-                "focus {raw}"
+                serde_json::from_value::<NativeCallConnectionState>(serde_json::json!(wire))
+                    .unwrap(),
+                state
             );
         }
-        assert_eq!(
-            native_event("focus").to_kind(),
-            Some(PlatformCallEventKind::FocusChanged { focused: false })
+        assert!(
+            serde_json::from_value::<NativeCallConnectionState>(serde_json::json!("starting"))
+                .is_err()
         );
     }
 
     #[test]
-    fn native_route_maps_to_bounded_route_without_device_names() {
-        for (raw, route) in [
-            ("earpiece", PlatformCallRoute::Earpiece),
-            ("receiver", PlatformCallRoute::Earpiece),
-            ("speaker", PlatformCallRoute::Speaker),
-            ("wired", PlatformCallRoute::Wired),
-            ("bluetooth", PlatformCallRoute::Bluetooth),
-            ("usb", PlatformCallRoute::Unknown),
-            ("other", PlatformCallRoute::Unknown),
-            ("none", PlatformCallRoute::Unknown),
-            ("bose-quietcomfort-35", PlatformCallRoute::Unknown),
+    fn failure_codes_are_bounded_wire_values_with_static_messages() {
+        for (code, wire) in [
+            (NativeCallFailureCode::InvalidRequest, "invalid_request"),
+            (NativeCallFailureCode::Busy, "busy"),
+            (NativeCallFailureCode::PermissionDenied, "permission_denied"),
+            (NativeCallFailureCode::ConnectFailed, "connect_failed"),
+            (NativeCallFailureCode::MediaFailed, "media_failed"),
+            (NativeCallFailureCode::Disconnected, "disconnected"),
+            (NativeCallFailureCode::Cancelled, "cancelled"),
+            (NativeCallFailureCode::Unavailable, "unavailable"),
+            (NativeCallFailureCode::Unexpected, "unexpected"),
         ] {
-            let mut event = native_event("route");
-            event.route = Some(raw.into());
-            assert_eq!(
-                event.to_kind(),
-                Some(PlatformCallEventKind::RouteChanged { route }),
-                "route {raw}"
-            );
+            assert_eq!(code.code(), wire);
+            assert_eq!(serde_json::to_value(code).unwrap(), wire);
+            assert!(!code.message().is_empty());
         }
-    }
-
-    #[test]
-    fn native_interruption_and_reset_map_to_bounded_variants() {
-        let mut began = native_event("interruption");
-        began.interruption = Some("began".into());
-        assert_eq!(
-            began.to_kind(),
-            Some(PlatformCallEventKind::Interrupted {
-                state: PlatformCallInterruption::Began
-            })
-        );
-        let mut ended = native_event("interruption");
-        ended.interruption = Some("ended".into());
-        assert_eq!(
-            ended.to_kind(),
-            Some(PlatformCallEventKind::Interrupted {
-                state: PlatformCallInterruption::Ended
-            })
-        );
-        assert_eq!(
-            native_event("media_services_reset").to_kind(),
-            Some(PlatformCallEventKind::MediaReset)
+        assert!(
+            serde_json::from_value::<NativeCallFailureCode>(serde_json::json!("internal_error"))
+                .is_err()
         );
     }
 
     #[test]
-    fn native_failure_codes_map_to_safe_codes() {
-        for (raw, code) in [
-            ("busy", PlatformCallFailureCode::Busy),
-            (
-                "permission_denied",
-                PlatformCallFailureCode::PermissionDenied,
-            ),
-            (
-                "audio_focus_failed",
-                PlatformCallFailureCode::AudioUnavailable,
-            ),
-            (
-                "audio_session_failed",
-                PlatformCallFailureCode::AudioUnavailable,
-            ),
-            ("stop_failed", PlatformCallFailureCode::StopFailed),
-            ("invalid_request", PlatformCallFailureCode::StartFailed),
-            ("not_visible", PlatformCallFailureCode::StartFailed),
-            ("service_start_failed", PlatformCallFailureCode::StartFailed),
-            ("Device is muted", PlatformCallFailureCode::StartFailed),
+    fn native_failure_codes_sanitize_into_the_bounded_vocabulary() {
+        for (raw, bounded) in [
+            ("invalid_request", NativeCallFailureCode::InvalidRequest),
+            ("busy", NativeCallFailureCode::Busy),
+            ("permission_denied", NativeCallFailureCode::PermissionDenied),
+            ("connect_failed", NativeCallFailureCode::ConnectFailed),
+            ("media_failed", NativeCallFailureCode::MediaFailed),
+            ("disconnected", NativeCallFailureCode::Disconnected),
+            ("cancelled", NativeCallFailureCode::Cancelled),
+            ("unavailable", NativeCallFailureCode::Unavailable),
+            ("unexpected", NativeCallFailureCode::Unexpected),
         ] {
-            let mut event = native_event("failure");
-            event.code = Some(raw.into());
-            assert_eq!(
-                event.to_kind(),
-                Some(PlatformCallEventKind::Failed { code }),
-                "code {raw}"
-            );
+            assert_eq!(failure_code_from_raw(Some(raw)), bounded, "code {raw}");
         }
-    }
-
-    #[test]
-    fn unknown_native_event_is_dropped() {
-        assert_eq!(native_event("unknown_thing").to_kind(), None);
-    }
-
-    #[test]
-    fn native_start_fields_serialize_as_camel_case() {
-        let fields = NativePlatformStartFields {
-            session_id: "opaque-session",
-            microphone: true,
-            playback: false,
-        };
         assert_eq!(
-            serde_json::to_value(fields).unwrap(),
-            serde_json::json!({
-                "sessionId": "opaque-session",
-                "microphone": true,
-                "playback": false
-            })
+            failure_code_from_raw(Some("whatever_else")),
+            NativeCallFailureCode::Unexpected
+        );
+        assert_eq!(
+            failure_code_from_raw(None),
+            NativeCallFailureCode::Unexpected
         );
     }
 
     #[test]
-    fn native_event_deserializes_android_and_ios_payloads() {
-        let android: NativePlatformCallEvent = serde_json::from_value(serde_json::json!({
-            "sessionId": "s",
-            "revision": 3,
-            "event": "route",
-            "route": "usb"
+    fn snapshot_deserializes_native_truth_with_bounded_last_error() {
+        let snapshot: NativeCallSnapshot = serde_json::from_value(serde_json::json!({
+            "revision": 9,
+            "callId": "call-1",
+            "connectionState": "connected",
+            "microphoneEnabled": true,
+            "cameraEnabled": false,
+            "participantCount": 2,
+            "lastError": { "code": "media_failed", "message": "raw native detail" }
         }))
         .unwrap();
+        assert_eq!(snapshot.revision, 9, "native revision passes through");
+        assert_eq!(snapshot.call_id.as_deref(), Some("call-1"));
         assert_eq!(
-            android.to_kind(),
-            Some(PlatformCallEventKind::RouteChanged {
-                route: PlatformCallRoute::Unknown
-            })
+            snapshot.connection_state,
+            NativeCallConnectionState::Connected
         );
-
-        let ios: NativePlatformCallEvent = serde_json::from_value(serde_json::json!({
-            "sessionId": "s",
-            "revision": 3,
-            "event": "interruption",
-            "interruption": "began"
-        }))
-        .unwrap();
+        assert!(snapshot.microphone_enabled);
+        assert!(!snapshot.camera_enabled);
+        assert_eq!(snapshot.participant_count, 2);
+        assert!(snapshot.is_live());
         assert_eq!(
-            ios.to_kind(),
-            Some(PlatformCallEventKind::Interrupted {
-                state: PlatformCallInterruption::Began
-            })
+            snapshot.last_error,
+            Some(NativeCallError::from_code(
+                NativeCallFailureCode::MediaFailed
+            ))
         );
+        let message = snapshot.last_error.unwrap().message;
+        assert_ne!(message, "raw native detail");
     }
 
     #[test]
-    fn platform_state_kind_wire_values_are_idle_and_active_only() {
-        assert_eq!(
-            serde_json::to_value(PlatformCallStateKind::Idle).unwrap(),
-            "idle"
-        );
-        assert_eq!(
-            serde_json::to_value(PlatformCallStateKind::Active).unwrap(),
-            "active"
-        );
-        assert!(
-            serde_json::from_value::<PlatformCallStateKind>(serde_json::json!("starting")).is_err()
-        );
-        assert!(
-            serde_json::from_value::<PlatformCallStateKind>(serde_json::json!("stopping")).is_err()
-        );
+    fn snapshot_defaults_missing_fields_and_rejects_unknown_states() {
+        let idle: NativeCallSnapshot =
+            serde_json::from_value(serde_json::json!({ "connectionState": "idle" })).unwrap();
+        assert_eq!(idle.revision, 0);
+        assert_eq!(idle.call_id, None);
+        assert!(!idle.microphone_enabled);
+        assert!(!idle.camera_enabled);
+        assert_eq!(idle.participant_count, 0);
+        assert_eq!(idle.last_error, None);
+        assert!(!idle.is_live());
+
+        assert!(serde_json::from_value::<NativeCallSnapshot>(
+            serde_json::json!({ "connectionState": "negotiating" })
+        )
+        .is_err());
+        assert!(serde_json::from_value::<NativeCallSnapshot>(serde_json::json!({})).is_err());
     }
 
     #[test]
-    fn platform_contract_serializes_only_bounded_wire_values() {
-        let event = serde_json::to_value(PlatformCallEvent {
+    fn snapshot_serializes_camel_case_omitting_clean_last_error() {
+        let clean = serde_json::to_value(NativeCallSnapshot {
             revision: 4,
-            session_id: "opaque-session".into(),
-            kind: PlatformCallEventKind::RouteChanged {
-                route: PlatformCallRoute::Bluetooth,
-            },
+            call_id: Some("call-1".into()),
+            connection_state: NativeCallConnectionState::Connected,
+            microphone_enabled: true,
+            camera_enabled: true,
+            participant_count: 3,
+            last_error: None,
         })
         .unwrap();
         assert_eq!(
-            event,
+            clean,
             serde_json::json!({
                 "revision": 4,
-                "sessionId": "opaque-session",
-                "type": "route_changed",
-                "route": "bluetooth"
+                "callId": "call-1",
+                "connectionState": "connected",
+                "microphoneEnabled": true,
+                "cameraEnabled": true,
+                "participantCount": 3
             })
         );
-        assert!(serde_json::from_value::<PlatformCallEventKind>(
-            serde_json::json!({ "type": "failed", "code": "start_failed" })
-        )
-        .is_ok());
-        assert!(serde_json::from_value::<PlatformCallEventKind>(
-            serde_json::json!({ "type": "failed", "message": "raw native error" })
-        )
-        .is_err());
+
+        let failed = serde_json::to_value(NativeCallSnapshot {
+            revision: 5,
+            call_id: Some("call-1".into()),
+            connection_state: NativeCallConnectionState::Failed,
+            microphone_enabled: true,
+            camera_enabled: false,
+            participant_count: 3,
+            last_error: Some(NativeCallError::from_code(
+                NativeCallFailureCode::Disconnected,
+            )),
+        })
+        .unwrap();
+        assert_eq!(
+            failed["lastError"],
+            serde_json::json!({
+                "code": "disconnected",
+                "message": "the call connection ended unexpectedly"
+            })
+        );
+    }
+
+    #[test]
+    fn channel_event_only_accepts_snapshot_changed() {
+        let event: NativeCallChannelEvent = serde_json::from_value(serde_json::json!({
+            "event": "snapshot_changed",
+            "snapshot": {
+                "revision": 11,
+                "callId": "call-1",
+                "connectionState": "reconnecting",
+                "microphoneEnabled": false,
+                "cameraEnabled": false,
+                "participantCount": 1
+            }
+        }))
+        .unwrap();
+        let snapshot = match event {
+            NativeCallChannelEvent::SnapshotChanged { snapshot } => snapshot,
+        };
+        assert_eq!(snapshot.revision, 11);
+        assert_eq!(
+            snapshot.connection_state,
+            NativeCallConnectionState::Reconnecting
+        );
+    }
+
+    #[test]
+    fn connect_request_deserializes_camel_case_and_debug_redacts_token() {
+        let request: ConnectNativeCallRequest = serde_json::from_value(serde_json::json!({
+            "callId": "call-1",
+            "url": "wss://livekit.example",
+            "token": "secret-jwt",
+            "microphoneEnabled": false
+        }))
+        .unwrap();
+        assert_eq!(request.call_id, "call-1");
+        let debug = format!("{request:?}");
+        assert!(debug.contains("[redacted]"));
+        assert!(!debug.contains("secret-jwt"));
+    }
+
+    #[test]
+    fn native_wire_fields_serialize_camel_case_and_redact_token() {
+        let fields = NativeConnectCallFields {
+            call_id: "call-1",
+            url: "wss://livekit.example",
+            token: "secret-jwt",
+            microphone_enabled: true,
+        };
+        assert_eq!(
+            serde_json::to_value(&fields).unwrap(),
+            serde_json::json!({
+                "callId": "call-1",
+                "url": "wss://livekit.example",
+                "token": "secret-jwt",
+                "microphoneEnabled": true
+            })
+        );
+        let debug = format!("{fields:?}");
+        assert!(debug.contains("[redacted]"));
+        assert!(!debug.contains("secret-jwt"));
+
+        assert_eq!(
+            serde_json::to_value(NativeDisconnectCallFields { call_id: "call-1" }).unwrap(),
+            serde_json::json!({ "callId": "call-1" })
+        );
+        assert_eq!(
+            serde_json::to_value(NativeSetMicrophoneFields {
+                call_id: "call-1",
+                enabled: true
+            })
+            .unwrap(),
+            serde_json::json!({ "callId": "call-1", "enabled": true })
+        );
+        assert_eq!(
+            serde_json::to_value(NativeSetCameraFields {
+                call_id: "call-1",
+                enabled: false
+            })
+            .unwrap(),
+            serde_json::json!({ "callId": "call-1", "enabled": false })
+        );
+    }
+
+    #[test]
+    fn capabilities_serialize_camel_case_with_camera_flag() {
+        assert_eq!(
+            serde_json::to_value(NativeCallCapabilities {
+                supported: true,
+                microphone: true,
+                background_audio: true,
+                native_room: true,
+                camera: false,
+            })
+            .unwrap(),
+            serde_json::json!({
+                "supported": true,
+                "microphone": true,
+                "backgroundAudio": true,
+                "nativeRoom": true,
+                "camera": false
+            })
+        );
     }
 }
