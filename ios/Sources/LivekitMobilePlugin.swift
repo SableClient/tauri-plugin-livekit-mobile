@@ -25,7 +25,7 @@ struct ConnectArgs: Decodable {
   /// Per-participant E2EE key material. Absent or empty means an
   /// unencrypted (generic) call.
   let encryptionKeys: [EncryptionKeyPayload]?
-  let channel: Channel
+  let channel: Channel?
 }
 
 struct EncryptionKeyPayload: Decodable {
