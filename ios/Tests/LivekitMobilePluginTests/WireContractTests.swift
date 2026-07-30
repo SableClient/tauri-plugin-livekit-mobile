@@ -1,5 +1,6 @@
 import Foundation
 import Tauri
+import UIKit
 import XCTest
 
 @testable import tauri_plugin_livekit_mobile
@@ -251,6 +252,30 @@ final class WireContractTests: XCTestCase {
     XCTAssertFalse(camera.enabled)
   }
 
+  func testSetRemoteVideoOverlayArgsDecodeCamelCase() throws {
+    let (invoke, _) = makeInvoke(data: """
+      {
+        "callId": "call-1",
+        "participantIdentity": "@alice:example.org",
+        "trackId": "TR_VC1",
+        "x": 10.5,
+        "y": 20.25,
+        "width": 320.0,
+        "height": 180.0,
+        "devicePixelRatio": 3.0
+      }
+      """)
+    let args = try invoke.parseArgs(SetRemoteVideoOverlayArgs.self)
+    XCTAssertEqual(args.callId, "call-1")
+    XCTAssertEqual(args.participantIdentity, "@alice:example.org")
+    XCTAssertEqual(args.trackId, "TR_VC1")
+    XCTAssertEqual(args.x, 10.5)
+    XCTAssertEqual(args.y, 20.25)
+    XCTAssertEqual(args.width, 320.0)
+    XCTAssertEqual(args.height, 180.0)
+    XCTAssertEqual(args.devicePixelRatio, 3.0)
+  }
+
   // MARK: - Invoke settlement
 
   func testCapabilitiesResolves() async throws {
@@ -263,6 +288,7 @@ final class WireContractTests: XCTestCase {
     XCTAssertEqual(payload["microphone"] as? Bool, true)
     XCTAssertEqual(payload["backgroundAudio"] as? Bool, true)
     XCTAssertEqual(payload["camera"] as? Bool, true)
+    XCTAssertEqual(payload["nativeVideoOverlay"] as? Bool, true)
   }
 
   func testGetStateResolvesIdleSnapshot() async throws {
@@ -335,6 +361,124 @@ final class WireContractTests: XCTestCase {
     XCTAssertEqual(response.id, Self.resolveId)
     let payload = try jsonObject(try XCTUnwrap(response.payload))
     XCTAssertEqual(payload["connectionState"] as? String, "idle")
+  }
+
+  /// The overlay frame converts the viewport-relative CSS rect through the
+  /// view hierarchy (CSS pixels map 1:1 to logical points, the device pixel
+  /// ratio is never applied) and clips it to the webview's bounds. The helper
+  /// is MainActor-isolated because UIView geometry is main-thread state.
+  @MainActor
+  func testOverlayFrameConvertsAndClipsToWebViewBounds() {
+    let container = UIView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+    let webView = UIView(frame: CGRect(x: 0, y: 100, width: 390, height: 600))
+    container.addSubview(webView)
+
+    // Fully inside: converted by the webview's geometry, unclipped.
+    let visible = RoomController.overlayFrame(
+      viewportRect: CGRect(x: 10.5, y: 20.25, width: 320, height: 180),
+      in: webView, container: container)
+    XCTAssertEqual(visible, CGRect(x: 10.5, y: 120.25, width: 320, height: 180))
+
+    // A negative origin is legal for partially off-screen tiles; the frame is
+    // clipped to the webview's bounds.
+    let clipped = RoomController.overlayFrame(
+      viewportRect: CGRect(x: -40, y: 500, width: 320, height: 180),
+      in: webView, container: container)
+    XCTAssertEqual(clipped, CGRect(x: 0, y: 600, width: 280, height: 100))
+
+    // A tile that only intersects along an edge is as good as invisible.
+    let edgeOnly = RoomController.overlayFrame(
+      viewportRect: CGRect(x: -40, y: 0, width: 40, height: 180),
+      in: webView, container: container)
+    XCTAssertNil(edgeOnly)
+
+    // Fully off-screen: no overlay frame, the command rejects.
+    XCTAssertNil(
+      RoomController.overlayFrame(
+        viewportRect: CGRect(x: 0, y: 700, width: 320, height: 180),
+        in: webView, container: container))
+  }
+
+  /// Partially off-screen tiles are valid (negative origin allowed), while
+  /// size and pixel ratio must be finite and positive.
+  func testOverlayGeometryValidationBounds() {
+    XCTAssertTrue(
+      RoomController.overlayGeometryIsValid(
+        CGRect(x: -40, y: -10, width: 320, height: 180), devicePixelRatio: 3))
+    XCTAssertTrue(
+      RoomController.overlayGeometryIsValid(
+        CGRect(x: 0, y: 0, width: 320, height: 180), devicePixelRatio: 1))
+    // Non-positive or non-finite sizes are rejected.
+    XCTAssertFalse(
+      RoomController.overlayGeometryIsValid(
+        CGRect(x: 0, y: 0, width: 0, height: 180), devicePixelRatio: 3))
+    XCTAssertFalse(
+      RoomController.overlayGeometryIsValid(
+        CGRect(x: 0, y: 0, width: 320, height: -1), devicePixelRatio: 3))
+    XCTAssertFalse(
+      RoomController.overlayGeometryIsValid(
+        CGRect(x: 0, y: 0, width: Double.nan, height: 180), devicePixelRatio: 3))
+    // Non-finite origins are rejected.
+    XCTAssertFalse(
+      RoomController.overlayGeometryIsValid(
+        CGRect(x: Double.infinity, y: 0, width: 320, height: 180), devicePixelRatio: 3))
+    // The pixel ratio is validated even though iOS never applies it.
+    XCTAssertFalse(
+      RoomController.overlayGeometryIsValid(
+        CGRect(x: 0, y: 0, width: 320, height: 180), devicePixelRatio: 0))
+    XCTAssertFalse(
+      RoomController.overlayGeometryIsValid(
+        CGRect(x: 0, y: 0, width: 320, height: 180), devicePixelRatio: -2))
+    XCTAssertFalse(
+      RoomController.overlayGeometryIsValid(
+        CGRect(x: 0, y: 0, width: 320, height: 180), devicePixelRatio: .nan))
+  }
+
+  /// A stale call id must never touch overlay state (there may be none), and
+  /// resolves the current snapshot like the other call-scoped commands.
+  func testStaleSetRemoteVideoOverlayIsNoOpResolve() async throws {
+    let plugin = LivekitMobilePlugin()
+    let (invoke, recording) = makeInvoke(data: """
+      {
+        "callId": "unknown",
+        "participantIdentity": "@alice:example.org",
+        "trackId": "TR_VC1",
+        "x": 0.0,
+        "y": 0.0,
+        "width": 320.0,
+        "height": 180.0,
+        "devicePixelRatio": 2.0
+      }
+      """)
+    try plugin.setRemoteVideoOverlay(invoke)
+    let response = await recording.wait()
+    XCTAssertEqual(response.id, Self.resolveId)
+    let payload = try jsonObject(try XCTUnwrap(response.payload))
+    try assertSnapshotKeys(
+      payload, revision: 0, callId: nil, connectionState: "idle",
+      microphoneEnabled: false, cameraEnabled: false, participantCount: 0)
+  }
+
+  func testStaleClearRemoteVideoOverlayIsNoOpResolve() async throws {
+    let plugin = LivekitMobilePlugin()
+    let (invoke, recording) = makeInvoke(data: #"{"callId": "unknown"}"#)
+    try plugin.clearRemoteVideoOverlay(invoke)
+    let response = await recording.wait()
+    XCTAssertEqual(response.id, Self.resolveId)
+    let payload = try jsonObject(try XCTUnwrap(response.payload))
+    XCTAssertEqual(payload["connectionState"] as? String, "idle")
+    XCTAssertTrue(payload["callId"] is NSNull)
+  }
+
+  func testMalformedSetRemoteVideoOverlayRejectsInvalidRequest() async throws {
+    let plugin = LivekitMobilePlugin()
+    let (invoke, recording) = makeInvoke(
+      data: #"{"callId": "call-1", "participantIdentity": "@alice:example.org"}"#)
+    try plugin.setRemoteVideoOverlay(invoke)
+    let response = await recording.wait()
+    XCTAssertEqual(response.id, Self.rejectId)
+    let payload = try jsonObject(try XCTUnwrap(response.payload))
+    XCTAssertEqual(payload["code"] as? String, "invalid_request")
   }
 
   func testMalformedSetCameraRejectsInvalidRequest() async throws {

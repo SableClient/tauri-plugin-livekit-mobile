@@ -5,6 +5,8 @@ const COMMANDS: &[&str] = &[
     "setNativeCallMicrophoneEnabled",
     "setNativeCallCameraEnabled",
     "switchNativeCallCamera",
+    "setNativeCallRemoteVideoOverlay",
+    "clearNativeCallRemoteVideoOverlay",
     "getNativeCallState",
 ];
 

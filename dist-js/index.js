@@ -32,6 +32,12 @@ async function switchNativeCallCamera(request) {
         payload: request,
     });
 }
+async function setNativeCallRemoteVideoOverlay(request) {
+    return await invoke('plugin:livekit-mobile|setNativeCallRemoteVideoOverlay', { payload: request });
+}
+async function clearNativeCallRemoteVideoOverlay(request) {
+    return await invoke('plugin:livekit-mobile|clearNativeCallRemoteVideoOverlay', { payload: request });
+}
 async function getNativeCallState() {
     return await invoke('plugin:livekit-mobile|getNativeCallState');
 }
@@ -45,4 +51,4 @@ async function listenNativeCallSnapshot(handler) {
     return await listen(NATIVE_CALL_EVENT, ({ payload }) => handler(payload));
 }
 
-export { NATIVE_CALL_EVENT, connectNativeCall, disconnectNativeCall, getNativeCallCapabilities, getNativeCallState, listenNativeCallSnapshot, setNativeCallCameraEnabled, setNativeCallMicrophoneEnabled, switchNativeCallCamera };
+export { NATIVE_CALL_EVENT, clearNativeCallRemoteVideoOverlay, connectNativeCall, disconnectNativeCall, getNativeCallCapabilities, getNativeCallState, listenNativeCallSnapshot, setNativeCallCameraEnabled, setNativeCallMicrophoneEnabled, setNativeCallRemoteVideoOverlay, switchNativeCallCamera };

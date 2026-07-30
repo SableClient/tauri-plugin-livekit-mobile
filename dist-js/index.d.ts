@@ -21,6 +21,7 @@ export interface NativeCallCapabilities {
     backgroundAudio: boolean;
     nativeRoom: boolean;
     camera: boolean;
+    nativeVideoOverlay: boolean;
 }
 /**
  * `url` is the LiveKit server URL and `token` a LiveKit access token (JWT),
@@ -45,6 +46,24 @@ export interface SetNativeCallCameraEnabledRequest {
     enabled: boolean;
 }
 export interface SwitchNativeCallCameraRequest {
+    callId: string;
+}
+/**
+ * Positions a native-rendered remote video track in CSS pixels. `x` and `y`
+ * may be negative for a partially offscreen DOM rectangle; all geometry is
+ * finite, and `width`, `height`, and `devicePixelRatio` must be positive.
+ */
+export interface SetNativeCallRemoteVideoOverlayRequest {
+    callId: string;
+    participantIdentity: string;
+    trackId: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    devicePixelRatio: number;
+}
+export interface ClearNativeCallRemoteVideoOverlayRequest {
     callId: string;
 }
 /**
@@ -92,6 +111,8 @@ export declare function disconnectNativeCall(request: DisconnectNativeCallReques
 export declare function setNativeCallMicrophoneEnabled(request: SetNativeCallMicrophoneEnabledRequest): Promise<NativeCallSnapshot>;
 export declare function setNativeCallCameraEnabled(request: SetNativeCallCameraEnabledRequest): Promise<NativeCallSnapshot>;
 export declare function switchNativeCallCamera(request: SwitchNativeCallCameraRequest): Promise<NativeCallSnapshot>;
+export declare function setNativeCallRemoteVideoOverlay(request: SetNativeCallRemoteVideoOverlayRequest): Promise<NativeCallSnapshot>;
+export declare function clearNativeCallRemoteVideoOverlay(request: ClearNativeCallRemoteVideoOverlayRequest): Promise<NativeCallSnapshot>;
 export declare function getNativeCallState(): Promise<NativeCallSnapshot>;
 /**
  * Listens for native room snapshots. Every native change — connection state,

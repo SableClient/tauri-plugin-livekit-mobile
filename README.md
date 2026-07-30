@@ -47,11 +47,14 @@ re-emits it.
 | ------------- | ------- |
 | Android       | Yes |
 | iOS           | Yes |
-| Desktop (any) | No — `getNativeCallCapabilities` reports `supported: false, nativeRoom: false, camera: false`; room commands fail with `unavailable` |
+| Desktop (any) | No — `getNativeCallCapabilities` reports `supported: false, nativeRoom: false, camera: false, nativeVideoOverlay: false`; room commands fail with `unavailable` |
 
 `NativeCallCapabilities.camera` advertises per platform whether the native
 lane accepts the camera commands (`setNativeCallCameraEnabled` /
 `switchNativeCallCamera`).
+
+`NativeCallCapabilities.nativeVideoOverlay` advertises whether the native lane
+accepts remote-video overlay placement commands.
 
 ## Install
 
@@ -102,6 +105,7 @@ Allow the default permission set in `src-tauri/capabilities/default.json`:
 This grants `getNativeCallCapabilities`, `connectNativeCall`,
 `disconnectNativeCall`, `setNativeCallMicrophoneEnabled`,
 `setNativeCallCameraEnabled`, `switchNativeCallCamera`, and
+`setNativeCallRemoteVideoOverlay`, `clearNativeCallRemoteVideoOverlay`, and
 `getNativeCallState`.
 
 ## Host app setup
@@ -152,6 +156,8 @@ import {
   setNativeCallMicrophoneEnabled,
   setNativeCallCameraEnabled,
   switchNativeCallCamera,
+  setNativeCallRemoteVideoOverlay,
+  clearNativeCallRemoteVideoOverlay,
   getNativeCallState,
   listenNativeCallSnapshot,
 } from '@sable-client/tauri-plugin-livekit-mobile';
@@ -178,6 +184,18 @@ if (capabilities.camera) {
   await setNativeCallCameraEnabled({ callId: 'mxc-call-id', enabled: true });
   await switchNativeCallCamera({ callId: 'mxc-call-id' });
 }
+if (capabilities.nativeVideoOverlay) {
+  await setNativeCallRemoteVideoOverlay({
+    callId: 'mxc-call-id',
+    participantIdentity: '@alice:example.org',
+    trackId: 'TR_abcdef',
+    x: 0,
+    y: 0,
+    width: 320,
+    height: 180,
+    devicePixelRatio: window.devicePixelRatio,
+  });
+}
 
 // On call end:
 await disconnectNativeCall({ callId: 'mxc-call-id' });
@@ -193,7 +211,8 @@ await unlisten();
   returns or forwards native snapshots.
 - Every command — `connectNativeCall`, `disconnectNativeCall`,
   `setNativeCallMicrophoneEnabled`, `setNativeCallCameraEnabled`,
-  `switchNativeCallCamera`, `getNativeCallState` — resolves with the
+  `switchNativeCallCamera`, `setNativeCallRemoteVideoOverlay`,
+  `clearNativeCallRemoteVideoOverlay`, `getNativeCallState` — resolves with the
   authoritative `NativeCallSnapshot`:
 
   ```ts
@@ -214,6 +233,15 @@ await unlisten();
 
   `revision` passes through the bridge untouched (Rust never creates one), so
   consumers can drop out-of-order snapshots by comparing revisions.
+- `setNativeCallRemoteVideoOverlay` forwards a stateless placement for one
+  remote track: `{ callId, participantIdentity, trackId, x, y, width, height,
+  devicePixelRatio }`. Every value must be finite; `width`, `height`, and
+  `devicePixelRatio` must be strictly positive. `x` and `y` may be negative
+  for partially offscreen DOM rectangles. Rust applies no coordinate or size
+  caps; native viewports own clipping and caps.
+  `clearNativeCallRemoteVideoOverlay` removes the call's native remote-video
+  overlay. The native side owns rendering and any overlay state; neither is
+  represented in snapshots.
 - `remoteParticipants` is a remote-only projection sized for rendering one
   remote-video tile per remote participant: `identity` is the opaque backend
   identity, and `camera` is present only while that participant has a remote

@@ -1,9 +1,11 @@
 import Foundation
 import Tauri
+import WebKit
 
 // Wire contract summary (the shared Rust bridge owns the full schema):
 // - Commands: capabilities, connect, disconnect, cancelConnect,
-//   setMicrophoneEnabled, setCameraEnabled, switchCamera, getState.
+//   setMicrophoneEnabled, setCameraEnabled, switchCamera, getState,
+//   setRemoteVideoOverlay, clearRemoteVideoOverlay.
 // - Every response is the authoritative snapshot
 //   { revision, callId|null, connectionState, microphoneEnabled,
 //     cameraEnabled, participantCount, lastError?: {code, message} }.
@@ -35,8 +37,23 @@ struct SetCameraEnabledArgs: Decodable {
   let enabled: Bool
 }
 
-// `cancelConnect` and `switchCamera` reuse the `{ callId }` payload of
-// `DisconnectArgs`.
+// `cancelConnect`, `switchCamera` and `clearRemoteVideoOverlay` reuse the
+// `{ callId }` payload of `DisconnectArgs`.
+
+struct SetRemoteVideoOverlayArgs: Decodable {
+  let callId: String
+  let participantIdentity: String
+  /// The remote camera track's SID (the lane's wire name is `trackId`).
+  let trackId: String
+  let x: Double
+  let y: Double
+  let width: Double
+  let height: Double
+  /// Present on the wire for cross-platform parity. iOS positions views in
+  /// logical points, which already match CSS pixels, so this must never
+  /// scale the rect.
+  let devicePixelRatio: Double
+}
 
 enum BridgeConnectionState: String, Encodable {
   case idle
@@ -147,6 +164,7 @@ struct BridgeCapabilities: Encodable {
   let microphone: Bool
   let backgroundAudio: Bool
   let camera: Bool
+  let nativeVideoOverlay: Bool
 }
 
 /// Tauri-facing surface; all work is serialized through ``RoomController`` on
@@ -166,9 +184,18 @@ final class LivekitMobilePlugin: Plugin {
     }
   }
 
+  /// Retains the host webview (weakly, on the controller) so the remote
+  /// video overlay can be positioned in its superview's coordinate space.
+  @objc public override func load(webview: WKWebView) {
+    Task { @MainActor [weak controller] in
+      controller?.attachHostWebView(webview)
+    }
+  }
+
   @objc public func capabilities(_ invoke: Invoke) throws {
     invoke.resolve(
-      BridgeCapabilities(microphone: true, backgroundAudio: true, camera: true))
+      BridgeCapabilities(
+        microphone: true, backgroundAudio: true, camera: true, nativeVideoOverlay: true))
   }
 
   @objc public func connect(_ invoke: Invoke) throws {
@@ -266,6 +293,40 @@ final class LivekitMobilePlugin: Plugin {
         return
       }
       invoke.resolve(controller.snapshot())
+    }
+  }
+
+  @objc public func setRemoteVideoOverlay(_ invoke: Invoke) throws {
+    guard let args = try? invoke.parseArgs(SetRemoteVideoOverlayArgs.self) else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+    Task { @MainActor [weak controller] in
+      guard let controller else {
+        reject(invoke, .unavailable)
+        return
+      }
+      controller.setRemoteVideoOverlay(
+        callId: args.callId,
+        participantIdentity: args.participantIdentity,
+        trackSid: args.trackId,
+        frame: CGRect(x: args.x, y: args.y, width: args.width, height: args.height),
+        devicePixelRatio: args.devicePixelRatio,
+        invoke: invoke)
+    }
+  }
+
+  @objc public func clearRemoteVideoOverlay(_ invoke: Invoke) throws {
+    guard let args = try? invoke.parseArgs(DisconnectArgs.self) else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+    Task { @MainActor [weak controller] in
+      guard let controller else {
+        reject(invoke, .unavailable)
+        return
+      }
+      controller.clearRemoteVideoOverlay(callId: args.callId, invoke: invoke)
     }
   }
 

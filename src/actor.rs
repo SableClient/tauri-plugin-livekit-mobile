@@ -14,21 +14,22 @@ use tauri::{Emitter, EventTarget};
 #[cfg(mobile)]
 use crate::mobile::{
     MobileBackend, NativeConnectCallRequest, NativeDisconnectCallRequest, NativeSetCameraRequest,
-    NativeSetMicrophoneRequest, NativeSwitchCameraRequest,
+    NativeSetMicrophoneRequest, NativeSetRemoteVideoOverlayRequest, NativeSwitchCameraRequest,
 };
 
 use crate::error::{Error, Result};
 #[cfg(not(mobile))]
 use crate::models::NativeCallConnectionState;
 use crate::models::{
-    ConnectNativeCallRequest, DisconnectNativeCallRequest, NativeCallCapabilities,
-    NativeCallFailureCode, NativeCallSnapshot, SetNativeCallCameraEnabledRequest,
-    SetNativeCallMicrophoneEnabledRequest, SwitchNativeCallCameraRequest,
+    ClearNativeCallRemoteVideoOverlayRequest, ConnectNativeCallRequest,
+    DisconnectNativeCallRequest, NativeCallCapabilities, NativeCallFailureCode, NativeCallSnapshot,
+    SetNativeCallCameraEnabledRequest, SetNativeCallMicrophoneEnabledRequest,
+    SetNativeCallRemoteVideoOverlayRequest, SwitchNativeCallCameraRequest,
 };
 #[cfg(mobile)]
 use crate::models::{
     NativeCallChannelEvent, NativeConnectCallFields, NativeDisconnectCallFields,
-    NativeSetCameraFields, NativeSetMicrophoneFields,
+    NativeSetCameraFields, NativeSetMicrophoneFields, NativeSetRemoteVideoOverlayFields,
 };
 
 #[cfg(mobile)]
@@ -57,6 +58,14 @@ pub(crate) enum Command {
         SwitchNativeCallCameraRequest,
         oneshot::Sender<Result<NativeCallSnapshot>>,
     ),
+    SetNativeCallRemoteVideoOverlay(
+        SetNativeCallRemoteVideoOverlayRequest,
+        oneshot::Sender<Result<NativeCallSnapshot>>,
+    ),
+    ClearNativeCallRemoteVideoOverlay(
+        ClearNativeCallRemoteVideoOverlayRequest,
+        oneshot::Sender<Result<NativeCallSnapshot>>,
+    ),
     GetNativeCallState(String, oneshot::Sender<Result<NativeCallSnapshot>>),
 }
 
@@ -70,6 +79,21 @@ fn connect_request_is_valid(request: &ConnectNativeCallRequest) -> bool {
 #[cfg(any(mobile, test))]
 fn call_id_is_valid(call_id: &str) -> bool {
     !call_id.trim().is_empty()
+}
+
+#[cfg(any(mobile, test))]
+fn remote_video_overlay_request_is_valid(request: &SetNativeCallRemoteVideoOverlayRequest) -> bool {
+    call_id_is_valid(&request.call_id)
+        && !request.participant_identity.trim().is_empty()
+        && !request.track_id.trim().is_empty()
+        && request.x.is_finite()
+        && request.y.is_finite()
+        && request.width.is_finite()
+        && request.width > 0.0
+        && request.height.is_finite()
+        && request.height > 0.0
+        && request.device_pixel_ratio.is_finite()
+        && request.device_pixel_ratio > 0.0
 }
 
 #[cfg(mobile)]
@@ -199,6 +223,22 @@ impl<R: Runtime> NativeCallBridge<R> {
             .await
     }
 
+    pub async fn set_native_call_remote_video_overlay(
+        &self,
+        request: SetNativeCallRemoteVideoOverlayRequest,
+    ) -> Result<NativeCallSnapshot> {
+        self.send(|response| Command::SetNativeCallRemoteVideoOverlay(request, response))
+            .await
+    }
+
+    pub async fn clear_native_call_remote_video_overlay(
+        &self,
+        request: ClearNativeCallRemoteVideoOverlayRequest,
+    ) -> Result<NativeCallSnapshot> {
+        self.send(|response| Command::ClearNativeCallRemoteVideoOverlay(request, response))
+            .await
+    }
+
     pub async fn get_native_call_state(&self, caller_label: String) -> Result<NativeCallSnapshot> {
         self.send(|response| Command::GetNativeCallState(caller_label, response))
             .await
@@ -269,6 +309,14 @@ impl<R: Runtime> Actor<R> {
             }
             Command::SwitchNativeCallCamera(request, response) => {
                 self.handle_switch_native_call_camera(request, response)
+                    .await
+            }
+            Command::SetNativeCallRemoteVideoOverlay(request, response) => {
+                self.handle_set_native_call_remote_video_overlay(request, response)
+                    .await
+            }
+            Command::ClearNativeCallRemoteVideoOverlay(request, response) => {
+                self.handle_clear_native_call_remote_video_overlay(request, response)
                     .await
             }
             Command::GetNativeCallState(caller_label, response) => {
@@ -490,6 +538,75 @@ impl<R: Runtime> Actor<R> {
         let _ = response.send(result);
     }
 
+    #[cfg(mobile)]
+    async fn handle_set_native_call_remote_video_overlay(
+        &mut self,
+        request: SetNativeCallRemoteVideoOverlayRequest,
+        response: oneshot::Sender<Result<NativeCallSnapshot>>,
+    ) {
+        if !remote_video_overlay_request_is_valid(&request) {
+            let _ = response.send(invalid_request());
+            return;
+        }
+        let result = self
+            .mobile
+            .set_native_call_remote_video_overlay(NativeSetRemoteVideoOverlayRequest {
+                fields: NativeSetRemoteVideoOverlayFields {
+                    call_id: &request.call_id,
+                    participant_identity: &request.participant_identity,
+                    track_id: &request.track_id,
+                    x: request.x,
+                    y: request.y,
+                    width: request.width,
+                    height: request.height,
+                    device_pixel_ratio: request.device_pixel_ratio,
+                },
+            })
+            .await;
+        let _ = response.send(result);
+    }
+
+    #[cfg(not(mobile))]
+    async fn handle_set_native_call_remote_video_overlay(
+        &mut self,
+        request: SetNativeCallRemoteVideoOverlayRequest,
+        response: oneshot::Sender<Result<NativeCallSnapshot>>,
+    ) {
+        let _ = &request;
+        let _ = response.send(unavailable());
+    }
+
+    #[cfg(mobile)]
+    async fn handle_clear_native_call_remote_video_overlay(
+        &mut self,
+        request: ClearNativeCallRemoteVideoOverlayRequest,
+        response: oneshot::Sender<Result<NativeCallSnapshot>>,
+    ) {
+        if !call_id_is_valid(&request.call_id) {
+            let _ = response.send(invalid_request());
+            return;
+        }
+        let result = self
+            .mobile
+            .clear_native_call_remote_video_overlay(NativeDisconnectCallRequest {
+                fields: NativeDisconnectCallFields {
+                    call_id: &request.call_id,
+                },
+            })
+            .await;
+        let _ = response.send(result);
+    }
+
+    #[cfg(not(mobile))]
+    async fn handle_clear_native_call_remote_video_overlay(
+        &mut self,
+        request: ClearNativeCallRemoteVideoOverlayRequest,
+        response: oneshot::Sender<Result<NativeCallSnapshot>>,
+    ) {
+        let _ = &request;
+        let _ = response.send(unavailable());
+    }
+
     #[cfg(not(mobile))]
     async fn handle_switch_native_call_camera(
         &mut self,
@@ -550,8 +667,10 @@ impl<R: Runtime> Actor<R> {
 
 #[cfg(test)]
 mod tests {
-    use super::{call_id_is_valid, connect_request_is_valid};
-    use crate::models::ConnectNativeCallRequest;
+    use super::{
+        call_id_is_valid, connect_request_is_valid, remote_video_overlay_request_is_valid,
+    };
+    use crate::models::{ConnectNativeCallRequest, SetNativeCallRemoteVideoOverlayRequest};
 
     fn connect_request(call_id: &str) -> ConnectNativeCallRequest {
         ConnectNativeCallRequest {
@@ -580,6 +699,42 @@ mod tests {
         assert!(call_id_is_valid("call"));
         assert!(!call_id_is_valid(""));
         assert!(!call_id_is_valid("   "));
+    }
+
+    #[test]
+    fn remote_video_overlay_validation_requires_identifiers_and_valid_geometry() {
+        let request = SetNativeCallRemoteVideoOverlayRequest {
+            call_id: "call".into(),
+            participant_identity: "@alice:example.org".into(),
+            track_id: "TR_abcdef".into(),
+            x: -120.0,
+            y: -50.0,
+            width: 320.0,
+            height: 180.0,
+            device_pixel_ratio: 2.0,
+        };
+        assert!(remote_video_overlay_request_is_valid(&request));
+
+        for invalid in [f64::NAN, f64::INFINITY, 0.0, -1.0] {
+            let mut invalid_request = request.clone();
+            invalid_request.width = invalid;
+            assert!(!remote_video_overlay_request_is_valid(&invalid_request));
+        }
+        let mut invalid_x = request.clone();
+        invalid_x.x = f64::NAN;
+        assert!(!remote_video_overlay_request_is_valid(&invalid_x));
+        let mut invalid_y = request.clone();
+        invalid_y.y = f64::INFINITY;
+        assert!(!remote_video_overlay_request_is_valid(&invalid_y));
+        let mut invalid_height = request.clone();
+        invalid_height.height = 0.0;
+        assert!(!remote_video_overlay_request_is_valid(&invalid_height));
+        let mut invalid_dpr = request.clone();
+        invalid_dpr.device_pixel_ratio = 0.0;
+        assert!(!remote_video_overlay_request_is_valid(&invalid_dpr));
+        let mut blank_track = request;
+        blank_track.track_id = " ".into();
+        assert!(!remote_video_overlay_request_is_valid(&blank_track));
     }
 
     #[cfg(not(mobile))]

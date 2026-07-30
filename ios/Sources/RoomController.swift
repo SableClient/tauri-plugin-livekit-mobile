@@ -1,6 +1,8 @@
 import AVFoundation
 import LiveKit
 import Tauri
+import UIKit
+import WebKit
 
 /// Serialized owner of the single native LiveKit room behind the bridge.
 ///
@@ -39,6 +41,31 @@ final class RoomController: NSObject {
   private var remoteParticipants: [BridgeRemoteParticipant] = []
   private var lastError: BridgeError?
   private var attempt: UInt64 = 0
+
+  // MARK: Remote video overlay state
+
+  /// Weak handle to the Tauri webview, retained from `Plugin.load(webview:)`.
+  /// The overlay's frame is positioned in this view's superview.
+  private weak var hostWebView: WKWebView?
+  /// The single non-interactive native renderer for one remote video track.
+  /// It exists only while the lane requests an overlay; clearing, disconnect
+  /// and teardown remove it from the view hierarchy.
+  private var overlayView: VideoView?
+  /// The participant/track the overlay is bound to. Stored so participant
+  /// and track lifecycle delegate events can re-resolve and rebind (or
+  /// clear) the attachment as publications come and go.
+  private var overlaySelection: OverlaySelection?
+
+  private struct OverlaySelection {
+    let participantIdentity: String
+    let trackSid: String
+  }
+
+  /// Called from `Plugin.load(webview:)`; the reference stays weak so the
+  /// plugin never extends the webview's lifetime.
+  func attachHostWebView(_ webView: WKWebView) {
+    hostWebView = webView
+  }
 
   // MARK: - Snapshot
 
@@ -85,6 +112,7 @@ final class RoomController: NSObject {
     // Clear a leftover room from a failed attempt, if any.
     if let staleRoom = room {
       room = nil
+      removeOverlayView()
       await staleRoom.disconnect()
       guard attemptId == attempt else {
         rejectCancelled(invoke)
@@ -99,6 +127,7 @@ final class RoomController: NSObject {
     cameraEnabled = false
     participantCount = 0
     remoteParticipants = []
+    removeOverlayView()
     connectionState = .connecting
     emitSnapshotChanged()
 
@@ -328,6 +357,201 @@ final class RoomController: NSObject {
     invoke.resolve(snapshot())
   }
 
+  // MARK: - Remote video overlay
+
+  /// Attaches the single non-interactive `VideoView` to the resolved remote
+  /// camera track and positions it over the matching DOM rect. `frame` is the
+  /// viewport-relative CSS rect: CSS pixels map 1:1 to iOS logical points, so
+  /// it is converted into the webview's superview coordinate space via
+  /// `UIView.convert` and clipped to the webview's bounds. `devicePixelRatio`
+  /// is validated but intentionally never applied on iOS.
+  ///
+  /// A call for the same track with a new rect only repositions the view. A
+  /// missing or replaced track (unpublished/unsubscribed between the snapshot
+  /// the caller acted on and this command) clears the attachment safely and
+  /// still resolves the current snapshot; the selection is kept so a later
+  /// track event can rebind it.
+  func setRemoteVideoOverlay(
+    callId requestedCallId: String,
+    participantIdentity: String,
+    trackSid: String,
+    frame: CGRect,
+    devicePixelRatio: Double,
+    invoke: Invoke
+  ) {
+    guard callId == requestedCallId, let room else {
+      invoke.resolve(snapshot())
+      return
+    }
+    guard connectionState == .connected else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+    // The shared lane already bounds the geometry; mirror the bound here so
+    // the native side is safe on its own. Partially off-screen tiles are
+    // legal, so x/y only need to be finite; size and pixel ratio must be
+    // positive.
+    guard Self.overlayGeometryIsValid(frame, devicePixelRatio: devicePixelRatio)
+    else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+    guard let webView = hostWebView, let container = webView.superview else {
+      reject(invoke, .unavailable)
+      return
+    }
+    guard let clipped = Self.overlayFrame(
+      viewportRect: frame, in: webView, container: container)
+    else {
+      // The tile is entirely outside the visible webview area.
+      reject(invoke, .invalidRequest)
+      return
+    }
+
+    let view = ensureOverlayView(in: container)
+    overlaySelection = OverlaySelection(
+      participantIdentity: participantIdentity, trackSid: trackSid)
+
+    guard
+      let track = Self.remoteVideoTrack(
+        participantIdentity: participantIdentity, trackSid: trackSid, in: room)
+    else {
+      // Clears safely: detach without failing the command.
+      detachOverlay(from: view)
+      invoke.resolve(snapshot())
+      return
+    }
+
+    if view.track !== track {
+      view.track = track
+    }
+    view.frame = clipped
+    view.isHidden = false
+    invoke.resolve(snapshot())
+  }
+
+  /// Removes the overlay view. A stale call id is a no-op resolve, matching
+  /// the other call-scoped commands.
+  func clearRemoteVideoOverlay(callId requestedCallId: String, invoke: Invoke) {
+    guard callId == requestedCallId else {
+      invoke.resolve(snapshot())
+      return
+    }
+    removeOverlayView()
+    invoke.resolve(snapshot())
+  }
+
+  /// Returns the single overlay view, creating it as a non-interactive
+  /// sibling of the host webview on first use.
+  private func ensureOverlayView(in container: UIView) -> VideoView {
+    if let overlayView {
+      if overlayView.superview !== container {
+        overlayView.removeFromSuperview()
+        container.addSubview(overlayView)
+      }
+      return overlayView
+    }
+    let view = VideoView()
+    // The web content keeps all interaction; the overlay must not intercept
+    // touches meant for the WebView's controls.
+    view.isUserInteractionEnabled = false
+    view.isHidden = true
+    container.addSubview(view)
+    overlayView = view
+    return view
+  }
+
+  /// Detaches the renderer but keeps the (hidden) view for the next bind.
+  private func detachOverlay(from view: VideoView) {
+    view.track = nil
+    view.isHidden = true
+  }
+
+  /// Fully releases the overlay (clear, disconnect, teardown, attempt
+  /// replacement): detach the track first so `VideoView` drops its renderer
+  /// subscriptions, then hide, remove from the hierarchy, drop the reference
+  /// and forget the selection. A later set recreates the view cleanly.
+  private func removeOverlayView() {
+    guard let view = overlayView else {
+      overlaySelection = nil
+      return
+    }
+    view.track = nil
+    view.isHidden = true
+    view.removeFromSuperview()
+    overlayView = nil
+    overlaySelection = nil
+  }
+
+  /// Re-resolves the selected overlay track after participant/track
+  /// lifecycle events: rebinds to the (possibly replaced) live track, or
+  /// clears the attachment when the track is gone (unpublish, unsubscribe, or
+  /// the participant left). Never recreates a removed view.
+  private func reconcileOverlay(in room: Room) {
+    guard let selection = overlaySelection, let view = overlayView else { return }
+    guard
+      let track = Self.remoteVideoTrack(
+        participantIdentity: selection.participantIdentity,
+        trackSid: selection.trackSid, in: room)
+    else {
+      detachOverlay(from: view)
+      return
+    }
+    if view.track !== track {
+      view.track = track
+    }
+    view.isHidden = false
+  }
+
+  /// Bounds for the overlay rect and pixel ratio. Tiles may be partially
+  /// off-screen, so the origin only needs to be finite; the size and the
+  /// pixel ratio must be finite and positive. The raw `size` is inspected:
+  /// `CGRect.width`/`height` normalize away negative sizes.
+  nonisolated static func overlayGeometryIsValid(
+    _ rect: CGRect, devicePixelRatio: Double
+  ) -> Bool {
+    rect.minX.isFinite && rect.minY.isFinite
+      && rect.size.width.isFinite && rect.size.height.isFinite
+      && rect.size.width > 0 && rect.size.height > 0
+      && devicePixelRatio.isFinite && devicePixelRatio > 0
+  }
+
+  /// Maps the viewport-relative CSS rect into the webview's superview
+  /// coordinate space (via the view hierarchy, so transforms are honored) and
+  /// clips it to the webview's own bounds. Nil when the intersection is
+  /// empty; the device's pixel ratio is intentionally not applied because
+  /// CSS pixels already map 1:1 to logical points. MainActor-isolated with
+  /// the rest of the controller: UIView geometry is main-thread state.
+  static func overlayFrame(
+    viewportRect: CGRect, in webView: UIView, container: UIView
+  ) -> CGRect? {
+    let converted = webView.convert(viewportRect, to: container)
+    let hostBounds = webView.convert(webView.bounds, to: container)
+    let clipped = converted.intersection(hostBounds)
+    guard !clipped.isNull, !clipped.isEmpty else { return nil }
+    guard clipped.width > 0, clipped.height > 0 else { return nil }
+    return clipped
+  }
+
+  /// Resolves one remote participant's video track by identity plus track
+  /// SID; nil when the participant or the publication is gone, when the
+  /// publication is unsubscribed (so an unsubscribe detaches the overlay
+  /// immediately), or when it carries no video track.
+  nonisolated static func remoteVideoTrack(
+    participantIdentity: String, trackSid: String, in room: Room
+  ) -> VideoTrack? {
+    guard
+      let participant = room.remoteParticipants.first(where: {
+        $0.key.stringValue == participantIdentity
+      })?.value,
+      let publication = participant.trackPublications.values
+        .first(where: { $0.sid.stringValue == trackSid }),
+      publication.isSubscribed,
+      let track = publication.track as? VideoTrack
+    else { return nil }
+    return track
+  }
+
   /// Silent teardown for plugin deinit; bumps the attempt identity so
   /// in-flight work settles with `cancelled`.
   func tearDown() async {
@@ -342,6 +566,7 @@ final class RoomController: NSObject {
     participantCount = 0
     remoteParticipants = []
     lastError = nil
+    removeOverlayView()
     if let roomToClose {
       await roomToClose.disconnect()
     }
@@ -371,6 +596,7 @@ final class RoomController: NSObject {
     remoteParticipants = []
     lastError = nil
     callId = nil
+    removeOverlayView()
     emitSnapshotChanged()
     channel = nil
 
@@ -636,6 +862,7 @@ extension RoomController: RoomDelegate {
     remoteParticipants = []
     lastError = BridgeError(.disconnected)
     connectionState = .failed
+    removeOverlayView()
     emitSnapshotChanged()
   }
 
@@ -652,11 +879,15 @@ extension RoomController: RoomDelegate {
   }
 
   /// Recomputes the remote-only projection from a room event and emits one
-  /// snapshot_changed when it (and with it the count) actually changed.
+  /// snapshot_changed when it (and with it the count) actually changed. Any
+  /// participant/publication/subscription event also reconciles the video
+  /// overlay against the room's current truth, even when the snapshot
+  /// projection itself is unchanged.
   private func updateRemoteParticipants(from room: Room) {
     guard room === self.room else { return }
     guard connectionState == .connected || connectionState == .reconnecting
     else { return }
+    reconcileOverlay(in: room)
     let projection = Self.projectRemoteParticipants(in: room)
     guard projection != remoteParticipants else { return }
     remoteParticipants = projection

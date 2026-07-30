@@ -37,6 +37,8 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::setNativeCallMicrophoneEnabled,
             commands::setNativeCallCameraEnabled,
             commands::switchNativeCallCamera,
+            commands::setNativeCallRemoteVideoOverlay,
+            commands::clearNativeCallRemoteVideoOverlay,
             commands::getNativeCallState
         ])
         .setup(|app, api| {

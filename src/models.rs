@@ -112,6 +112,7 @@ pub struct NativeCallCapabilities {
     pub background_audio: bool,
     pub native_room: bool,
     pub camera: bool,
+    pub native_video_overlay: bool,
 }
 
 impl NativeCallCapabilities {
@@ -124,6 +125,7 @@ impl NativeCallCapabilities {
             background_audio: supported,
             native_room: supported,
             camera: supported,
+            native_video_overlay: false,
         }
     }
 }
@@ -260,6 +262,25 @@ pub struct SwitchNativeCallCameraRequest {
     pub call_id: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetNativeCallRemoteVideoOverlayRequest {
+    pub call_id: String,
+    pub participant_identity: String,
+    pub track_id: String,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    pub device_pixel_ratio: f64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClearNativeCallRemoteVideoOverlayRequest {
+    pub call_id: String,
+}
+
 /// The connect payload fields forwarded to the native room plugins.
 ///
 /// Kept in `models.rs` (not `mobile.rs`, which only compiles on mobile
@@ -303,6 +324,19 @@ pub struct NativeSetMicrophoneFields<'a> {
 pub struct NativeSetCameraFields<'a> {
     pub call_id: &'a str,
     pub enabled: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeSetRemoteVideoOverlayFields<'a> {
+    pub call_id: &'a str,
+    pub participant_identity: &'a str,
+    pub track_id: &'a str,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    pub device_pixel_ratio: f64,
 }
 
 #[cfg(test)]
@@ -610,10 +644,33 @@ mod tests {
             .unwrap(),
             serde_json::json!({ "callId": "call-1", "enabled": false })
         );
+        assert_eq!(
+            serde_json::to_value(NativeSetRemoteVideoOverlayFields {
+                call_id: "call-1",
+                participant_identity: "@alice:example.org",
+                track_id: "TR_abcdef",
+                x: 10.0,
+                y: 20.0,
+                width: 320.0,
+                height: 180.0,
+                device_pixel_ratio: 2.0,
+            })
+            .unwrap(),
+            serde_json::json!({
+                "callId": "call-1",
+                "participantIdentity": "@alice:example.org",
+                "trackId": "TR_abcdef",
+                "x": 10.0,
+                "y": 20.0,
+                "width": 320.0,
+                "height": 180.0,
+                "devicePixelRatio": 2.0
+            })
+        );
     }
 
     #[test]
-    fn capabilities_serialize_camel_case_with_camera_flag() {
+    fn capabilities_serialize_camel_case_with_media_flags() {
         assert_eq!(
             serde_json::to_value(NativeCallCapabilities {
                 supported: true,
@@ -621,6 +678,7 @@ mod tests {
                 background_audio: true,
                 native_room: true,
                 camera: false,
+                native_video_overlay: true,
             })
             .unwrap(),
             serde_json::json!({
@@ -628,7 +686,8 @@ mod tests {
                 "microphone": true,
                 "backgroundAudio": true,
                 "nativeRoom": true,
-                "camera": false
+                "camera": false,
+                "nativeVideoOverlay": true
             })
         );
     }

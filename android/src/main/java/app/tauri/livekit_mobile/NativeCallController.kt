@@ -42,6 +42,7 @@ internal class NativeCallController(
     private val appContext: Context,
     private val hasMicrophonePermission: () -> Boolean,
     private val hasCameraPermission: () -> Boolean = { false },
+    private val videoOverlay: RemoteVideoOverlay = RemoteVideoOverlay { null },
 ) {
     private val dispatcher =
         Executors.newSingleThreadExecutor { runnable ->
@@ -334,6 +335,63 @@ internal class NativeCallController(
         }
     }
 
+    fun setRemoteVideoOverlay(
+        callId: String,
+        participantIdentity: String,
+        trackSid: String,
+        x: Double,
+        y: Double,
+        width: Double,
+        height: Double,
+        devicePixelRatio: Double,
+        invoke: Invoke,
+    ) {
+        scope.launch {
+            if (snapshot.callId != callId) {
+                invoke.resolve(snapshotJson())
+                return@launch
+            }
+            val currentRoom = room
+            if (currentRoom == null) {
+                reject(invoke, NativeCallWire.ERR_UNAVAILABLE)
+                return@launch
+            }
+            when (
+                videoOverlay.attach(
+                    currentRoom,
+                    participantIdentity,
+                    trackSid,
+                    x,
+                    y,
+                    width,
+                    height,
+                    devicePixelRatio,
+                )
+            ) {
+                is RemoteVideoOverlay.AttachResult.Attached -> invoke.resolve(snapshotJson())
+                is RemoteVideoOverlay.AttachResult.InvalidGeometry ->
+                    reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
+                is RemoteVideoOverlay.AttachResult.TrackUnavailable ->
+                    reject(invoke, NativeCallWire.ERR_UNAVAILABLE)
+                is RemoteVideoOverlay.AttachResult.HostUnavailable ->
+                    reject(invoke, NativeCallWire.ERR_UNAVAILABLE)
+                is RemoteVideoOverlay.AttachResult.Failed ->
+                    reject(invoke, NativeCallWire.ERR_UNEXPECTED)
+            }
+        }
+    }
+
+    fun clearRemoteVideoOverlay(callId: String, invoke: Invoke) {
+        scope.launch {
+            if (snapshot.callId != callId) {
+                invoke.resolve(snapshotJson())
+                return@launch
+            }
+            videoOverlay.clear()
+            invoke.resolve(snapshotJson())
+        }
+    }
+
     /** Queues teardown on the bridge thread and blocks the caller briefly so
      * onDestroy guarantees the room is released before the scope is cancelled. */
     fun dispose() {
@@ -424,6 +482,7 @@ internal class NativeCallController(
                         remoteParticipants = remoteParticipantsProjection(room),
                     )
                 }
+                videoOverlay.reconcile(room)
                 emitSnapshotChanged()
             }
             is RoomEvent.ParticipantDisconnected -> {
@@ -433,20 +492,33 @@ internal class NativeCallController(
                         remoteParticipants = remoteParticipantsProjection(room),
                     )
                 }
+                videoOverlay.reconcile(room)
                 emitSnapshotChanged()
             }
             // Remote publication lifecycle only affects the remote projection;
-            // local publishes/mutes must not churn the snapshot.
-            is RoomEvent.TrackPublished ->
+            // local publishes/mutes must not churn the snapshot. The overlay
+            // reconciles on every remote track lifecycle event so it never
+            // retains an unpublished/unsubscribed/replaced track.
+            is RoomEvent.TrackPublished -> {
                 applyRemoteProjectionIfChanged(event.participant)
-            is RoomEvent.TrackUnpublished ->
+                videoOverlay.reconcile(room)
+            }
+            is RoomEvent.TrackUnpublished -> {
                 applyRemoteProjectionIfChanged(event.participant)
+                videoOverlay.reconcile(room)
+            }
             is RoomEvent.TrackMuted ->
                 applyRemoteProjectionIfChanged(event.participant)
             is RoomEvent.TrackUnmuted ->
                 applyRemoteProjectionIfChanged(event.participant)
-            is RoomEvent.TrackSubscribed -> applyRemoteProjectionIfChanged()
-            is RoomEvent.TrackUnsubscribed -> applyRemoteProjectionIfChanged()
+            is RoomEvent.TrackSubscribed -> {
+                applyRemoteProjectionIfChanged()
+                videoOverlay.reconcile(room)
+            }
+            is RoomEvent.TrackUnsubscribed -> {
+                applyRemoteProjectionIfChanged()
+                videoOverlay.reconcile(room)
+            }
             else -> Unit
         }
     }
@@ -499,6 +571,8 @@ internal class NativeCallController(
     }
 
     private fun teardownRoom() {
+        // The renderer's EGL context belongs to the room: drop it first.
+        videoOverlay.clear()
         eventJob?.cancel()
         eventJob = null
         val endingRoom = room

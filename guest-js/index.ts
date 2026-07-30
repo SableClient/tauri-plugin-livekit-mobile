@@ -41,6 +41,7 @@ export interface NativeCallCapabilities {
   backgroundAudio: boolean;
   nativeRoom: boolean;
   camera: boolean;
+  nativeVideoOverlay: boolean;
 }
 
 /**
@@ -70,6 +71,26 @@ export interface SetNativeCallCameraEnabledRequest {
 }
 
 export interface SwitchNativeCallCameraRequest {
+  callId: string;
+}
+
+/**
+ * Positions a native-rendered remote video track in CSS pixels. `x` and `y`
+ * may be negative for a partially offscreen DOM rectangle; all geometry is
+ * finite, and `width`, `height`, and `devicePixelRatio` must be positive.
+ */
+export interface SetNativeCallRemoteVideoOverlayRequest {
+  callId: string;
+  participantIdentity: string;
+  trackId: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  devicePixelRatio: number;
+}
+
+export interface ClearNativeCallRemoteVideoOverlayRequest {
   callId: string;
 }
 
@@ -161,6 +182,24 @@ export async function switchNativeCallCamera(
   return await invoke<NativeCallSnapshot>('plugin:livekit-mobile|switchNativeCallCamera', {
     payload: request,
   });
+}
+
+export async function setNativeCallRemoteVideoOverlay(
+  request: SetNativeCallRemoteVideoOverlayRequest
+): Promise<NativeCallSnapshot> {
+  return await invoke<NativeCallSnapshot>(
+    'plugin:livekit-mobile|setNativeCallRemoteVideoOverlay',
+    { payload: request }
+  );
+}
+
+export async function clearNativeCallRemoteVideoOverlay(
+  request: ClearNativeCallRemoteVideoOverlayRequest
+): Promise<NativeCallSnapshot> {
+  return await invoke<NativeCallSnapshot>(
+    'plugin:livekit-mobile|clearNativeCallRemoteVideoOverlay',
+    { payload: request }
+  );
 }
 
 export async function getNativeCallState(): Promise<NativeCallSnapshot> {

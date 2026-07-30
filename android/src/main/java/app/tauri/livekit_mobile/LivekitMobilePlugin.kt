@@ -2,6 +2,7 @@ package app.tauri.livekit_mobile
 
 import android.app.Activity
 import android.content.pm.PackageManager
+import android.webkit.WebView
 import androidx.core.content.ContextCompat
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
@@ -39,6 +40,18 @@ internal class SetNativeCallCameraEnabledArgs {
     var enabled: Boolean = false
 }
 
+@InvokeArg
+internal class SetNativeCallRemoteVideoOverlayArgs {
+    var callId: String = ""
+    var participantIdentity: String = ""
+    var trackId: String = ""
+    var x: Double = 0.0
+    var y: Double = 0.0
+    var width: Double = 0.0
+    var height: Double = 0.0
+    var devicePixelRatio: Double = 0.0
+}
+
 @TauriPlugin(
     permissions = [
         Permission(
@@ -52,12 +65,24 @@ internal class SetNativeCallCameraEnabledArgs {
     ],
 )
 class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
+    /** Host WebView retained at load() so the video overlay can anchor above
+     * it. Written on the main thread, read on the controller's bridge thread. */
+    @Volatile
+    private var hostWebView: WebView? = null
+
+    private val videoOverlay = RemoteVideoOverlay(webViewProvider = { hostWebView })
+
     private val controller =
         NativeCallController(
             appContext = activity.applicationContext,
             hasMicrophonePermission = { hasRecordAudioPermission() },
             hasCameraPermission = { hasCameraPermission() },
+            videoOverlay = videoOverlay,
         )
+
+    override fun load(webView: WebView) {
+        hostWebView = webView
+    }
 
     private var pendingConnect: PendingConnect? = null
     private var pendingMicrophone: PendingMicrophone? = null
@@ -88,6 +113,7 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
                 .put("foregroundService", true)
                 .put("backgroundJavascript", false)
                 .put("camera", true)
+                .put("nativeVideoOverlay", true)
                 .put("screenShare", false)
                 .put("devicePicker", false),
         )
@@ -217,6 +243,42 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     @Command
+    fun setNativeCallRemoteVideoOverlay(invoke: Invoke) {
+        val args =
+            runCatching { invoke.parseArgs(SetNativeCallRemoteVideoOverlayArgs::class.java) }
+                .getOrNull()
+        if (args == null ||
+            args.callId.isBlank() ||
+            args.participantIdentity.isBlank() ||
+            args.trackId.isBlank()
+        ) {
+            reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
+            return
+        }
+        controller.setRemoteVideoOverlay(
+            args.callId,
+            args.participantIdentity,
+            args.trackId,
+            args.x,
+            args.y,
+            args.width,
+            args.height,
+            args.devicePixelRatio,
+            invoke,
+        )
+    }
+
+    @Command
+    fun clearNativeCallRemoteVideoOverlay(invoke: Invoke) {
+        val args = runCatching { invoke.parseArgs(CallIdArgs::class.java) }.getOrNull()
+        if (args == null || args.callId.isBlank()) {
+            reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
+            return
+        }
+        controller.clearRemoteVideoOverlay(args.callId, invoke)
+    }
+
+    @Command
     fun getNativeCallState(invoke: Invoke) {
         invoke.resolve(controller.snapshotJson())
     }
@@ -277,6 +339,9 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
         pendingMicrophone = null
         pendingCamera?.let { reject(it.invoke, NativeCallWire.ERR_CANCELLED) }
         pendingCamera = null
+        // Release the overlay on the main thread before dispose() parks it:
+        // teardown must never wait on a blocked looper to drop EGL resources.
+        videoOverlay.clear()
         controller.dispose()
         super.onDestroy(activity)
     }

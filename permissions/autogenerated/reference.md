@@ -10,6 +10,8 @@ Default permissions for the plugin
 - `allow-setNativeCallMicrophoneEnabled`
 - `allow-setNativeCallCameraEnabled`
 - `allow-switchNativeCallCamera`
+- `allow-setNativeCallRemoteVideoOverlay`
+- `allow-clearNativeCallRemoteVideoOverlay`
 - `allow-getNativeCallState`
 
 ## Permission Table
@@ -20,6 +22,32 @@ Default permissions for the plugin
 <th>Description</th>
 </tr>
 
+
+<tr>
+<td>
+
+`livekit-mobile:allow-clearNativeCallRemoteVideoOverlay`
+
+</td>
+<td>
+
+Enables the clearNativeCallRemoteVideoOverlay command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:deny-clearNativeCallRemoteVideoOverlay`
+
+</td>
+<td>
+
+Denies the clearNativeCallRemoteVideoOverlay command without any pre-configured scope.
+
+</td>
+</tr>
 
 <tr>
 <td>
@@ -173,6 +201,32 @@ Enables the setNativeCallMicrophoneEnabled command without any pre-configured sc
 <td>
 
 Denies the setNativeCallMicrophoneEnabled command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:allow-setNativeCallRemoteVideoOverlay`
+
+</td>
+<td>
+
+Enables the setNativeCallRemoteVideoOverlay command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:deny-setNativeCallRemoteVideoOverlay`
+
+</td>
+<td>
+
+Denies the setNativeCallRemoteVideoOverlay command without any pre-configured scope.
 
 </td>
 </tr>

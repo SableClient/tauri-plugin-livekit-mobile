@@ -14,6 +14,7 @@ use crate::{
         failure_code_from_raw, NativeCallCapabilities, NativeCallChannelEvent,
         NativeCallFailureCode, NativeCallSnapshot, NativeConnectCallFields,
         NativeDisconnectCallFields, NativeSetCameraFields, NativeSetMicrophoneFields,
+        NativeSetRemoteVideoOverlayFields,
     },
 };
 
@@ -33,6 +34,8 @@ mod platform_commands {
     pub(super) const SWITCH_CAMERA: &str = "switchNativeCallCamera";
     pub(super) const CANCEL_CONNECT: &str = "cancelNativeCallConnect";
     pub(super) const GET_STATE: &str = "getNativeCallState";
+    pub(super) const SET_REMOTE_VIDEO_OVERLAY: &str = "setNativeCallRemoteVideoOverlay";
+    pub(super) const CLEAR_REMOTE_VIDEO_OVERLAY: &str = "clearNativeCallRemoteVideoOverlay";
 }
 
 #[cfg(target_os = "ios")]
@@ -45,6 +48,8 @@ mod platform_commands {
     pub(super) const SWITCH_CAMERA: &str = "switchCamera";
     pub(super) const CANCEL_CONNECT: &str = "cancelConnect";
     pub(super) const GET_STATE: &str = "getState";
+    pub(super) const SET_REMOTE_VIDEO_OVERLAY: &str = "setRemoteVideoOverlay";
+    pub(super) const CLEAR_REMOTE_VIDEO_OVERLAY: &str = "clearRemoteVideoOverlay";
 }
 
 /// Upper bound for any single native invocation, so a hung native call
@@ -66,6 +71,8 @@ pub(crate) struct NativeCallCapabilitiesWire {
     background_audio: bool,
     #[serde(default)]
     camera: bool,
+    #[serde(default)]
+    native_video_overlay: bool,
 }
 
 impl From<NativeCallCapabilitiesWire> for NativeCallCapabilities {
@@ -77,6 +84,7 @@ impl From<NativeCallCapabilitiesWire> for NativeCallCapabilities {
             // These commands exist only in the native room bridge.
             native_room: true,
             camera: native.camera,
+            native_video_overlay: native.native_video_overlay,
         }
     }
 }
@@ -191,6 +199,22 @@ impl<R: Runtime> MobileBackend<R> {
         self.invoke(platform_commands::SWITCH_CAMERA, request).await
     }
 
+    pub(crate) async fn set_native_call_remote_video_overlay(
+        &self,
+        request: NativeSetRemoteVideoOverlayRequest<'_>,
+    ) -> crate::Result<NativeCallSnapshot> {
+        self.invoke(platform_commands::SET_REMOTE_VIDEO_OVERLAY, request)
+            .await
+    }
+
+    pub(crate) async fn clear_native_call_remote_video_overlay(
+        &self,
+        request: NativeDisconnectCallRequest<'_>,
+    ) -> crate::Result<NativeCallSnapshot> {
+        self.invoke(platform_commands::CLEAR_REMOTE_VIDEO_OVERLAY, request)
+            .await
+    }
+
     pub(crate) async fn get_native_call_state(&self) -> crate::Result<NativeCallSnapshot> {
         self.invoke(platform_commands::GET_STATE, ()).await
     }
@@ -244,6 +268,13 @@ pub(crate) struct NativeSetCameraRequest<'a> {
 pub(crate) struct NativeSwitchCameraRequest<'a> {
     #[serde(flatten)]
     pub fields: NativeDisconnectCallFields<'a>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NativeSetRemoteVideoOverlayRequest<'a> {
+    #[serde(flatten)]
+    pub fields: NativeSetRemoteVideoOverlayFields<'a>,
 }
 
 pub fn init<R: Runtime, C: DeserializeOwned>(
