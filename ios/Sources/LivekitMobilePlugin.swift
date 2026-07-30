@@ -207,6 +207,7 @@ final class LivekitMobilePlugin: Plugin {
   /// Retains the host webview (weakly, on the controller) so the remote
   /// video overlay can be positioned in its superview's coordinate space.
   @objc public override func load(webview: WKWebView) {
+    forceLinkLiveKitObjCSurface()
     Task { @MainActor [weak controller] in
       controller?.attachHostWebView(webview)
     }
