@@ -150,6 +150,26 @@ where
     Ok(raw.map(|raw| NativeCallError::from_code(failure_code_from_raw(Some(&raw.code)))))
 }
 
+/// Camera projection of one remote participant's camera publication.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeCallRemoteCamera {
+    pub sid: String,
+    pub muted: bool,
+    pub subscribed: bool,
+}
+
+/// Remote-only participant projection; `identity` is the opaque backend
+/// identity. `camera` exists only while the participant has a remote camera
+/// publication.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeCallRemoteParticipant {
+    pub identity: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub camera: Option<NativeCallRemoteCamera>,
+}
+
 /// Wire shape of the native room snapshot resolved by native commands and
 /// announced over the connect channel. `revision` is native-owned and passed
 /// through unchanged.
@@ -167,6 +187,9 @@ pub struct NativeCallSnapshot {
     pub camera_enabled: bool,
     #[serde(default)]
     pub participant_count: u32,
+    // `default` keeps natives that predate the roster decodable.
+    #[serde(default)]
+    pub remote_participants: Vec<NativeCallRemoteParticipant>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -378,6 +401,8 @@ mod tests {
         assert!(!snapshot.camera_enabled);
         assert_eq!(snapshot.participant_count, 2);
         assert!(snapshot.is_live());
+        // Natives that predated the roster parse with an empty projection.
+        assert_eq!(snapshot.remote_participants, Vec::new());
         assert_eq!(
             snapshot.last_error,
             Some(NativeCallError::from_code(
@@ -397,6 +422,7 @@ mod tests {
         assert!(!idle.microphone_enabled);
         assert!(!idle.camera_enabled);
         assert_eq!(idle.participant_count, 0);
+        assert_eq!(idle.remote_participants, Vec::new());
         assert_eq!(idle.last_error, None);
         assert!(!idle.is_live());
 
@@ -416,6 +442,7 @@ mod tests {
             microphone_enabled: true,
             camera_enabled: true,
             participant_count: 3,
+            remote_participants: Vec::new(),
             last_error: None,
         })
         .unwrap();
@@ -427,7 +454,8 @@ mod tests {
                 "connectionState": "connected",
                 "microphoneEnabled": true,
                 "cameraEnabled": true,
-                "participantCount": 3
+                "participantCount": 3,
+                "remoteParticipants": []
             })
         );
 
@@ -438,6 +466,7 @@ mod tests {
             microphone_enabled: true,
             camera_enabled: false,
             participant_count: 3,
+            remote_participants: Vec::new(),
             last_error: Some(NativeCallError::from_code(
                 NativeCallFailureCode::Disconnected,
             )),
@@ -449,6 +478,55 @@ mod tests {
                 "code": "disconnected",
                 "message": "the call connection ended unexpectedly"
             })
+        );
+    }
+
+    #[test]
+    fn remote_participants_pass_through_with_optional_camera() {
+        let snapshot: NativeCallSnapshot = serde_json::from_value(serde_json::json!({
+            "revision": 7,
+            "callId": "call-1",
+            "connectionState": "connected",
+            "microphoneEnabled": true,
+            "cameraEnabled": false,
+            "participantCount": 2,
+            "remoteParticipants": [
+                {
+                    "identity": "@alice:example.org",
+                    "camera": { "sid": "TR_abcdef", "muted": false, "subscribed": true }
+                },
+                { "identity": "@bob:example.org" }
+            ]
+        }))
+        .unwrap();
+        assert_eq!(
+            snapshot.remote_participants,
+            vec![
+                NativeCallRemoteParticipant {
+                    identity: "@alice:example.org".into(),
+                    camera: Some(NativeCallRemoteCamera {
+                        sid: "TR_abcdef".into(),
+                        muted: false,
+                        subscribed: true,
+                    }),
+                },
+                NativeCallRemoteParticipant {
+                    identity: "@bob:example.org".into(),
+                    camera: None,
+                },
+            ]
+        );
+
+        // `camera` is omitted when there is no remote camera publication.
+        assert_eq!(
+            serde_json::to_value(&snapshot.remote_participants).unwrap(),
+            serde_json::json!([
+                {
+                    "identity": "@alice:example.org",
+                    "camera": { "sid": "TR_abcdef", "muted": false, "subscribed": true }
+                },
+                { "identity": "@bob:example.org" }
+            ])
         );
     }
 

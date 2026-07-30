@@ -36,6 +36,7 @@ final class RoomController: NSObject {
   private var microphoneEnabled = false
   private var cameraEnabled = false
   private var participantCount = 0
+  private var remoteParticipants: [BridgeRemoteParticipant] = []
   private var lastError: BridgeError?
   private var attempt: UInt64 = 0
 
@@ -49,6 +50,7 @@ final class RoomController: NSObject {
       microphoneEnabled: microphoneEnabled,
       cameraEnabled: cameraEnabled,
       participantCount: participantCount,
+      remoteParticipants: remoteParticipants,
       lastError: lastError)
   }
 
@@ -96,6 +98,7 @@ final class RoomController: NSObject {
     microphoneEnabled = false
     cameraEnabled = false
     participantCount = 0
+    remoteParticipants = []
     connectionState = .connecting
     emitSnapshotChanged()
 
@@ -337,6 +340,7 @@ final class RoomController: NSObject {
     microphoneEnabled = false
     cameraEnabled = false
     participantCount = 0
+    remoteParticipants = []
     lastError = nil
     if let roomToClose {
       await roomToClose.disconnect()
@@ -364,6 +368,7 @@ final class RoomController: NSObject {
     microphoneEnabled = false
     cameraEnabled = false
     participantCount = 0
+    remoteParticipants = []
     lastError = nil
     callId = nil
     emitSnapshotChanged()
@@ -383,7 +388,8 @@ final class RoomController: NSObject {
     if newState == .connected, let room {
       microphoneEnabled = room.localParticipant.isMicrophoneEnabled()
       cameraEnabled = room.localParticipant.isCameraEnabled()
-      participantCount = room.remoteParticipants.count
+      remoteParticipants = Self.projectRemoteParticipants(in: room)
+      participantCount = remoteParticipants.count
     }
     emitSnapshotChanged()
   }
@@ -393,6 +399,7 @@ final class RoomController: NSObject {
     microphoneEnabled = false
     cameraEnabled = false
     participantCount = 0
+    remoteParticipants = []
     lastError = error
     emitSnapshotChanged()
     invoke.reject(error.message, code: error.code.rawValue)
@@ -404,6 +411,31 @@ final class RoomController: NSObject {
 
   private func rejectCancelled(_ invoke: Invoke) {
     reject(invoke, .cancelled)
+  }
+
+  // MARK: - Remote participant projection
+
+  /// Minimal remote-only projection: identity (from the room's participant
+  /// key) plus the camera publication with remote-aware mute/subscription
+  /// state. Sorted by identity so the snapshot is stable.
+  nonisolated static func projectRemoteParticipants(
+    in room: Room
+  ) -> [BridgeRemoteParticipant] {
+    room.remoteParticipants
+      .map { identity, participant in
+        let camera =
+          participant.trackPublications.values
+          .filter { $0.source == .camera }
+          .sorted { $0.sid.stringValue < $1.sid.stringValue }
+          .first
+          .map {
+            BridgeRemoteCamera(
+              sid: $0.sid.stringValue, muted: $0.isMuted,
+              subscribed: $0.isSubscribed)
+          }
+        return BridgeRemoteParticipant(identity: identity.stringValue, camera: camera)
+      }
+      .sorted { $0.identity < $1.identity }
   }
 
   // MARK: - Camera helpers
@@ -513,7 +545,7 @@ extension RoomController: RoomDelegate {
     _ room: Room, participantDidConnect participant: RemoteParticipant
   ) {
     Task { @MainActor [weak self] in
-      self?.handleParticipantsChanged(from: room)
+      self?.updateRemoteParticipants(from: room)
     }
   }
 
@@ -521,7 +553,55 @@ extension RoomController: RoomDelegate {
     _ room: Room, participantDidDisconnect participant: RemoteParticipant
   ) {
     Task { @MainActor [weak self] in
-      self?.handleParticipantsChanged(from: room)
+      self?.updateRemoteParticipants(from: room)
+    }
+  }
+
+  // The explicit selectors below are required by the SDK: they disambiguate
+  // the remote-participant variants from the local ones.
+
+  @objc(room:remoteParticipant:didPublishTrack:) nonisolated func room(
+    _ room: Room, participant: RemoteParticipant,
+    didPublishTrack publication: RemoteTrackPublication
+  ) {
+    Task { @MainActor [weak self] in
+      self?.updateRemoteParticipants(from: room)
+    }
+  }
+
+  @objc(room:remoteParticipant:didUnpublishTrack:) nonisolated func room(
+    _ room: Room, participant: RemoteParticipant,
+    didUnpublishTrack publication: RemoteTrackPublication
+  ) {
+    Task { @MainActor [weak self] in
+      self?.updateRemoteParticipants(from: room)
+    }
+  }
+
+  @objc nonisolated func room(
+    _ room: Room, participant: RemoteParticipant,
+    didSubscribeTrack publication: RemoteTrackPublication
+  ) {
+    Task { @MainActor [weak self] in
+      self?.updateRemoteParticipants(from: room)
+    }
+  }
+
+  @objc nonisolated func room(
+    _ room: Room, participant: RemoteParticipant,
+    didUnsubscribeTrack publication: RemoteTrackPublication
+  ) {
+    Task { @MainActor [weak self] in
+      self?.updateRemoteParticipants(from: room)
+    }
+  }
+
+  @objc nonisolated func room(
+    _ room: Room, participant: Participant,
+    trackPublication: TrackPublication, didUpdateIsMuted isMuted: Bool
+  ) {
+    Task { @MainActor [weak self] in
+      self?.updateRemoteParticipants(from: room)
     }
   }
 
@@ -553,6 +633,7 @@ extension RoomController: RoomDelegate {
     microphoneEnabled = false
     cameraEnabled = false
     participantCount = 0
+    remoteParticipants = []
     lastError = BridgeError(.disconnected)
     connectionState = .failed
     emitSnapshotChanged()
@@ -570,13 +651,16 @@ extension RoomController: RoomDelegate {
     applyConnectionState(.connected, from: room)
   }
 
-  private func handleParticipantsChanged(from room: Room) {
+  /// Recomputes the remote-only projection from a room event and emits one
+  /// snapshot_changed when it (and with it the count) actually changed.
+  private func updateRemoteParticipants(from room: Room) {
     guard room === self.room else { return }
     guard connectionState == .connected || connectionState == .reconnecting
     else { return }
-    let count = room.remoteParticipants.count
-    guard count != participantCount else { return }
-    participantCount = count
+    let projection = Self.projectRemoteParticipants(in: room)
+    guard projection != remoteParticipants else { return }
+    remoteParticipants = projection
+    participantCount = projection.count
     emitSnapshotChanged()
   }
 }

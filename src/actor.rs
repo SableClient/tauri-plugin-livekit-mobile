@@ -91,6 +91,7 @@ fn idle_snapshot() -> NativeCallSnapshot {
         microphone_enabled: false,
         camera_enabled: false,
         participant_count: 0,
+        remote_participants: Vec::new(),
         last_error: None,
     }
 }
@@ -579,5 +580,15 @@ mod tests {
         assert!(call_id_is_valid("call"));
         assert!(!call_id_is_valid(""));
         assert!(!call_id_is_valid("   "));
+    }
+
+    #[cfg(not(mobile))]
+    #[test]
+    fn desktop_idle_snapshot_has_empty_room_projection() {
+        let idle = super::idle_snapshot();
+        assert_eq!(idle.revision, 0);
+        assert_eq!(idle.call_id, None);
+        assert_eq!(idle.remote_participants, Vec::new());
+        assert!(!idle.is_live());
     }
 }

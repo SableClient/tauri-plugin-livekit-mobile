@@ -1,5 +1,18 @@
 package app.tauri.livekit_mobile
 
+/** Remote-participant projection inside the snapshot. Audio-only participants
+ * simply omit the camera entry; no metadata, names, or audio tracks cross. */
+internal data class NativeRemoteParticipant(
+    val identity: String,
+    val camera: Camera? = null,
+) {
+    internal data class Camera(
+        val sid: String,
+        val muted: Boolean,
+        val subscribed: Boolean,
+    )
+}
+
 /**
  * Authoritative native-room snapshot. Pure immutable data; the controller owns
  * all mutation and the revision counter on its single dispatcher.
@@ -11,6 +24,7 @@ internal data class NativeCallSnapshot(
     val microphoneEnabled: Boolean = false,
     val cameraEnabled: Boolean = false,
     val participantCount: Int = 0,
+    val remoteParticipants: List<NativeRemoteParticipant> = emptyList(),
     val lastErrorCode: String? = null,
 ) {
     /** True while a connect is in flight or a room is up. */
@@ -25,6 +39,7 @@ internal data class NativeCallSnapshot(
             microphoneEnabled = false,
             cameraEnabled = false,
             participantCount = 0,
+            remoteParticipants = emptyList(),
             lastErrorCode = null,
         )
 

@@ -48,6 +48,24 @@ export interface SwitchNativeCallCameraRequest {
     callId: string;
 }
 /**
+ * One remote participant's camera publication (track id, mute and
+ * subscription state).
+ */
+export interface NativeCallRemoteCamera {
+    sid: string;
+    muted: boolean;
+    subscribed: boolean;
+}
+/**
+ * Remote-only participant projection. `identity` is the opaque
+ * LiveKit/MatrixRTC backend identity. `camera` exists only while the
+ * participant has a remote camera publication.
+ */
+export interface NativeCallRemoteParticipant {
+    identity: string;
+    camera?: NativeCallRemoteCamera;
+}
+/**
  * The single authoritative shape of the native room, resolved by every
  * command and delivered by every event. `revision` is owned and bumped by
  * the native side on every change and passes through the bridge untouched;
@@ -60,6 +78,7 @@ export interface NativeCallSnapshot {
     microphoneEnabled: boolean;
     cameraEnabled: boolean;
     participantCount: number;
+    remoteParticipants: NativeCallRemoteParticipant[];
     lastError?: NativeCallError;
 }
 /**

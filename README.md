@@ -204,12 +204,22 @@ await unlisten();
     microphoneEnabled: boolean;
     cameraEnabled: boolean;
     participantCount: number;
+    remoteParticipants: Array<{
+      identity: string; // opaque LiveKit/MatrixRTC backend identity
+      camera?: { sid: string; muted: boolean; subscribed: boolean };
+    }>;
     lastError?: { code: NativeCallFailureCode; message: string };
   }
   ```
 
   `revision` passes through the bridge untouched (Rust never creates one), so
   consumers can drop out-of-order snapshots by comparing revisions.
+- `remoteParticipants` is a remote-only projection sized for rendering one
+  remote-video tile per remote participant: `identity` is the opaque backend
+  identity, and `camera` is present only while that participant has a remote
+  camera publication (`sid` is its LiveKit track id). The bridge passes the
+  roster through untouched — it keeps no roster state of its own. Missing
+  keys on older natives decode as an empty list.
 - Every native invocation is time-bounded (60s for connect, 30s for the
   rest) so a hung native call cannot wedge the bridge. An elapsed bound
   surfaces as an error with code `timeout`. A timed-out connect is **not**

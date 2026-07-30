@@ -32,14 +32,15 @@ final class WireContractTests: XCTestCase {
     BridgeStateResponse(
       revision: revision, callId: nil, connectionState: .idle,
       microphoneEnabled: microphoneEnabled, cameraEnabled: cameraEnabled,
-      participantCount: 0, lastError: nil)
+      participantCount: 0, remoteParticipants: [], lastError: nil)
   }
 
   /// Asserts the full snapshot keys exactly as the bridge contract requires.
   private func assertSnapshotKeys(
     _ state: [String: Any], revision: Int = 0, callId: String?,
     connectionState: String, microphoneEnabled: Bool, cameraEnabled: Bool,
-    participantCount: Int, file: StaticString = #filePath, line: UInt = #line
+    participantCount: Int, remoteParticipantCount: Int = 0,
+    file: StaticString = #filePath, line: UInt = #line
   ) throws {
     XCTAssertEqual(state["revision"] as? Int, revision, file: file, line: line)
     if let callId {
@@ -51,6 +52,11 @@ final class WireContractTests: XCTestCase {
     XCTAssertEqual(state["microphoneEnabled"] as? Bool, microphoneEnabled, file: file, line: line)
     XCTAssertEqual(state["cameraEnabled"] as? Bool, cameraEnabled, file: file, line: line)
     XCTAssertEqual(state["participantCount"] as? Int, participantCount, file: file, line: line)
+    let participants = try XCTUnwrap(
+      state["remoteParticipants"] as? [[String: Any]],
+      "remoteParticipants must always be present", file: file, line: line)
+    XCTAssertEqual(
+      participants.count, remoteParticipantCount, file: file, line: line)
   }
 
   private final class InvokeRecording: @unchecked Sendable {
@@ -144,11 +150,37 @@ final class WireContractTests: XCTestCase {
     let state = try jsonObject(
       BridgeStateResponse(
         revision: 7, callId: "call-1", connectionState: .connected,
-        microphoneEnabled: true, cameraEnabled: true, participantCount: 3,
+        microphoneEnabled: true, cameraEnabled: true, participantCount: 2,
+        remoteParticipants: [
+          BridgeRemoteParticipant(
+            identity: "alice",
+            camera: BridgeRemoteCamera(sid: "TR_VC1", muted: false, subscribed: true)),
+          BridgeRemoteParticipant(identity: "bob", camera: nil),
+        ],
         lastError: BridgeError(.mediaFailed)))
     try assertSnapshotKeys(
       state, revision: 7, callId: "call-1", connectionState: "connected",
-      microphoneEnabled: true, cameraEnabled: true, participantCount: 3)
+      microphoneEnabled: true, cameraEnabled: true, participantCount: 2,
+      remoteParticipantCount: 2)
+    let participants = try XCTUnwrap(state["remoteParticipants"] as? [[String: Any]])
+
+    let alice = participants[0]
+    XCTAssertEqual(alice["identity"] as? String, "alice")
+    let camera = try XCTUnwrap(alice["camera"] as? [String: Any])
+    XCTAssertEqual(camera["sid"] as? String, "TR_VC1")
+    XCTAssertEqual(camera["muted"] as? Bool, false)
+    XCTAssertEqual(camera["subscribed"] as? Bool, true)
+
+    // `camera` is omitted (not null) when the participant has no camera
+    // publication.
+    let bob = participants[1]
+    XCTAssertEqual(bob["identity"] as? String, "bob")
+    XCTAssertNil(bob["camera"])
+    // The projection never carries names, metadata, or audio tracks.
+    XCTAssertNil(alice["name"])
+    XCTAssertNil(alice["metadata"])
+    XCTAssertNil(alice["audio"])
+
     let lastError = try XCTUnwrap(state["lastError"] as? [String: Any])
     XCTAssertEqual(lastError["code"] as? String, "media_failed")
     XCTAssertEqual(
@@ -176,6 +208,7 @@ final class WireContractTests: XCTestCase {
     XCTAssertNil(event["code"])
     XCTAssertNil(event["message"])
     XCTAssertNil(event["participantCount"])
+    XCTAssertNil(event["remoteParticipants"])
   }
 
   func testEventKindRawValue() {

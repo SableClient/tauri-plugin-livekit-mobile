@@ -85,6 +85,18 @@ struct BridgeError: Encodable {
   }
 }
 
+struct BridgeRemoteCamera: Encodable, Equatable {
+  let sid: String
+  let muted: Bool
+  let subscribed: Bool
+}
+
+struct BridgeRemoteParticipant: Encodable, Equatable {
+  let identity: String
+  /// Present only while the participant has a camera publication.
+  let camera: BridgeRemoteCamera?
+}
+
 struct BridgeStateResponse: Encodable {
   let revision: UInt64
   let callId: String?
@@ -92,6 +104,7 @@ struct BridgeStateResponse: Encodable {
   let microphoneEnabled: Bool
   let cameraEnabled: Bool
   let participantCount: Int
+  let remoteParticipants: [BridgeRemoteParticipant]
   let lastError: BridgeError?
 
   // Custom encoding: `callId` must be an explicit JSON null when idle, while
@@ -103,6 +116,7 @@ struct BridgeStateResponse: Encodable {
     case microphoneEnabled
     case cameraEnabled
     case participantCount
+    case remoteParticipants
     case lastError
   }
 
@@ -114,6 +128,7 @@ struct BridgeStateResponse: Encodable {
     try container.encode(microphoneEnabled, forKey: .microphoneEnabled)
     try container.encode(cameraEnabled, forKey: .cameraEnabled)
     try container.encode(participantCount, forKey: .participantCount)
+    try container.encode(remoteParticipants, forKey: .remoteParticipants)
     try container.encodeIfPresent(lastError, forKey: .lastError)
   }
 }

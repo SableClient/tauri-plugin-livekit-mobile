@@ -6,11 +6,14 @@ import android.os.Build
 import androidx.core.content.ContextCompat
 import app.tauri.plugin.Channel
 import app.tauri.plugin.Invoke
+import app.tauri.plugin.JSArray
 import app.tauri.plugin.JSObject
 import io.livekit.android.LiveKit
 import io.livekit.android.events.RoomEvent
 import io.livekit.android.events.collect
 import io.livekit.android.room.Room
+import io.livekit.android.room.participant.Participant
+import io.livekit.android.room.participant.RemoteParticipant
 import io.livekit.android.room.track.LocalVideoTrack
 import io.livekit.android.room.track.Track
 import java.util.concurrent.CountDownLatch
@@ -67,6 +70,27 @@ internal class NativeCallController(
             put("microphoneEnabled", current.microphoneEnabled)
             put("cameraEnabled", current.cameraEnabled)
             put("participantCount", current.participantCount)
+            put(
+                "remoteParticipants",
+                JSArray().apply {
+                    current.remoteParticipants.forEach { participant ->
+                        put(
+                            JSObject().apply {
+                                put("identity", participant.identity)
+                                participant.camera?.let { camera ->
+                                    put(
+                                        "camera",
+                                        JSObject()
+                                            .put("sid", camera.sid)
+                                            .put("muted", camera.muted)
+                                            .put("subscribed", camera.subscribed),
+                                    )
+                                }
+                            },
+                        )
+                    }
+                },
+            )
             current.lastErrorCode?.let { code ->
                 put(
                     "lastError",
@@ -104,6 +128,7 @@ internal class NativeCallController(
                         microphoneEnabled = false,
                         cameraEnabled = false,
                         participantCount = 0,
+                        remoteParticipants = emptyList(),
                         lastErrorCode = null,
                     )
                 }
@@ -175,6 +200,7 @@ internal class NativeCallController(
                         microphoneEnabled = microphoneActive,
                         lastErrorCode = microphoneError?.let(NativeCallWire::sanitize),
                         participantCount = newRoom.remoteParticipants.size,
+                        remoteParticipants = remoteParticipantsProjection(newRoom),
                     )
                 }
                 emitSnapshotChanged()
@@ -359,6 +385,7 @@ internal class NativeCallController(
                     copy(
                         connectionState = NativeCallWire.STATE_CONNECTED,
                         participantCount = room?.remoteParticipants?.size ?: 0,
+                        remoteParticipants = remoteParticipantsProjection(room),
                     )
                 }
                 emitSnapshotChanged()
@@ -373,6 +400,7 @@ internal class NativeCallController(
                     copy(
                         connectionState = NativeCallWire.STATE_CONNECTED,
                         participantCount = room?.remoteParticipants?.size ?: 0,
+                        remoteParticipants = remoteParticipantsProjection(room),
                     )
                 }
                 emitSnapshotChanged()
@@ -391,18 +419,76 @@ internal class NativeCallController(
             }
             is RoomEvent.ParticipantConnected -> {
                 transition {
-                    copy(participantCount = room?.remoteParticipants?.size ?: 0)
+                    copy(
+                        participantCount = room?.remoteParticipants?.size ?: 0,
+                        remoteParticipants = remoteParticipantsProjection(room),
+                    )
                 }
                 emitSnapshotChanged()
             }
             is RoomEvent.ParticipantDisconnected -> {
                 transition {
-                    copy(participantCount = room?.remoteParticipants?.size ?: 0)
+                    copy(
+                        participantCount = room?.remoteParticipants?.size ?: 0,
+                        remoteParticipants = remoteParticipantsProjection(room),
+                    )
                 }
                 emitSnapshotChanged()
             }
+            // Remote publication lifecycle only affects the remote projection;
+            // local publishes/mutes must not churn the snapshot.
+            is RoomEvent.TrackPublished ->
+                applyRemoteProjectionIfChanged(event.participant)
+            is RoomEvent.TrackUnpublished ->
+                applyRemoteProjectionIfChanged(event.participant)
+            is RoomEvent.TrackMuted ->
+                applyRemoteProjectionIfChanged(event.participant)
+            is RoomEvent.TrackUnmuted ->
+                applyRemoteProjectionIfChanged(event.participant)
+            is RoomEvent.TrackSubscribed -> applyRemoteProjectionIfChanged()
+            is RoomEvent.TrackUnsubscribed -> applyRemoteProjectionIfChanged()
             else -> Unit
         }
+    }
+
+    /**
+     * Smallest authoritative remote-only projection: identity, plus the remote
+     * CAMERA publication (sid, muted, remote-aware subscribed) when one exists.
+     * Sorted so identical room state always projects to an equal list.
+     */
+    private fun remoteParticipantsProjection(
+        currentRoom: Room?,
+    ): List<NativeRemoteParticipant> {
+        val participants = currentRoom?.remoteParticipants ?: return emptyList()
+        return participants.entries
+            .map { (identity, participant) ->
+                // sid is non-null in 2.27.0; sort so several camera
+                // publications project deterministically (matches iOS).
+                val camera =
+                    participant.trackPublications.values
+                        .filter { it.source == Track.Source.CAMERA }
+                        .sortedBy { it.sid }
+                        .firstOrNull()
+                        ?.let { publication ->
+                            NativeRemoteParticipant.Camera(
+                                sid = publication.sid,
+                                muted = publication.muted,
+                                subscribed = publication.subscribed,
+                            )
+                        }
+                NativeRemoteParticipant(identity = identity.value, camera = camera)
+            }
+            .sortedBy { it.identity }
+    }
+
+    /** Recomputes the remote-only projection after a publication event, skipping
+     * local participants and no-op changes (no revision bump, no emit). */
+    private fun applyRemoteProjectionIfChanged(participant: Participant? = null) {
+        if (participant != null && participant !is RemoteParticipant) return
+        val projection = remoteParticipantsProjection(room)
+        if (snapshot.remoteParticipants == projection) return
+        transition { copy(remoteParticipants = projection) }
+        emitSnapshotChanged()
     }
 
     private fun transition(transform: NativeCallSnapshot.() -> NativeCallSnapshot) {
