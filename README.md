@@ -146,6 +146,35 @@ Add to the host app's `Info.plist`:
 - `UIBackgroundModes` containing `audio`: required for room audio to
   continue while the app is backgrounded.
 
+The host app must also bundle LiveKit's two binary frameworks. They are
+**dynamic** libraries loaded at `@rpath`, so unlike the rest of the LiveKit
+SDK they cannot be absorbed into this plugin's static archive; nothing in
+Tauri's generated Xcode project embeds them on your behalf. Without them the
+app fails at launch with `dyld: Library not loaded:
+@rpath/LiveKitWebRTC.framework/LiveKitWebRTC`.
+
+Download the versions pinned by `ios/Package.resolved` and list them in
+`tauri.conf.json` — any `.xcframework` entry is treated as a vendor framework
+and gets embedded and signed into the bundle:
+
+```json
+{
+  "bundle": {
+    "iOS": {
+      "frameworks": [
+        "frameworks/LiveKitWebRTC.xcframework",
+        "frameworks/RustLiveKitUniFFI.xcframework"
+      ]
+    }
+  }
+}
+```
+
+Paths are relative to the Tauri directory (`src-tauri`). Recreate the iOS
+project after changing this list. The matching release archives are
+[`LiveKitWebRTC`](https://github.com/livekit/webrtc-xcframework/releases) and
+[`RustLiveKitUniFFI`](https://github.com/livekit/livekit-uniffi-xcframework/releases).
+
 ## JavaScript usage
 
 ```ts

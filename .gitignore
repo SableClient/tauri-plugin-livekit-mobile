@@ -20,11 +20,7 @@ build/
 /ios/.tauri/
 /ios/.build/
 
-# iOS Xcode framework template build artifacts (Package.swift/Package.resolved
-# are intentionally absent under ios/; the project is ios/tauri-plugin-livekit-mobile.xcodeproj).
-/ios-tests/.build/
-/ios-tests/.swiftpm/
-xcuserdata/
+/ios/.swiftpm/
 
 dist
 

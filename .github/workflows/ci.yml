@@ -55,15 +55,21 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
       - name: Provide Tauri Swift package
         run: |
           git clone --depth 1 --branch tauri-v2.11.3 https://github.com/tauri-apps/tauri /tmp/tauri
           mkdir -p .tauri
           cp -r /tmp/tauri/crates/tauri/mobile/ios-api .tauri/tauri-api
-      - name: Build iOS framework for iOS
+      - name: Build Swift package for iOS
         run: |
-          xcodebuild -project tauri-plugin-livekit-mobile.xcodeproj \
-            -scheme tauri-plugin-livekit-mobile \
+          xcodebuild -scheme tauri-plugin-livekit-mobile \
             -destination 'generic/platform=iOS' \
             CODE_SIGNING_ALLOWED=NO build
         working-directory: ios
+      # Exercises the build script that links the Swift package into a host app.
+      # `swift build` alone never runs it. `wry` gates `register_ios_plugin`.
+      - name: Link plugin into an iOS cargo build
+        run: cargo build --target aarch64-apple-ios --features tauri/wry
