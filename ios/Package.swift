@@ -17,8 +17,8 @@ let package = Package(
     .package(name: "Tauri", path: "../.tauri/tauri-api"),
     .package(
       name: "LiveKit",
-      url: "https://github.com/livekit/client-sdk-swift.git",
-      .upToNextMajor(from: "2.15.3"))
+      url: "https://github.com/SableClient/client-sdk-swift.git",
+      .revision("3f586ba2122339fa277a61f076905bd9b21da913"))
   ],
   targets: [
     .target(

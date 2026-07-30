@@ -3,11 +3,11 @@
     "pins": [
       {
         "package": "LiveKit",
-        "repositoryURL": "https://github.com/livekit/client-sdk-swift.git",
+        "repositoryURL": "https://github.com/SableClient/client-sdk-swift.git",
         "state": {
           "branch": null,
-          "revision": "43ade336353ad12f9ec7fa1e6a51d9b3bd8121f8",
-          "version": "2.15.3"
+          "revision": "3f586ba2122339fa277a61f076905bd9b21da913",
+          "version": null
         }
       },
       {

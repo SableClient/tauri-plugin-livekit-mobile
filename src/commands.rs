@@ -98,6 +98,17 @@ pub(crate) async fn clearNativeCallRemoteVideoOverlay<R: Runtime>(
 
 #[allow(non_snake_case)]
 #[tauri_command]
+pub(crate) async fn setNativeCallEncryptionKey<R: Runtime>(
+    app: AppHandle<R>,
+    payload: SetNativeCallEncryptionKeyRequest,
+) -> Result<NativeCallSnapshot> {
+    app.native_call_bridge()
+        .set_native_call_encryption_key(payload)
+        .await
+}
+
+#[allow(non_snake_case)]
+#[tauri_command]
 pub(crate) async fn getNativeCallState<R: Runtime>(
     app: AppHandle<R>,
     webview: Webview<R>,

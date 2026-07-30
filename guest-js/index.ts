@@ -45,15 +45,39 @@ export interface NativeCallCapabilities {
 }
 
 /**
+ * One shared-E2EE key: raw key material (`key`, base64-encoded) for one
+ * participant `identity` at `keyIndex`. Keys only flow guest → native; they
+ * never appear in snapshots or events.
+ */
+export interface EncryptionKey {
+  identity: string;
+  keyIndex: number;
+  key: string;
+}
+
+/**
  * `url` is the LiveKit server URL and `token` a LiveKit access token (JWT),
  * both supplied by the host app (e.g. MatrixRTC focus negotiation). The
  * plugin never mints, refreshes, logs, or echoes the token.
+ *
+ * `encryptionKeys` are initial shared-E2EE keys installed by the native side
+ * before `room.connect`. Omitted or empty means an ordinary unencrypted
+ * LiveKit call; use `setNativeCallEncryptionKey` for later rotations.
  */
 export interface ConnectNativeCallRequest {
   callId: string;
   url: string;
   token: string;
   microphoneEnabled: boolean;
+  encryptionKeys?: EncryptionKey[];
+}
+
+/** Rotates or installs a shared-E2EE key mid-call. */
+export interface SetNativeCallEncryptionKeyRequest {
+  callId: string;
+  identity: string;
+  keyIndex: number;
+  key: string;
 }
 
 export interface DisconnectNativeCallRequest {
@@ -204,6 +228,20 @@ export async function clearNativeCallRemoteVideoOverlay(
 
 export async function getNativeCallState(): Promise<NativeCallSnapshot> {
   return await invoke<NativeCallSnapshot>('plugin:livekit-mobile|getNativeCallState');
+}
+
+/**
+ * Installs or rotates a shared-E2EE key for one identity in the active
+ * call. Initial keys belong on `connectNativeCall` (they are installed
+ * before `room.connect`); this command covers later rotations/updates.
+ */
+export async function setNativeCallEncryptionKey(
+  request: SetNativeCallEncryptionKeyRequest
+): Promise<NativeCallSnapshot> {
+  return await invoke<NativeCallSnapshot>(
+    'plugin:livekit-mobile|setNativeCallEncryptionKey',
+    { payload: request }
+  );
 }
 
 /**

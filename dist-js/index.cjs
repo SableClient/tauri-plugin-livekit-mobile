@@ -44,6 +44,14 @@ async function getNativeCallState() {
     return await core.invoke('plugin:livekit-mobile|getNativeCallState');
 }
 /**
+ * Installs or rotates a shared-E2EE key for one identity in the active
+ * call. Initial keys belong on `connectNativeCall` (they are installed
+ * before `room.connect`); this command covers later rotations/updates.
+ */
+async function setNativeCallEncryptionKey(request) {
+    return await core.invoke('plugin:livekit-mobile|setNativeCallEncryptionKey', { payload: request });
+}
+/**
  * Listens for native room snapshots. Every native change — connection state,
  * participant count, microphone/camera flips, failures (via `lastError`) —
  * arrives as one full `NativeCallSnapshot`; there are no separate event
@@ -61,6 +69,7 @@ exports.getNativeCallCapabilities = getNativeCallCapabilities;
 exports.getNativeCallState = getNativeCallState;
 exports.listenNativeCallSnapshot = listenNativeCallSnapshot;
 exports.setNativeCallCameraEnabled = setNativeCallCameraEnabled;
+exports.setNativeCallEncryptionKey = setNativeCallEncryptionKey;
 exports.setNativeCallMicrophoneEnabled = setNativeCallMicrophoneEnabled;
 exports.setNativeCallRemoteVideoOverlay = setNativeCallRemoteVideoOverlay;
 exports.switchNativeCallCamera = switchNativeCallCamera;

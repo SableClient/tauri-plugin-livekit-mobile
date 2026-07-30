@@ -215,6 +215,28 @@ pub enum NativeCallChannelEvent {
     SnapshotChanged { snapshot: NativeCallSnapshot },
 }
 
+/// One shared-E2EE key: `key` is the raw key material, base64-encoded,
+/// scoped to a participant `identity` and a `key_index`. Keys only flow
+/// guest → native; they never appear in snapshots or events.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EncryptionKey {
+    pub identity: String,
+    pub key_index: u32,
+    pub key: String,
+}
+
+// Key material must never land in logs: redact it in `Debug`.
+impl std::fmt::Debug for EncryptionKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EncryptionKey")
+            .field("identity", &self.identity)
+            .field("key_index", &self.key_index)
+            .field("key", &"[redacted]")
+            .finish()
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectNativeCallRequest {
@@ -222,9 +244,14 @@ pub struct ConnectNativeCallRequest {
     pub url: String,
     pub token: String,
     pub microphone_enabled: bool,
+    /// Initial shared-E2EE keys the native side installs before
+    /// `room.connect`. Empty (or omitted) means ordinary unencrypted
+    /// LiveKit, keeping the plugin generic.
+    #[serde(default)]
+    pub encryption_keys: Vec<EncryptionKey>,
 }
 
-// Token must never land in logs: redact it in `Debug`.
+// Token and key material must never land in logs: redact them in `Debug`.
 impl std::fmt::Debug for ConnectNativeCallRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ConnectNativeCallRequest")
@@ -232,6 +259,7 @@ impl std::fmt::Debug for ConnectNativeCallRequest {
             .field("url", &self.url)
             .field("token", &"[redacted]")
             .field("microphone_enabled", &self.microphone_enabled)
+            .field("encryption_keys", &self.encryption_keys)
             .finish()
     }
 }
@@ -281,6 +309,28 @@ pub struct ClearNativeCallRemoteVideoOverlayRequest {
     pub call_id: String,
 }
 
+/// Mid-call shared-E2EE key rotation/update for one participant identity.
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetNativeCallEncryptionKeyRequest {
+    pub call_id: String,
+    pub identity: String,
+    pub key_index: u32,
+    pub key: String,
+}
+
+// Key material must never land in logs: redact it in `Debug`.
+impl std::fmt::Debug for SetNativeCallEncryptionKeyRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SetNativeCallEncryptionKeyRequest")
+            .field("call_id", &self.call_id)
+            .field("identity", &self.identity)
+            .field("key_index", &self.key_index)
+            .field("key", &"[redacted]")
+            .finish()
+    }
+}
+
 /// The connect payload fields forwarded to the native room plugins.
 ///
 /// Kept in `models.rs` (not `mobile.rs`, which only compiles on mobile
@@ -292,9 +342,12 @@ pub struct NativeConnectCallFields<'a> {
     pub url: &'a str,
     pub token: &'a str,
     pub microphone_enabled: bool,
+    // Omitted entirely for ordinary unencrypted calls.
+    #[serde(skip_serializing_if = "<[EncryptionKey]>::is_empty")]
+    pub encryption_keys: &'a [EncryptionKey],
 }
 
-// Token must never land in logs: redact it in `Debug`.
+// Token and key material must never land in logs: redact them in `Debug`.
 impl std::fmt::Debug for NativeConnectCallFields<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NativeConnectCallFields")
@@ -302,6 +355,7 @@ impl std::fmt::Debug for NativeConnectCallFields<'_> {
             .field("url", &self.url)
             .field("token", &"[redacted]")
             .field("microphone_enabled", &self.microphone_enabled)
+            .field("encryption_keys", &self.encryption_keys)
             .finish()
     }
 }
@@ -324,6 +378,29 @@ pub struct NativeSetMicrophoneFields<'a> {
 pub struct NativeSetCameraFields<'a> {
     pub call_id: &'a str,
     pub enabled: bool,
+}
+
+/// Native payload for `setNativeCallEncryptionKey` (Android) /
+/// `setEncryptionKey` (iOS): one shared-E2EE key for one identity.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeSetEncryptionKeyFields<'a> {
+    pub call_id: &'a str,
+    pub identity: &'a str,
+    pub key_index: u32,
+    pub key: &'a str,
+}
+
+// Key material must never land in logs: redact it in `Debug`.
+impl std::fmt::Debug for NativeSetEncryptionKeyFields<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NativeSetEncryptionKeyFields")
+            .field("call_id", &self.call_id)
+            .field("identity", &self.identity)
+            .field("key_index", &self.key_index)
+            .field("key", &"[redacted]")
+            .finish()
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -598,9 +675,67 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(request.call_id, "call-1");
+        // Omitted `encryptionKeys`: ordinary unencrypted call.
+        assert!(request.encryption_keys.is_empty());
         let debug = format!("{request:?}");
         assert!(debug.contains("[redacted]"));
         assert!(!debug.contains("secret-jwt"));
+    }
+
+    #[test]
+    fn connect_request_encryption_keys_parse_camel_case_and_debug_redacts_material() {
+        let request: ConnectNativeCallRequest = serde_json::from_value(serde_json::json!({
+            "callId": "call-1",
+            "url": "wss://livekit.example",
+            "token": "secret-jwt",
+            "microphoneEnabled": true,
+            "encryptionKeys": [
+                { "identity": "@alice:example.org", "keyIndex": 0, "key": "c2VjcmV0LWtleQ==" },
+                { "identity": "@bob:example.org", "keyIndex": 1, "key": "b3RoZXIta2V5" }
+            ]
+        }))
+        .unwrap();
+        assert_eq!(request.encryption_keys.len(), 2);
+        assert_eq!(request.encryption_keys[0].identity, "@alice:example.org");
+        assert_eq!(request.encryption_keys[0].key_index, 0);
+        assert_eq!(request.encryption_keys[0].key, "c2VjcmV0LWtleQ==");
+
+        // Empty `encryptionKeys` means the same as omitted.
+        let plain: ConnectNativeCallRequest = serde_json::from_value(serde_json::json!({
+            "callId": "call-1",
+            "url": "wss://livekit.example",
+            "token": "secret-jwt",
+            "microphoneEnabled": true,
+            "encryptionKeys": []
+        }))
+        .unwrap();
+        assert!(plain.encryption_keys.is_empty());
+
+        let debug = format!("{request:?}");
+        assert!(debug.contains("[redacted]"));
+        assert!(!debug.contains("secret-jwt"));
+        // Key material is redacted; identities and indexes stay visible.
+        assert!(!debug.contains("c2VjcmV0LWtleQ=="));
+        assert!(!debug.contains("b3RoZXIta2V5"));
+        assert!(debug.contains("@alice:example.org"));
+        assert!(debug.contains("key_index: 1"));
+    }
+
+    #[test]
+    fn encryption_key_request_parses_camel_case_and_debug_redacts_material() {
+        let request: SetNativeCallEncryptionKeyRequest =
+            serde_json::from_value(serde_json::json!({
+                "callId": "call-1",
+                "identity": "@alice:example.org",
+                "keyIndex": 3,
+                "key": "c2VjcmV0LWtleQ=="
+            }))
+            .unwrap();
+        assert_eq!(request.call_id, "call-1");
+        assert_eq!(request.key_index, 3);
+        let debug = format!("{request:?}");
+        assert!(debug.contains("[redacted]"));
+        assert!(!debug.contains("c2VjcmV0LWtleQ=="));
     }
 
     #[test]
@@ -610,7 +745,10 @@ mod tests {
             url: "wss://livekit.example",
             token: "secret-jwt",
             microphone_enabled: true,
+            encryption_keys: &[],
         };
+        // No E2EE keys: the `encryptionKeys` key is omitted entirely, so
+        // natives that predate the field see an unchanged payload.
         assert_eq!(
             serde_json::to_value(&fields).unwrap(),
             serde_json::json!({
@@ -623,6 +761,51 @@ mod tests {
         let debug = format!("{fields:?}");
         assert!(debug.contains("[redacted]"));
         assert!(!debug.contains("secret-jwt"));
+
+        let keys = [EncryptionKey {
+            identity: "@alice:example.org".into(),
+            key_index: 0,
+            key: "c2VjcmV0LWtleQ==".into(),
+        }];
+        let encrypted = NativeConnectCallFields {
+            encryption_keys: &keys,
+            ..fields
+        };
+        assert_eq!(
+            serde_json::to_value(&encrypted).unwrap(),
+            serde_json::json!({
+                "callId": "call-1",
+                "url": "wss://livekit.example",
+                "token": "secret-jwt",
+                "microphoneEnabled": true,
+                "encryptionKeys": [
+                    { "identity": "@alice:example.org", "keyIndex": 0, "key": "c2VjcmV0LWtleQ==" }
+                ]
+            })
+        );
+        let debug = format!("{encrypted:?}");
+        assert!(debug.contains("[redacted]"));
+        assert!(!debug.contains("c2VjcmV0LWtleQ=="));
+
+        // Native key-rotation payload: camelCase wire, redacted Debug.
+        let rotation = NativeSetEncryptionKeyFields {
+            call_id: "call-1",
+            identity: "@alice:example.org",
+            key_index: 2,
+            key: "c2VjcmV0LWtleQ==",
+        };
+        assert_eq!(
+            serde_json::to_value(&rotation).unwrap(),
+            serde_json::json!({
+                "callId": "call-1",
+                "identity": "@alice:example.org",
+                "keyIndex": 2,
+                "key": "c2VjcmV0LWtleQ=="
+            })
+        );
+        let debug = format!("{rotation:?}");
+        assert!(debug.contains("[redacted]"));
+        assert!(!debug.contains("c2VjcmV0LWtleQ=="));
 
         assert_eq!(
             serde_json::to_value(NativeDisconnectCallFields { call_id: "call-1" }).unwrap(),

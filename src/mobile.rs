@@ -13,8 +13,8 @@ use crate::{
     models::{
         failure_code_from_raw, NativeCallCapabilities, NativeCallChannelEvent,
         NativeCallFailureCode, NativeCallSnapshot, NativeConnectCallFields,
-        NativeDisconnectCallFields, NativeSetCameraFields, NativeSetMicrophoneFields,
-        NativeSetRemoteVideoOverlayFields,
+        NativeDisconnectCallFields, NativeSetCameraFields, NativeSetEncryptionKeyFields,
+        NativeSetMicrophoneFields, NativeSetRemoteVideoOverlayFields,
     },
 };
 
@@ -36,6 +36,7 @@ mod platform_commands {
     pub(super) const GET_STATE: &str = "getNativeCallState";
     pub(super) const SET_REMOTE_VIDEO_OVERLAY: &str = "setNativeCallRemoteVideoOverlay";
     pub(super) const CLEAR_REMOTE_VIDEO_OVERLAY: &str = "clearNativeCallRemoteVideoOverlay";
+    pub(super) const SET_ENCRYPTION_KEY: &str = "setNativeCallEncryptionKey";
 }
 
 #[cfg(target_os = "ios")]
@@ -50,6 +51,7 @@ mod platform_commands {
     pub(super) const GET_STATE: &str = "getState";
     pub(super) const SET_REMOTE_VIDEO_OVERLAY: &str = "setRemoteVideoOverlay";
     pub(super) const CLEAR_REMOTE_VIDEO_OVERLAY: &str = "clearRemoteVideoOverlay";
+    pub(super) const SET_ENCRYPTION_KEY: &str = "setEncryptionKey";
 }
 
 /// Upper bound for any single native invocation, so a hung native call
@@ -215,6 +217,14 @@ impl<R: Runtime> MobileBackend<R> {
             .await
     }
 
+    pub(crate) async fn set_native_call_encryption_key(
+        &self,
+        request: NativeSetEncryptionKeyRequest<'_>,
+    ) -> crate::Result<NativeCallSnapshot> {
+        self.invoke(platform_commands::SET_ENCRYPTION_KEY, request)
+            .await
+    }
+
     pub(crate) async fn get_native_call_state(&self) -> crate::Result<NativeCallSnapshot> {
         self.invoke(platform_commands::GET_STATE, ()).await
     }
@@ -275,6 +285,15 @@ pub(crate) struct NativeSwitchCameraRequest<'a> {
 pub(crate) struct NativeSetRemoteVideoOverlayRequest<'a> {
     #[serde(flatten)]
     pub fields: NativeSetRemoteVideoOverlayFields<'a>,
+}
+
+/// Native payload for `setNativeCallEncryptionKey` (Android) /
+/// `setEncryptionKey` (iOS). `Debug` redacts the key via the contained fields.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NativeSetEncryptionKeyRequest<'a> {
+    #[serde(flatten)]
+    pub fields: NativeSetEncryptionKeyFields<'a>,
 }
 
 pub fn init<R: Runtime, C: DeserializeOwned>(

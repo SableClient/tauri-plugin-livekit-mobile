@@ -33,6 +33,13 @@ final class RoomController: NSObject {
   private var room: Room?
   private var channel: Channel?
   private var callId: String?
+  /// Per-call E2EE key provider. Non-nil only while the current attempt is
+  /// encrypted; created with all initial key material installed before the
+  /// Room exists, so rotation is accepted for the whole `connecting` phase.
+  private var keyProvider: BaseKeyProvider?
+  /// Highest applied key index per participant identity, for the monotonic
+  /// rotation guard. Never logged or exposed through the bridge.
+  private var appliedKeyIndexes: [String: Int32] = [:]
   private var revision: UInt64 = 0
   private var connectionState: BridgeConnectionState = .idle
   private var microphoneEnabled = false
@@ -106,12 +113,22 @@ final class RoomController: NSObject {
       break
     }
 
+    // Decode the optional E2EE key material up front: malformed base64 or
+    // negative indexes reject through the bounded invalid-request path
+    // without disturbing any state. Absent or empty means unencrypted.
+    guard let keyMaterial = Self.decodeKeyMaterial(from: args.encryptionKeys) else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+
     attempt &+= 1
     let attemptId = attempt
 
     // Clear a leftover room from a failed attempt, if any.
     if let staleRoom = room {
       room = nil
+      keyProvider = nil
+      appliedKeyIndexes = [:]
       removeOverlayView()
       await staleRoom.disconnect()
       guard attemptId == attempt else {
@@ -131,6 +148,13 @@ final class RoomController: NSObject {
     connectionState = .connecting
     emitSnapshotChanged()
 
+    // Install all initial per-identity keys before any suspension point so
+    // rotation commands are accepted for the entire connecting phase.
+    if !keyMaterial.isEmpty {
+      keyProvider = Self.makeKeyProvider(keyMaterial: keyMaterial)
+      appliedKeyIndexes = Self.initialAppliedKeyIndexes(for: keyMaterial)
+    }
+
     if args.microphoneEnabled {
       let granted = await Self.requestMicrophonePermission()
       guard attemptId == attempt else {
@@ -143,7 +167,15 @@ final class RoomController: NSObject {
       }
     }
 
-    let newRoom = Room(delegate: self)
+    let newRoom: Room
+    if let keyProvider {
+      // Frame-only E2EE via the legacy options: the newer EncryptionOptions
+      // also encrypts data channels, which the web peers do not support.
+      let roomOptions = RoomOptions(e2eeOptions: E2EEOptions(keyProvider: keyProvider))
+      newRoom = Room(delegate: self, roomOptions: roomOptions)
+    } else {
+      newRoom = Room(delegate: self)
+    }
     room = newRoom
 
     do {
@@ -151,6 +183,7 @@ final class RoomController: NSObject {
     } catch {
       // The thrown error is deliberately discarded: native errors may embed
       // the server URL, and only bounded codes may cross the bridge.
+      // failConnect drops this attempt's key provider and index state.
       guard attemptId == attempt else {
         rejectCancelled(invoke)
         return
@@ -355,6 +388,128 @@ final class RoomController: NSObject {
 
     // The camera position is intentionally not part of the snapshot.
     invoke.resolve(snapshot())
+  }
+
+  // MARK: - E2EE key rotation
+
+  /// Installs rotated key material for one participant identity. The input
+  /// is validated first, matching the other lanes: invalid decoded input
+  /// rejects `invalid_request` regardless of call state. A stale call id or
+  /// a current call without an E2EE provider (unencrypted call, failed
+  /// attempt) resolves the unchanged snapshot; the provider exists exactly
+  /// while an attempt is connecting, connected, or reconnecting, so those
+  /// all accept updates. Replayed or older key indexes are dropped so key
+  /// material never moves backwards. Deliberately emits no snapshot event
+  /// and bumps no revision: key state is not part of the bridge contract
+  /// and must remain invisible.
+  func setEncryptionKey(
+    callId requestedCallId: String, identity: String, keyIndex: Int32,
+    key: String, invoke: Invoke
+  ) {
+    guard let material = Self.decodeKey(
+      identity: identity, keyIndex: keyIndex, key: key)
+    else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+    guard callId == requestedCallId, let keyProvider else {
+      invoke.resolve(snapshot())
+      return
+    }
+    guard Self.keyIndexAdvances(
+      material.keyIndex, after: appliedKeyIndexes[material.identity])
+    else {
+      invoke.resolve(snapshot())
+      return
+    }
+    keyProvider.setKey(
+      keyData: material.keyData, participantId: material.identity,
+      index: material.keyIndex)
+    appliedKeyIndexes[material.identity] = material.keyIndex
+    invoke.resolve(snapshot())
+  }
+
+  /// Decoded per-participant key material for one call attempt.
+  struct EncryptionKeyMaterial {
+    let identity: String
+    let keyIndex: Int32
+    let keyData: Data
+  }
+
+  /// Validates and decodes one wire entry, matching the Rust gate and the
+  /// Android lane: blank (empty or whitespace-only) identities, negative
+  /// indexes, undecodable base64, and empty decoded key bytes are all
+  /// invalid. Key material is never logged.
+  nonisolated static func decodeKey(
+    identity: String, keyIndex: Int32, key: String
+  ) -> EncryptionKeyMaterial? {
+    guard !identity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+      keyIndex >= 0,
+      let keyData = Data(base64Encoded: key), !keyData.isEmpty
+    else { return nil }
+    return EncryptionKeyMaterial(
+      identity: identity, keyIndex: keyIndex, keyData: keyData)
+  }
+
+  /// Decodes optional base64 key payloads. Returns nil when any entry is
+  /// undecodable (the caller rejects via the bounded invalid-request path),
+  /// an empty array when the payload is absent or empty (unencrypted call).
+  nonisolated static func decodeKeyMaterial(
+    from payloads: [EncryptionKeyPayload]?
+  ) -> [EncryptionKeyMaterial]? {
+    guard let payloads, !payloads.isEmpty else { return [] }
+    var material: [EncryptionKeyMaterial] = []
+    material.reserveCapacity(payloads.count)
+    for payload in payloads {
+      guard
+        let entry = Self.decodeKey(
+          identity: payload.identity, keyIndex: payload.keyIndex, key: payload.key)
+      else { return nil }
+      material.append(entry)
+    }
+    return material
+  }
+
+  /// Seeds the per-identity monotonic guard from the initial keys. Every
+  /// supplied entry is installed on the provider's key ring; for duplicate
+  /// identities the greatest index is tracked as the latest, so only the
+  /// strictly-increasing guard applies to post-connect rotation.
+  nonisolated static func initialAppliedKeyIndexes(
+    for keyMaterial: [EncryptionKeyMaterial]
+  ) -> [String: Int32] {
+    var applied: [String: Int32] = [:]
+    for key in keyMaterial {
+      applied[key.identity] = max(applied[key.identity] ?? .min, key.keyIndex)
+    }
+    return applied
+  }
+
+  /// Builds the per-call key provider matching the web lanes: per-participant
+  /// keys (no shared key), HKDF derivation, ratchet window 10, key ring 256;
+  /// the ratchet salt and uncrypted magic bytes keep the LiveKit defaults.
+  nonisolated static func makeKeyProvider(
+    keyMaterial: [EncryptionKeyMaterial]
+  ) -> BaseKeyProvider {
+    let provider = BaseKeyProvider(
+      options: KeyProviderOptions(
+        sharedKey: false,
+        ratchetWindowSize: 10,
+        keyRingSize: 256,
+        keyDerivationAlgorithm: .hkdf))
+    for key in keyMaterial {
+      provider.setKey(
+        keyData: key.keyData, participantId: key.identity, index: key.keyIndex)
+    }
+    return provider
+  }
+
+  /// Monotonic rotation guard: only a strictly newer index may advance an
+  /// identity's key material.
+  nonisolated static func keyIndexAdvances(
+    _ newIndex: Int32, after applied: Int32?
+  ) -> Bool {
+    guard let applied else { return true }
+    return newIndex > applied
   }
 
   // MARK: - Remote video overlay
@@ -565,6 +720,8 @@ final class RoomController: NSObject {
     cameraEnabled = false
     participantCount = 0
     remoteParticipants = []
+    keyProvider = nil
+    appliedKeyIndexes = [:]
     lastError = nil
     removeOverlayView()
     if let roomToClose {
@@ -594,6 +751,8 @@ final class RoomController: NSObject {
     cameraEnabled = false
     participantCount = 0
     remoteParticipants = []
+    keyProvider = nil
+    appliedKeyIndexes = [:]
     lastError = nil
     callId = nil
     removeOverlayView()
@@ -626,6 +785,8 @@ final class RoomController: NSObject {
     cameraEnabled = false
     participantCount = 0
     remoteParticipants = []
+    keyProvider = nil
+    appliedKeyIndexes = [:]
     lastError = error
     emitSnapshotChanged()
     invoke.reject(error.message, code: error.code.rawValue)
@@ -854,8 +1015,10 @@ extension RoomController: RoomDelegate {
     guard connectionState != .idle, connectionState != .failed else { return }
     // Terminal, unexpected disconnect. The LiveKitError is deliberately not
     // forwarded (bounded codes only). Keep `callId`/channel so Rust sees the
-    // failed snapshot; drop the dead room.
+    // failed snapshot; drop the dead room and its key state.
     self.room = nil
+    keyProvider = nil
+    appliedKeyIndexes = [:]
     microphoneEnabled = false
     cameraEnabled = false
     participantCount = 0

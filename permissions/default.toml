@@ -9,5 +9,6 @@ permissions = [
     "allow-switchNativeCallCamera",
     "allow-setNativeCallRemoteVideoOverlay",
     "allow-clearNativeCallRemoteVideoOverlay",
+    "allow-setNativeCallEncryptionKey",
     "allow-getNativeCallState",
 ]

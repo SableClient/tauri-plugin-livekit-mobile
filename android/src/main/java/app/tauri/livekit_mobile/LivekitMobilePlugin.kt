@@ -15,11 +15,19 @@ import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 
 @InvokeArg
+internal class NativeCallEncryptionKeyEntry {
+    var identity: String = ""
+    var keyIndex: Int = 0
+    var key: String = ""
+}
+
+@InvokeArg
 internal class ConnectNativeCallArgs {
     var callId: String = ""
     var url: String = ""
     var token: String = ""
     var microphoneEnabled: Boolean = false
+    var encryptionKeys: List<NativeCallEncryptionKeyEntry>? = null
     lateinit var channel: Channel
 }
 
@@ -38,6 +46,14 @@ internal class SetNativeCallMicrophoneEnabledArgs {
 internal class SetNativeCallCameraEnabledArgs {
     var callId: String = ""
     var enabled: Boolean = false
+}
+
+@InvokeArg
+internal class SetNativeCallEncryptionKeyArgs {
+    var callId: String = ""
+    var identity: String = ""
+    var keyIndex: Int = 0
+    var key: String = ""
 }
 
 @InvokeArg
@@ -131,6 +147,12 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
             reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
             return
         }
+        // Decode key material at the boundary; malformed entries fail the call.
+        val encryptionKeys = decodeEncryptionKeys(args.encryptionKeys)
+        if (encryptionKeys == null) {
+            reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
+            return
+        }
         if (controller.isBusy(args.callId)) {
             reject(invoke, NativeCallWire.ERR_BUSY)
             return
@@ -155,6 +177,7 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
             args.url,
             args.token,
             args.microphoneEnabled,
+            encryptionKeys,
             args.channel,
             invoke,
         )
@@ -269,6 +292,26 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     @Command
+    fun setNativeCallEncryptionKey(invoke: Invoke) {
+        val args =
+            runCatching { invoke.parseArgs(SetNativeCallEncryptionKeyArgs::class.java) }
+                .getOrNull()
+        if (args == null || args.callId.isBlank()) {
+            reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
+            return
+        }
+        // Decode key material at the boundary; the controller decides whether
+        // the current call accepts it.
+        val material =
+            NativeCallEncryption.decodeEntry(args.identity, args.keyIndex, args.key)
+        if (material == null) {
+            reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
+            return
+        }
+        controller.setEncryptionKey(args.callId, material, invoke)
+    }
+
+    @Command
     fun clearNativeCallRemoteVideoOverlay(invoke: Invoke) {
         val args = runCatching { invoke.parseArgs(CallIdArgs::class.java) }.getOrNull()
         if (args == null || args.callId.isBlank()) {
@@ -288,12 +331,19 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
         val connect = pendingConnect
         if (connect != null && connect.invoke.id == invoke.id) {
             pendingConnect = null
+            // Already validated in connectNativeCall; re-decoded defensively.
+            val encryptionKeys = decodeEncryptionKeys(connect.args.encryptionKeys)
+            if (encryptionKeys == null) {
+                reject(connect.invoke, NativeCallWire.ERR_INVALID_REQUEST)
+                return
+            }
             if (hasRecordAudioPermission()) {
                 controller.connect(
                     connect.args.callId,
                     connect.args.url,
                     connect.args.token,
                     connect.args.microphoneEnabled,
+                    encryptionKeys,
                     connect.args.channel,
                     connect.invoke,
                 )
@@ -349,6 +399,21 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
     private fun reject(invoke: Invoke, code: String) {
         val safeCode = NativeCallWire.sanitize(code)
         invoke.reject(NativeCallWire.messageFor(safeCode), safeCode)
+    }
+
+    /**
+     * Validates and decodes the optional initial key list: null means at least
+     * one entry was malformed; an absent or empty list means a generic
+     * (non-E2EE) call.
+     */
+    private fun decodeEncryptionKeys(
+        entries: List<NativeCallEncryptionKeyEntry>?,
+    ): List<NativeCallKeyMaterial>? {
+        if (entries.isNullOrEmpty()) return emptyList()
+        return entries.map { entry ->
+            NativeCallEncryption.decodeEntry(entry.identity, entry.keyIndex, entry.key)
+                ?: return null
+        }
     }
 
     private fun hasRecordAudioPermission(): Boolean =

@@ -5,22 +5,42 @@ import WebKit
 // Wire contract summary (the shared Rust bridge owns the full schema):
 // - Commands: capabilities, connect, disconnect, cancelConnect,
 //   setMicrophoneEnabled, setCameraEnabled, switchCamera, getState,
-//   setRemoteVideoOverlay, clearRemoteVideoOverlay.
+//   setRemoteVideoOverlay, clearRemoteVideoOverlay, setEncryptionKey.
 // - Every response is the authoritative snapshot
 //   { revision, callId|null, connectionState, microphoneEnabled,
 //     cameraEnabled, participantCount, lastError?: {code, message} }.
 // - The only channel event is { event: "snapshot_changed", snapshot }.
 //
 // `token` is a LiveKit JWT: used only transiently to connect, and never
-// logged, stored, or echoed back. Only bounded codes and static messages
-// cross this boundary; native errors (which may embed URLs) are discarded.
+// logged, stored, or echoed back. E2EE key material (base64) is likewise
+// only installed into the native key provider and never logged, echoed, or
+// exposed through snapshots. Only bounded codes and static messages cross
+// this boundary; native errors (which may embed URLs) are discarded.
 
 struct ConnectArgs: Decodable {
   let callId: String
   let url: String
   let token: String
   let microphoneEnabled: Bool
+  /// Per-participant E2EE key material. Absent or empty means an
+  /// unencrypted (generic) call.
+  let encryptionKeys: [EncryptionKeyPayload]?
   let channel: Channel
+}
+
+struct EncryptionKeyPayload: Decodable {
+  let identity: String
+  let keyIndex: Int32
+  /// Base64-encoded raw key bytes.
+  let key: String
+}
+
+struct SetEncryptionKeyArgs: Decodable {
+  let callId: String
+  let identity: String
+  let keyIndex: Int32
+  /// Base64-encoded rotated key bytes.
+  let key: String
 }
 
 struct DisconnectArgs: Decodable {
@@ -283,6 +303,28 @@ final class LivekitMobilePlugin: Plugin {
         return
       }
       await controller.switchCamera(callId: args.callId, invoke: invoke)
+    }
+  }
+
+  /// Key rotation for an encrypted call: installs rotated key material for
+  /// one participant identity. No snapshot event is emitted; key state
+  /// never appears in the bridge contract.
+  @objc public func setEncryptionKey(_ invoke: Invoke) throws {
+    guard let args = try? invoke.parseArgs(SetEncryptionKeyArgs.self) else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+    Task { @MainActor [weak controller] in
+      guard let controller else {
+        reject(invoke, .unavailable)
+        return
+      }
+      controller.setEncryptionKey(
+        callId: args.callId,
+        identity: args.identity,
+        keyIndex: args.keyIndex,
+        key: args.key,
+        invoke: invoke)
     }
   }
 

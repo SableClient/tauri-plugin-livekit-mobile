@@ -1,4 +1,5 @@
 import Foundation
+import LiveKit
 import Tauri
 import UIKit
 import XCTest
@@ -250,6 +251,309 @@ final class WireContractTests: XCTestCase {
     let camera = try invoke.parseArgs(SetCameraEnabledArgs.self)
     XCTAssertEqual(camera.callId, "call-1")
     XCTAssertFalse(camera.enabled)
+  }
+
+  func testConnectArgsDecodeOptionalEncryptionKeys() throws {
+    // Absent: the generic (unencrypted) path must keep decoding.
+    let (plainInvoke, _) = makeInvoke(data: """
+      {
+        "callId": "call-1",
+        "url": "wss://example.test",
+        "token": "T0K3N",
+        "microphoneEnabled": false,
+        "channel": "__CHANNEL__:7"
+      }
+      """)
+    let plain = try plainInvoke.parseArgs(ConnectArgs.self)
+    XCTAssertNil(plain.encryptionKeys)
+
+    // Present: identity, key index and base64 key bytes per participant.
+    let (invoke, _) = makeInvoke(data: """
+      {
+        "callId": "call-1",
+        "url": "wss://example.test",
+        "token": "T0K3N",
+        "microphoneEnabled": false,
+        "channel": "__CHANNEL__:7",
+        "encryptionKeys": [
+          { "identity": "@alice:example.org", "keyIndex": 0, "key": "AP8=" },
+          { "identity": "@bob:example.org", "keyIndex": 5, "key": "MTIz" }
+        ]
+      }
+      """)
+    let args = try invoke.parseArgs(ConnectArgs.self)
+    let keys = try XCTUnwrap(args.encryptionKeys)
+    XCTAssertEqual(keys.count, 2)
+    XCTAssertEqual(keys[0].identity, "@alice:example.org")
+    XCTAssertEqual(keys[0].keyIndex, 0)
+    XCTAssertEqual(keys[0].key, "AP8=")
+    XCTAssertEqual(keys[1].identity, "@bob:example.org")
+    XCTAssertEqual(keys[1].keyIndex, 5)
+    XCTAssertEqual(keys[1].key, "MTIz")
+  }
+
+  func testSetEncryptionKeyArgsDecodeCamelCase() throws {
+    let (invoke, _) = makeInvoke(data: """
+      {
+        "callId": "call-1",
+        "identity": "@alice:example.org",
+        "keyIndex": 7,
+        "key": "AP8="
+      }
+      """)
+    let args = try invoke.parseArgs(SetEncryptionKeyArgs.self)
+    XCTAssertEqual(args.callId, "call-1")
+    XCTAssertEqual(args.identity, "@alice:example.org")
+    XCTAssertEqual(args.keyIndex, 7)
+    XCTAssertEqual(args.key, "AP8=")
+  }
+
+  // MARK: - E2EE key material
+
+  func testDecodeKeyMaterialAbsentOrEmptyMeansUnencrypted() throws {
+    XCTAssertTrue(try XCTUnwrap(RoomController.decodeKeyMaterial(from: nil)).isEmpty)
+    XCTAssertTrue(try XCTUnwrap(RoomController.decodeKeyMaterial(from: [])).isEmpty)
+  }
+
+  func testDecodeKeyMaterialDecodesBase64Keys() throws {
+    let material = try XCTUnwrap(
+      RoomController.decodeKeyMaterial(from: [
+        EncryptionKeyPayload(
+          identity: "@alice:example.org", keyIndex: 0, key: "AP8="),
+        EncryptionKeyPayload(
+          identity: "@bob:example.org", keyIndex: 5, key: "MTIz"),
+      ]))
+    XCTAssertEqual(material.count, 2)
+    XCTAssertEqual(material[0].identity, "@alice:example.org")
+    XCTAssertEqual(material[0].keyIndex, 0)
+    XCTAssertEqual(material[0].keyData, Data([0x00, 0xFF]))
+    XCTAssertEqual(material[1].identity, "@bob:example.org")
+    XCTAssertEqual(material[1].keyIndex, 5)
+    XCTAssertEqual(material[1].keyData, Data("123".utf8))
+  }
+
+  /// Blank identities, negative indexes, undecodable base64, and empty
+  /// decoded key bytes all fail the whole decode (matching the Rust gate
+  /// and the Android lane) so the caller can reject through the bounded
+  /// invalid-request path.
+  func testDecodeKeyMaterialRejectsInvalidEntries() throws {
+    XCTAssertNil(
+      RoomController.decodeKeyMaterial(from: [
+        EncryptionKeyPayload(identity: "@a:b.c", keyIndex: 0, key: "!!!")
+      ]))
+    XCTAssertNil(
+      RoomController.decodeKeyMaterial(from: [
+        EncryptionKeyPayload(identity: "@a:b.c", keyIndex: 0, key: "AP8")
+      ]))
+    XCTAssertNil(
+      RoomController.decodeKeyMaterial(from: [
+        EncryptionKeyPayload(identity: "@a:b.c", keyIndex: -1, key: "AP8=")
+      ]))
+    // Blank identities: empty and whitespace-only.
+    XCTAssertNil(
+      RoomController.decodeKeyMaterial(from: [
+        EncryptionKeyPayload(identity: "", keyIndex: 0, key: "AP8=")
+      ]))
+    XCTAssertNil(
+      RoomController.decodeKeyMaterial(from: [
+        EncryptionKeyPayload(identity: " \t\n", keyIndex: 0, key: "AP8=")
+      ]))
+    // Base64 that decodes to zero bytes is not a usable key.
+    XCTAssertNil(
+      RoomController.decodeKeyMaterial(from: [
+        EncryptionKeyPayload(identity: "@a:b.c", keyIndex: 0, key: "")
+      ]))
+    // A single bad entry rejects the payload, even with valid entries.
+    XCTAssertNil(
+      RoomController.decodeKeyMaterial(from: [
+        EncryptionKeyPayload(identity: "@a:b.c", keyIndex: 0, key: "AP8="),
+        EncryptionKeyPayload(identity: "@b:c.d", keyIndex: 1, key: "!!"),
+      ]))
+  }
+
+  /// The per-call provider must match the web lanes: per-participant keys,
+  /// HKDF, ratchet window 10, key ring 256, LiveKit default salt/magic —
+  /// and raw (non-UTF8) key bytes must round-trip unmodified.
+  func testMakeKeyProviderMatchesWebLaneConfiguration() throws {
+    let key = Data([0xFF, 0xFE, 0x80, 0x00, 0xDE, 0xAD])
+    let material = [
+      RoomController.EncryptionKeyMaterial(
+        identity: "@alice:example.org", keyIndex: 1, keyData: key),
+      RoomController.EncryptionKeyMaterial(
+        identity: "@bob:example.org", keyIndex: 200, keyData: Data("bob-key".utf8)),
+    ]
+    let provider = RoomController.makeKeyProvider(keyMaterial: material)
+
+    let options = provider.options
+    XCTAssertFalse(options.sharedKey)
+    XCTAssertEqual(options.keyDerivationAlgorithm, .hkdf)
+    XCTAssertEqual(options.ratchetWindowSize, 10)
+    XCTAssertEqual(options.keyRingSize, 256)
+    XCTAssertEqual(options.ratchetSalt, Data(defaultRatchetSalt.utf8))
+    XCTAssertEqual(options.uncryptedMagicBytes, Data(defaultMagicBytes.utf8))
+
+    XCTAssertEqual(
+      provider.exportKey(participantId: "@alice:example.org", index: 1), key)
+    XCTAssertEqual(
+      provider.exportKey(participantId: "@bob:example.org", index: 200),
+      Data("bob-key".utf8))
+  }
+
+  func testKeyIndexMonotonicGuard() {
+    XCTAssertTrue(RoomController.keyIndexAdvances(0, after: nil))
+    XCTAssertTrue(RoomController.keyIndexAdvances(7, after: 6))
+    XCTAssertFalse(RoomController.keyIndexAdvances(6, after: 6))
+    XCTAssertFalse(RoomController.keyIndexAdvances(2, after: 6))
+  }
+
+  /// Duplicate identities in the initial payload keep every ring entry and
+  /// seed the monotonic guard with the greatest index, so the
+  /// strictly-increasing rule applies only to post-connect rotation.
+  func testInitialKeyIndexesKeepGreatestPerIdentity() {
+    let data = Data([0x01])
+    let applied = RoomController.initialAppliedKeyIndexes(for: [
+      RoomController.EncryptionKeyMaterial(
+        identity: "@a:b.c", keyIndex: 3, keyData: data),
+      RoomController.EncryptionKeyMaterial(
+        identity: "@a:b.c", keyIndex: 7, keyData: data),
+      RoomController.EncryptionKeyMaterial(
+        identity: "@a:b.c", keyIndex: 5, keyData: data),
+      RoomController.EncryptionKeyMaterial(
+        identity: "@b:c.d", keyIndex: 1, keyData: data),
+    ])
+    XCTAssertEqual(applied, ["@a:b.c": 7, "@b:c.d": 1])
+  }
+
+  /// Every supplied entry for a repeated identity must land on the
+  /// provider's key ring (not just the last one).
+  func testMakeKeyProviderPreservesRingEntriesForDuplicateIdentity() {
+    let first = Data([0xAA])
+    let second = Data([0xBB])
+    let third = Data([0xCC])
+    let provider = RoomController.makeKeyProvider(keyMaterial: [
+      RoomController.EncryptionKeyMaterial(
+        identity: "@a:b.c", keyIndex: 3, keyData: first),
+      RoomController.EncryptionKeyMaterial(
+        identity: "@a:b.c", keyIndex: 7, keyData: second),
+      RoomController.EncryptionKeyMaterial(
+        identity: "@a:b.c", keyIndex: 5, keyData: third),
+    ])
+    XCTAssertEqual(provider.exportKey(participantId: "@a:b.c", index: 3), first)
+    XCTAssertEqual(provider.exportKey(participantId: "@a:b.c", index: 5), third)
+    XCTAssertEqual(provider.exportKey(participantId: "@a:b.c", index: 7), second)
+  }
+
+  // MARK: - Rotation invoke settlement
+
+  /// A stale call id must never touch key state and resolves the current
+  /// snapshot, like the other call-scoped commands.
+  func testStaleSetEncryptionKeyIsNoOpResolve() async throws {
+    let plugin = LivekitMobilePlugin()
+    let (invoke, recording) = makeInvoke(data: """
+      {
+        "callId": "unknown",
+        "identity": "@alice:example.org",
+        "keyIndex": 1,
+        "key": "AP8="
+      }
+      """)
+    try plugin.setEncryptionKey(invoke)
+    let response = await recording.wait()
+    XCTAssertEqual(response.id, Self.resolveId)
+    let payload = try jsonObject(try XCTUnwrap(response.payload))
+    try assertSnapshotKeys(
+      payload, revision: 0, callId: nil, connectionState: "idle",
+      microphoneEnabled: false, cameraEnabled: false, participantCount: 0)
+  }
+
+  func testMalformedSetEncryptionKeyRejectsInvalidRequest() async throws {
+    let plugin = LivekitMobilePlugin()
+    let (invoke, recording) = makeInvoke(
+      data: #"{"callId": "call-1", "identity": "@alice:example.org"}"#)
+    try plugin.setEncryptionKey(invoke)
+    let response = await recording.wait()
+    XCTAssertEqual(response.id, Self.rejectId)
+    let payload = try jsonObject(try XCTUnwrap(response.payload))
+    XCTAssertEqual(payload["code"] as? String, "invalid_request")
+  }
+
+  /// Input is validated before any call-state check (matching the Android
+  /// lane's boundary decode): undecodable rotation input rejects
+  /// `invalid_request` even when the call id is stale.
+  func testSetEncryptionKeyRejectsInvalidInputRegardlessOfCallState() async throws {
+    for data in [
+      // Bad base64.
+      #"{"callId": "unknown", "identity": "@a:b.c", "keyIndex": 0, "key": "!!bad!!"}"#,
+      // Blank identity.
+      #"{"callId": "unknown", "identity": " ", "keyIndex": 0, "key": "AP8="}"#,
+      // Empty decoded key bytes.
+      #"{"callId": "unknown", "identity": "@a:b.c", "keyIndex": 0, "key": ""}"#,
+      // Negative key index.
+      #"{"callId": "unknown", "identity": "@a:b.c", "keyIndex": -1, "key": "AP8="}"#,
+    ] {
+      let plugin = LivekitMobilePlugin()
+      let (invoke, recording) = makeInvoke(data: data)
+      try plugin.setEncryptionKey(invoke)
+      let response = await recording.wait()
+      XCTAssertEqual(response.id, Self.rejectId, data)
+      let rawPayload = try XCTUnwrap(response.payload)
+      let payload = try jsonObject(rawPayload)
+      XCTAssertEqual(payload["code"] as? String, "invalid_request", data)
+      XCTAssertFalse(rawPayload.contains("key"), data)
+    }
+  }
+
+  /// A stale rotation carries key material through the reject-safe no-op
+  /// path; the resolved snapshot must never echo any of it.
+  func testStaleSetEncryptionKeyResolvesWithoutEchoingKey() async throws {
+    let plugin = LivekitMobilePlugin()
+    let (invoke, recording) = makeInvoke(data: """
+      {
+        "callId": "call-1",
+        "identity": "@alice:example.org",
+        "keyIndex": 3,
+        "key": "c2VjcmV0LWtleS1ieXRlcw=="
+      }
+      """)
+    try plugin.setEncryptionKey(invoke)
+    let response = await recording.wait()
+    XCTAssertEqual(response.id, Self.resolveId)
+    let rawPayload = try XCTUnwrap(response.payload)
+    XCTAssertFalse(rawPayload.contains("c2VjcmV0LWtleS1ieXRlcw=="))
+    XCTAssertFalse(rawPayload.contains("keyIndex"))
+    XCTAssertFalse(rawPayload.contains("alice"))
+  }
+
+  /// Malformed base64 in connect rejects without echoing the key material.
+  func testMalformedConnectEncryptionKeyRejectsWithoutEchoing() async throws {
+    let plugin = LivekitMobilePlugin()
+    let (invoke, recording) = makeInvoke(data: """
+      {
+        "callId": "call-1",
+        "url": "wss://example.test",
+        "token": "T0K3N",
+        "microphoneEnabled": false,
+        "channel": "__CHANNEL__:7",
+        "encryptionKeys": [
+          { "identity": "@alice:example.org", "keyIndex": 0, "key": "!!not-base64!!" }
+        ]
+      }
+      """)
+    try plugin.connect(invoke)
+    let response = await recording.wait()
+    XCTAssertEqual(response.id, Self.rejectId)
+    let rawPayload = try XCTUnwrap(response.payload)
+    let payload = try jsonObject(rawPayload)
+    XCTAssertEqual(payload["code"] as? String, "invalid_request")
+    XCTAssertFalse(rawPayload.contains("not-base64"))
+    // A rejected decode must not disturb state: no revision bump, still idle.
+    let (stateInvoke, stateRecording) = makeInvoke(data: "{}")
+    try plugin.getState(stateInvoke)
+    let stateResponse = await stateRecording.wait()
+    let statePayload = try jsonObject(try XCTUnwrap(stateResponse.payload))
+    try assertSnapshotKeys(
+      statePayload, revision: 0, callId: nil, connectionState: "idle",
+      microphoneEnabled: false, cameraEnabled: false, participantCount: 0)
   }
 
   func testSetRemoteVideoOverlayArgsDecodeCamelCase() throws {

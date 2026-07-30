@@ -12,6 +12,7 @@ Default permissions for the plugin
 - `allow-switchNativeCallCamera`
 - `allow-setNativeCallRemoteVideoOverlay`
 - `allow-clearNativeCallRemoteVideoOverlay`
+- `allow-setNativeCallEncryptionKey`
 - `allow-getNativeCallState`
 
 ## Permission Table
@@ -175,6 +176,32 @@ Enables the setNativeCallCameraEnabled command without any pre-configured scope.
 <td>
 
 Denies the setNativeCallCameraEnabled command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:allow-setNativeCallEncryptionKey`
+
+</td>
+<td>
+
+Enables the setNativeCallEncryptionKey command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:deny-setNativeCallEncryptionKey`
+
+</td>
+<td>
+
+Denies the setNativeCallEncryptionKey command without any pre-configured scope.
 
 </td>
 </tr>

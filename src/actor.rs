@@ -14,7 +14,8 @@ use tauri::{Emitter, EventTarget};
 #[cfg(mobile)]
 use crate::mobile::{
     MobileBackend, NativeConnectCallRequest, NativeDisconnectCallRequest, NativeSetCameraRequest,
-    NativeSetMicrophoneRequest, NativeSetRemoteVideoOverlayRequest, NativeSwitchCameraRequest,
+    NativeSetEncryptionKeyRequest, NativeSetMicrophoneRequest, NativeSetRemoteVideoOverlayRequest,
+    NativeSwitchCameraRequest,
 };
 
 use crate::error::{Error, Result};
@@ -23,13 +24,15 @@ use crate::models::NativeCallConnectionState;
 use crate::models::{
     ClearNativeCallRemoteVideoOverlayRequest, ConnectNativeCallRequest,
     DisconnectNativeCallRequest, NativeCallCapabilities, NativeCallFailureCode, NativeCallSnapshot,
-    SetNativeCallCameraEnabledRequest, SetNativeCallMicrophoneEnabledRequest,
-    SetNativeCallRemoteVideoOverlayRequest, SwitchNativeCallCameraRequest,
+    SetNativeCallCameraEnabledRequest, SetNativeCallEncryptionKeyRequest,
+    SetNativeCallMicrophoneEnabledRequest, SetNativeCallRemoteVideoOverlayRequest,
+    SwitchNativeCallCameraRequest,
 };
 #[cfg(mobile)]
 use crate::models::{
     NativeCallChannelEvent, NativeConnectCallFields, NativeDisconnectCallFields,
-    NativeSetCameraFields, NativeSetMicrophoneFields, NativeSetRemoteVideoOverlayFields,
+    NativeSetCameraFields, NativeSetEncryptionKeyFields, NativeSetMicrophoneFields,
+    NativeSetRemoteVideoOverlayFields,
 };
 
 #[cfg(mobile)]
@@ -66,6 +69,10 @@ pub(crate) enum Command {
         ClearNativeCallRemoteVideoOverlayRequest,
         oneshot::Sender<Result<NativeCallSnapshot>>,
     ),
+    SetNativeCallEncryptionKey(
+        SetNativeCallEncryptionKeyRequest,
+        oneshot::Sender<Result<NativeCallSnapshot>>,
+    ),
     GetNativeCallState(String, oneshot::Sender<Result<NativeCallSnapshot>>),
 }
 
@@ -74,6 +81,24 @@ fn connect_request_is_valid(request: &ConnectNativeCallRequest) -> bool {
     !(request.call_id.trim().is_empty()
         || request.url.trim().is_empty()
         || request.token.trim().is_empty())
+        && request
+            .encryption_keys
+            .iter()
+            .all(|key| encryption_key_material_is_valid(&key.identity, &key.key))
+}
+
+/// An E2EE key is well-formed when its identity is nonblank and `key` is
+/// base64 that decodes to nonempty bytes. The decoded byte length is not
+/// constrained: E2EE key sizes are the native side's decision, not the
+/// bridge's.
+#[cfg(any(mobile, test))]
+fn encryption_key_material_is_valid(identity: &str, key: &str) -> bool {
+    use base64::Engine;
+    !identity.trim().is_empty()
+        && base64::engine::general_purpose::STANDARD
+            .decode(key)
+            .map(|bytes| !bytes.is_empty())
+            .unwrap_or(false)
 }
 
 #[cfg(any(mobile, test))]
@@ -239,6 +264,14 @@ impl<R: Runtime> NativeCallBridge<R> {
             .await
     }
 
+    pub async fn set_native_call_encryption_key(
+        &self,
+        request: SetNativeCallEncryptionKeyRequest,
+    ) -> Result<NativeCallSnapshot> {
+        self.send(|response| Command::SetNativeCallEncryptionKey(request, response))
+            .await
+    }
+
     pub async fn get_native_call_state(&self, caller_label: String) -> Result<NativeCallSnapshot> {
         self.send(|response| Command::GetNativeCallState(caller_label, response))
             .await
@@ -319,6 +352,10 @@ impl<R: Runtime> Actor<R> {
                 self.handle_clear_native_call_remote_video_overlay(request, response)
                     .await
             }
+            Command::SetNativeCallEncryptionKey(request, response) => {
+                self.handle_set_native_call_encryption_key(request, response)
+                    .await
+            }
             Command::GetNativeCallState(caller_label, response) => {
                 self.handle_get_native_call_state(caller_label, response)
                     .await
@@ -361,6 +398,7 @@ impl<R: Runtime> Actor<R> {
                     url: &request.url,
                     token: &request.token,
                     microphone_enabled: request.microphone_enabled,
+                    encryption_keys: &request.encryption_keys,
                 },
                 channel,
             })
@@ -607,6 +645,42 @@ impl<R: Runtime> Actor<R> {
         let _ = response.send(unavailable());
     }
 
+    #[cfg(mobile)]
+    async fn handle_set_native_call_encryption_key(
+        &mut self,
+        request: SetNativeCallEncryptionKeyRequest,
+        response: oneshot::Sender<Result<NativeCallSnapshot>>,
+    ) {
+        if !call_id_is_valid(&request.call_id)
+            || !encryption_key_material_is_valid(&request.identity, &request.key)
+        {
+            let _ = response.send(invalid_request());
+            return;
+        }
+        let result = self
+            .mobile
+            .set_native_call_encryption_key(NativeSetEncryptionKeyRequest {
+                fields: NativeSetEncryptionKeyFields {
+                    call_id: &request.call_id,
+                    identity: &request.identity,
+                    key_index: request.key_index,
+                    key: &request.key,
+                },
+            })
+            .await;
+        let _ = response.send(result);
+    }
+
+    #[cfg(not(mobile))]
+    async fn handle_set_native_call_encryption_key(
+        &mut self,
+        request: SetNativeCallEncryptionKeyRequest,
+        response: oneshot::Sender<Result<NativeCallSnapshot>>,
+    ) {
+        let _ = &request;
+        let _ = response.send(unavailable());
+    }
+
     #[cfg(not(mobile))]
     async fn handle_switch_native_call_camera(
         &mut self,
@@ -668,9 +742,12 @@ impl<R: Runtime> Actor<R> {
 #[cfg(test)]
 mod tests {
     use super::{
-        call_id_is_valid, connect_request_is_valid, remote_video_overlay_request_is_valid,
+        call_id_is_valid, connect_request_is_valid, encryption_key_material_is_valid,
+        remote_video_overlay_request_is_valid,
     };
-    use crate::models::{ConnectNativeCallRequest, SetNativeCallRemoteVideoOverlayRequest};
+    use crate::models::{
+        ConnectNativeCallRequest, EncryptionKey, SetNativeCallRemoteVideoOverlayRequest,
+    };
 
     fn connect_request(call_id: &str) -> ConnectNativeCallRequest {
         ConnectNativeCallRequest {
@@ -678,6 +755,7 @@ mod tests {
             url: "wss://livekit.example".into(),
             token: "jwt".into(),
             microphone_enabled: true,
+            encryption_keys: Vec::new(),
         }
     }
 
@@ -692,6 +770,48 @@ mod tests {
         let mut blank_token = connect_request("call");
         blank_token.token = "  ".into();
         assert!(!connect_request_is_valid(&blank_token));
+    }
+
+    #[test]
+    fn encryption_key_material_validation() {
+        // "secret" padded and "other" unpadded-well-formed base64.
+        assert!(encryption_key_material_is_valid("@alice:e.org", "c2VjcmV0"));
+        assert!(!encryption_key_material_is_valid(" ", "c2VjcmV0"));
+        assert!(!encryption_key_material_is_valid("@alice:e.org", ""));
+        assert!(!encryption_key_material_is_valid("@alice:e.org", "   "));
+        assert!(!encryption_key_material_is_valid(
+            "@alice:e.org",
+            "not base64!!"
+        ));
+        // Wrong padding / truncated input is rejected.
+        assert!(!encryption_key_material_is_valid(
+            "@alice:e.org",
+            "c2VjcmV="
+        ));
+    }
+
+    #[test]
+    fn connect_validation_rejects_invalid_encryption_keys() {
+        let mut request = connect_request("call");
+        request.encryption_keys = vec![
+            EncryptionKey {
+                identity: "@alice:e.org".into(),
+                key_index: 0,
+                key: "c2VjcmV0".into(),
+            },
+            EncryptionKey {
+                identity: "@bob:e.org".into(),
+                key_index: 1,
+                key: "b3RoZXI=".into(),
+            },
+        ];
+        assert!(connect_request_is_valid(&request));
+
+        request.encryption_keys[1].key = "!!!".into();
+        assert!(!connect_request_is_valid(&request));
+        request.encryption_keys[1].key = "b3RoZXI=".into();
+        request.encryption_keys[0].identity = "  ".into();
+        assert!(!connect_request_is_valid(&request));
     }
 
     #[test]

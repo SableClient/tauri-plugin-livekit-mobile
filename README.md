@@ -105,8 +105,8 @@ Allow the default permission set in `src-tauri/capabilities/default.json`:
 This grants `getNativeCallCapabilities`, `connectNativeCall`,
 `disconnectNativeCall`, `setNativeCallMicrophoneEnabled`,
 `setNativeCallCameraEnabled`, `switchNativeCallCamera`, and
-`setNativeCallRemoteVideoOverlay`, `clearNativeCallRemoteVideoOverlay`, and
-`getNativeCallState`.
+`setNativeCallRemoteVideoOverlay`, `clearNativeCallRemoteVideoOverlay`,
+`setNativeCallEncryptionKey`, and `getNativeCallState`.
 
 ## Host app setup
 
@@ -212,7 +212,8 @@ await unlisten();
 - Every command — `connectNativeCall`, `disconnectNativeCall`,
   `setNativeCallMicrophoneEnabled`, `setNativeCallCameraEnabled`,
   `switchNativeCallCamera`, `setNativeCallRemoteVideoOverlay`,
-  `clearNativeCallRemoteVideoOverlay`, `getNativeCallState` — resolves with the
+  `clearNativeCallRemoteVideoOverlay`, `setNativeCallEncryptionKey`,
+  `getNativeCallState` — resolves with the
   authoritative `NativeCallSnapshot`:
 
   ```ts
@@ -257,6 +258,24 @@ await unlisten();
   snapshot (or `timeout` if the native side cannot be reached at all). The
   channel is never merely abandoned, so a room that survives cancellation is
   never orphaned from its events.
+
+### Shared E2EE keys
+
+The bridge is key-agnostic: it validates and forwards shared key material
+(`{ identity, keyIndex, key }`, with `key` the raw bytes base64-encoded) but
+never mints, stores, logs, or echoes it, and keys never appear in snapshots
+or events. No key byte length is enforced; key sizes are the native side's
+decision.
+
+- Initial keys ride on `connectNativeCall` as optional `encryptionKeys`. The
+  native side installs them **before** `room.connect`; omitted or empty means
+  an ordinary unencrypted LiveKit call.
+- `setNativeCallEncryptionKey({ callId, identity, keyIndex, key })` installs
+  or rotates a key mid-call (Android: `setNativeCallEncryptionKey`, iOS:
+  `setEncryptionKey`) and resolves with the current `NativeCallSnapshot`.
+
+Blank `callId`/`identity`, or `key` material that does not base64-decode to
+nonempty bytes, rejects with `invalid_request`.
 
 ### Owner webview event delivery
 

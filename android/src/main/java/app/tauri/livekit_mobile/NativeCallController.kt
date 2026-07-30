@@ -9,6 +9,7 @@ import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSArray
 import app.tauri.plugin.JSObject
 import io.livekit.android.LiveKit
+import io.livekit.android.e2ee.E2EEOptions
 import io.livekit.android.events.RoomEvent
 import io.livekit.android.events.collect
 import io.livekit.android.room.Room
@@ -56,6 +57,9 @@ internal class NativeCallController(
 
     private var channel: Channel? = null
     private var room: Room? = null
+
+    /** Per-call E2EE state; set before room.connect, destroyed with the room. */
+    private var e2ee: NativeCallE2EEKeys? = null
     private var eventJob: Job? = null
     private var connectJob: Job? = null
     private var attempt = 0L
@@ -114,6 +118,7 @@ internal class NativeCallController(
         url: String,
         token: String,
         microphoneEnabled: Boolean,
+        encryptionKeys: List<NativeCallKeyMaterial>,
         callChannel: Channel,
         invoke: Invoke,
     ) {
@@ -152,6 +157,27 @@ internal class NativeCallController(
                             }
                         }
                     }
+                if (encryptionKeys.isNotEmpty()) {
+                    // E2EE calls only: create a fresh per-call provider, install
+                    // the full key ring, and wire it before connect. Any JNI/SDK
+                    // failure settles this invoke through the bounded connect
+                    // error path, which releases the room and destroys the
+                    // provider via teardownRoom instead of leaking either.
+                    try {
+                        val keys = NativeCallE2EEKeys()
+                        e2ee = keys
+                        encryptionKeys.forEach(keys::installRingEntry)
+                        newRoom.e2eeOptions = E2EEOptions(keyProvider = keys)
+                    } catch (_: Exception) {
+                        failConnect(
+                            currentAttempt,
+                            null,
+                            invoke,
+                            NativeCallWire.ERR_CONNECT_FAILED,
+                        )
+                        return@launch
+                    }
+                }
                 try {
                     newRoom.connect(url, token)
                 } catch (cancelled: CancellationException) {
@@ -392,6 +418,35 @@ internal class NativeCallController(
         }
     }
 
+    /**
+     * Installs a rotated encryption key into the current call's provider.
+     * Works while connecting or connected; installs are serialized on the
+     * bridge thread so racing rotations cannot drop a valid update. Stale
+     * call ids, non-E2EE calls, and guard-rejected indexes resolve the
+     * current snapshot unchanged without emitting snapshot changes.
+     */
+    fun setEncryptionKey(
+        callId: String,
+        material: NativeCallKeyMaterial,
+        invoke: Invoke,
+    ) {
+        scope.launch {
+            val keys = e2ee
+            if (snapshot.callId != callId || keys == null) {
+                invoke.resolve(snapshotJson())
+                return@launch
+            }
+            try {
+                keys.installRotation(material)
+            } catch (_: Exception) {
+                // A failed install must still settle the invoke, bounded.
+                reject(invoke, NativeCallWire.ERR_UNEXPECTED)
+                return@launch
+            }
+            invoke.resolve(snapshotJson())
+        }
+    }
+
     /** Queues teardown on the bridge thread and blocks the caller briefly so
      * onDestroy guarantees the room is released before the scope is cancelled. */
     fun dispose() {
@@ -581,6 +636,11 @@ internal class NativeCallController(
             runCatching { endingRoom.disconnect() }
             runCatching { endingRoom.release() }
         }
+        // Destroy key material and the native provider after the room (and its
+        // frame cryptors) are fully released.
+        val endingKeys = e2ee
+        e2ee = null
+        endingKeys?.destroy()
     }
 
     private fun emitSnapshotChanged() {
