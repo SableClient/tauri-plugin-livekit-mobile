@@ -104,6 +104,9 @@ fn link_ios_package() {
 
     let lib_dir = build_path.join(build_dir).join(configuration);
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
+    // LiveKit's binary XCFrameworks land as .framework bundles next to the
+    // static library; consumers link them from this directory.
+    println!("cargo:rustc-link-search=framework={}", lib_dir.display());
     println!("cargo:rustc-link-lib=static=tauri-plugin-livekit-mobile");
     // Narrow: `swift build` rewrites `ios/Package.resolved`, so watching `ios/`
     // wholesale would rebuild every run.
