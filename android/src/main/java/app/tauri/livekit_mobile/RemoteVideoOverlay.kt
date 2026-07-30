@@ -32,7 +32,7 @@ internal data class OverlaySpec(
 )
 
 /**
- * Converts a WebView-viewport–relative CSS rect into a physical Android pixel
+ * Converts a WebView-viewport-relative CSS rect into a physical Android pixel
  * rect clipped to the WebView itself (`viewportWidthPx`/`viewportHeightPx`).
  *
  * All edge math happens in the Double domain and the viewport intersection is
@@ -210,7 +210,7 @@ internal class RemoteVideoOverlay(
                                 if (webViewIndex >= 0) webViewIndex + 1 else parent.childCount
                             parent.addView(view, index)
                         }
-                        // The clipped rect is WebView viewport–relative; the
+                        // The clipped rect is WebView viewport-relative; the
                         // view sits in the WebView's parent, so translate by
                         // the parent-relative origin. Translations survive
                         // parent re-layouts.
@@ -261,7 +261,7 @@ internal class RemoteVideoOverlay(
         val view = renderer
         if (view == null) {
             // Nothing to detach; reattach from scratch once the track exists.
-            if (resolved != null && room != null) {
+            if (room != null && resolved != null) {
                 attach(room, identity, trackSid, spec.x, spec.y, spec.width, spec.height,
                     spec.devicePixelRatio)
             }
@@ -359,8 +359,8 @@ internal class RemoteVideoOverlay(
     /**
      * Temporary detach: drop the sink and hide the tile but keep the view,
      * renderer, and selection so [reconcile] can rebind. The `attachedTrack`
-     * reference is retained until the main-thread removal actually succeeds —
-     * clearing it earlier would let a marshal timeout/failure orphan the
+     * reference is retained until the main-thread removal actually succeeds,
+     * since clearing it earlier would let a marshal timeout/failure orphan the
      * renderer as a sink on the old track, which the follow-up [clear] must
      * then still be able to reach. Returns false when the main-thread step
      * failed and callers should [clear] instead (the kept reference lets that
@@ -406,7 +406,7 @@ internal class RemoteVideoOverlay(
 
     /**
      * Resolves a remote participant's video track by identity + track SID, but
-     * only while the publication is subscribed and carries a non-null track —
+     * only while the publication is subscribed and carries a non-null track;
      * an unsubscribed publication detaches immediately rather than replaying
      * its last frame.
      */

@@ -675,11 +675,10 @@ internal class NativeCallController(
                 @Suppress("DEPRECATION")
                 appContext.startService(intent)
             }
-        } catch (_: SecurityException) {
-            transition { copy(lastErrorCode = NativeCallWire.ERR_UNAVAILABLE) }
-        } catch (_: IllegalStateException) {
-            transition { copy(lastErrorCode = NativeCallWire.ERR_UNAVAILABLE) }
         } catch (_: RuntimeException) {
+            // startForegroundService throws SecurityException/IllegalStateException
+            // (both RuntimeExceptions) on missing grants or background-start
+            // restrictions.
             transition { copy(lastErrorCode = NativeCallWire.ERR_UNAVAILABLE) }
         }
     }

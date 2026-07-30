@@ -372,8 +372,8 @@ final class WireContractTests: XCTestCase {
   }
 
   /// The per-call provider must match the web lanes: per-participant keys,
-  /// HKDF, ratchet window 10, key ring 256, LiveKit default salt/magic —
-  /// and raw (non-UTF8) key bytes must round-trip unmodified.
+  /// HKDF, ratchet window 10, key ring 256, LiveKit default salt/magic, and
+  /// raw (non-UTF8) key bytes must round-trip unmodified.
   func testMakeKeyProviderMatchesWebLaneConfiguration() throws {
     let key = Data([0xFF, 0xFE, 0x80, 0x00, 0xDE, 0xAD])
     let material = [

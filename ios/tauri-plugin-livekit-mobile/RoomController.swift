@@ -683,8 +683,8 @@ final class RoomController: NSObject {
     let converted = webView.convert(viewportRect, to: container)
     let hostBounds = webView.convert(webView.bounds, to: container)
     let clipped = converted.intersection(hostBounds)
+    // `isEmpty` covers null/infinite rects and non-positive dimensions.
     guard !clipped.isNull, !clipped.isEmpty else { return nil }
-    guard clipped.width > 0, clipped.height > 0 else { return nil }
     return clipped
   }
 

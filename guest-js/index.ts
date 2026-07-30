@@ -245,8 +245,8 @@ export async function setNativeCallEncryptionKey(
 }
 
 /**
- * Listens for native room snapshots. Every native change — connection state,
- * participant count, microphone/camera flips, failures (via `lastError`) —
+ * Listens for native room snapshots. Every native change (connection state,
+ * participant count, microphone/camera flips, failures via `lastError`)
  * arrives as one full `NativeCallSnapshot`; there are no separate event
  * kinds.
  */

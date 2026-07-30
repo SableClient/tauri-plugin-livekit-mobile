@@ -1,8 +1,8 @@
 # tauri-plugin-livekit-mobile
 
 A Tauri v2 plugin that bridges a WebView-hosted call (e.g. a MatrixRTC call
-in Sable) to a **native LiveKit audio room** on Android and iOS. The room —
-connection, tracks, reconnections, encoding — lives in the native plugin
+in Sable) to a **native LiveKit audio room** on Android and iOS. The room
+(connection, tracks, reconnections, encoding) lives in the native plugin
 (LiveKit Kotlin/Swift SDK, plus an Android foreground service so audio
 survives backgrounding). The native side is the single source of truth for
 room state; the Rust crate is a thin transport that validates basic input,
@@ -33,7 +33,7 @@ The host application owns everything around the room. For each call it must:
    MatrixRTC LiveKit auth service, with a TTL that covers the call;
 2. call `connectNativeCall` with `{ callId, url, token, microphoneEnabled }`,
    choosing an opaque `callId` (e.g. the Matrix call id);
-3. refresh or rotate tokens out-of-band — if a token expires mid-call the
+3. refresh or rotate tokens out-of-band; if a token expires mid-call the
    native bridge reports a bounded failure and the host disconnects and
    reconnects with a fresh token.
 
@@ -47,7 +47,7 @@ re-emits it.
 | ------------- | ------- |
 | Android       | Yes |
 | iOS           | Yes |
-| Desktop (any) | No — `getNativeCallCapabilities` reports `supported: false, nativeRoom: false, camera: false, nativeVideoOverlay: false`; room commands fail with `unavailable` |
+| Desktop (any) | No. `getNativeCallCapabilities` reports `supported: false, nativeRoom: false, camera: false, nativeVideoOverlay: false`; room commands fail with `unavailable` |
 
 `NativeCallCapabilities.camera` advertises per platform whether the native
 lane accepts the camera commands (`setNativeCallCameraEnabled` /
@@ -140,10 +140,10 @@ drawer but remains visible in Task Manager; service behavior is unaffected.
 
 Add to the host app's `Info.plist`:
 
-- `NSMicrophoneUsageDescription` — required when connecting with
+- `NSMicrophoneUsageDescription`: required when connecting with
   `microphoneEnabled: true` or turning the microphone on mid-call; the
   plugin requests record permission before enabling the microphone.
-- `UIBackgroundModes` containing `audio` — required for room audio to
+- `UIBackgroundModes` containing `audio`: required for room audio to
   continue while the app is backgrounded.
 
 ## JavaScript usage
@@ -209,11 +209,11 @@ await unlisten();
   stale-call rejection are all decided natively. Rust never predicts, mirrors
   or replays room state: it validates basic input, forwards invocations and
   returns or forwards native snapshots.
-- Every command — `connectNativeCall`, `disconnectNativeCall`,
+- Every command (`connectNativeCall`, `disconnectNativeCall`,
   `setNativeCallMicrophoneEnabled`, `setNativeCallCameraEnabled`,
   `switchNativeCallCamera`, `setNativeCallRemoteVideoOverlay`,
   `clearNativeCallRemoteVideoOverlay`, `setNativeCallEncryptionKey`,
-  `getNativeCallState` — resolves with the
+  `getNativeCallState`) resolves with the
   authoritative `NativeCallSnapshot`:
 
   ```ts
@@ -247,7 +247,7 @@ await unlisten();
   remote-video tile per remote participant: `identity` is the opaque backend
   identity, and `camera` is present only while that participant has a remote
   camera publication (`sid` is its LiveKit track id). The bridge passes the
-  roster through untouched — it keeps no roster state of its own. Missing
+  roster through untouched; it keeps no roster state of its own. Missing
   keys on older natives decode as an empty list.
 - Every native invocation is time-bounded (60s for connect, 30s for the
   rest) so a hung native call cannot wedge the bridge. An elapsed bound
@@ -281,7 +281,7 @@ nonempty bytes, rejects with `invalid_request`.
 
 `connectNativeCall` records the calling webview as the call's owner. Snapshot
 events are emitted on `plugin:livekit-mobile://native-call-event` **targeted
-at the owner webview only** (`EventTarget::webview(label)`) — there is no
+at the owner webview only** (`EventTarget::webview(label)`): there is no
 global broadcast, so parallel webviews never receive another call's events. A
 `listenNativeCallSnapshot` in any other webview stays silent.
 
@@ -303,8 +303,8 @@ Limitations to be aware of:
 
 ### Events
 
-The native side emits one channel event shape — `{ event: "snapshot_changed",
-snapshot }` — and the bridge forwards the `snapshot` payload to the owner
+The native side emits one channel event shape, `{ event: "snapshot_changed",
+snapshot }`, and the bridge forwards the `snapshot` payload to the owner
 webview. There are no separate participant, state or failure event kinds:
 connection changes, participant counts, microphone/camera flips and failures
 (via `lastError`) all surface as snapshots.
@@ -314,7 +314,7 @@ connection changes, participant counts, microphone/camera flips and failures
 Command rejections serialize as `{ code, message }`. Codes come from one
 bounded vocabulary shared with snapshot `lastError`: `invalid_request`,
 `busy`, `permission_denied`, `connect_failed`, `media_failed`,
-`disconnected`, `cancelled`, `unavailable`, `unexpected` — plus the
+`disconnected`, `cancelled`, `unavailable`, `unexpected`, plus the
 bridge-level `timeout`. Messages are static strings derived from the code;
 raw native error strings and platform-specific codes are folded into this
 vocabulary at the boundary and never forwarded to JavaScript.
