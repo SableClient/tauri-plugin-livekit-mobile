@@ -71,10 +71,8 @@ final class RoomController: NSObject {
 
   /// How long a dropped socket may stay in `reconnecting` before the call is
   /// reported as terminally failed.
-  private static let reconnectGraceSeconds: UInt64 = 30
   /// Pending promotion of a stalled reconnect to `.failed`. Cancelled when the
   /// room reconnects or is torn down.
-  private var reconnectDeadline: Task<Void, Never>?
 
   // MARK: Native Picture-in-Picture (iOS 15+)
 
@@ -958,8 +956,6 @@ final class RoomController: NSObject {
   /// in-flight work settles with `cancelled`.
   func tearDown() async {
     attempt &+= 1
-    reconnectDeadline?.cancel()
-    reconnectDeadline = nil
     pipEnabled = false
     let roomToClose = room
     room = nil
@@ -1163,8 +1159,6 @@ final class RoomController: NSObject {
     }
 
     attempt &+= 1
-    reconnectDeadline?.cancel()
-    reconnectDeadline = nil
     pipEnabled = false
 
     let roomToClose = room
@@ -1475,28 +1469,16 @@ extension RoomController: RoomDelegate {
       return
     }
 
-    // The WebSocket dropped but LiveKit hasn't started reconnecting yet.
-    // Treat as reconnecting (the phone may have locked and the socket will
-    // come back once the network does), but arm a deadline so a reconnect that
-    // never completes is eventually reported as failed instead of leaving the
-    // snapshot pinned at `reconnecting` forever.
-    logRoom("WebSocket dropped: treating as reconnecting, not failed")
-    applyConnectionState(.reconnecting, from: room)
-    armReconnectDeadline(for: room)
+    // The SDK only reports this once its own retry ladder is exhausted and the
+    // engine is torn down (it clears `e2eeManager` first), so nothing can
+    // recover. In-progress reconnection arrives as `didStartReconnectWithMode`
+    // instead, which the guard above covers.
+    logRoom("Disconnected after a successful connection: failing the call")
+    failCall(from: room)
   }
 
-  private func armReconnectDeadline(for room: Room) {
-    reconnectDeadline?.cancel()
-    reconnectDeadline = Task { @MainActor [weak self] in
-      try? await Task.sleep(nanoseconds: Self.reconnectGraceSeconds * 1_000_000_000)
-      guard !Task.isCancelled else { return }
-      self?.failStalledReconnect(from: room)
-    }
-  }
-
-  private func failStalledReconnect(from room: Room) {
-    guard room === self.room, connectionState == .reconnecting else { return }
-    logRoom("Reconnect did not complete within the grace period: failing the call")
+  private func failCall(from room: Room) {
+    guard room === self.room, connectionState != .idle, connectionState != .failed else { return }
     self.room = nil
     keyProvider = nil
     appliedKeyIndexes = [:]
@@ -1524,8 +1506,6 @@ extension RoomController: RoomDelegate {
   private func handleReconnected(from room: Room) {
     guard room === self.room else { return }
     guard connectionState == .reconnecting else { return }
-    reconnectDeadline?.cancel()
-    reconnectDeadline = nil
     applyConnectionState(.connected, from: room)
   }
 
