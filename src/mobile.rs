@@ -14,7 +14,15 @@ use crate::{
         failure_code_from_raw, NativeCallCapabilities, NativeCallChannelEvent,
         NativeCallFailureCode, NativeCallSnapshot, NativeConnectCallFields,
         NativeDisconnectCallFields, NativeSetCameraFields, NativeSetEncryptionKeyFields,
-        NativeSetMicrophoneFields, NativeSetRemoteVideoOverlayFields,
+        NativeSetLocalVideoOverlayFields, NativeSetMicrophoneFields,
+        NativeSetRemoteVideoOverlayFields, NativeReportIncomingCallFields,
+        NativeStartSystemCallFields, NativeAnswerSystemCallFields, NativeEndSystemCallFields,
+        NativeSetSystemCallMutedFields, NativeFulfillAnswerCallFields,
+        NativeFulfillEndCallFields, NativeReportConnectedFields, SystemCallAction,
+        NativeGetAudioRoutesFields, NativeSetAudioRouteFields, NativeSendDTMFFields,
+        NativeUpdateCallDisplayFields, NativeReportAnsweredElsewhereFields,
+        NativeReportDeclinedElsewhereFields, NativeReportUnansweredFields,
+        NativeDeclineSystemCallFields, CommandWithSnapshotResponse, GetAudioRoutesResponse,
     },
 };
 
@@ -36,9 +44,27 @@ mod platform_commands {
     pub(super) const GET_STATE: &str = "getNativeCallState";
     pub(super) const SET_REMOTE_VIDEO_OVERLAY: &str = "setNativeCallRemoteVideoOverlay";
     pub(super) const CLEAR_REMOTE_VIDEO_OVERLAY: &str = "clearNativeCallRemoteVideoOverlay";
+    pub(super) const SET_LOCAL_VIDEO_OVERLAY: &str = "setNativeCallLocalVideoOverlay";
+    pub(super) const CLEAR_LOCAL_VIDEO_OVERLAY: &str = "clearNativeCallLocalVideoOverlay";
+    pub(super) const REPORT_INCOMING_CALL: &str = "reportSystemIncomingCall";
+    pub(super) const START_SYSTEM_CALL: &str = "startSystemCall";
+    pub(super) const ANSWER_SYSTEM_CALL: &str = "answerSystemCall";
+    pub(super) const END_SYSTEM_CALL: &str = "endSystemCall";
+    pub(super) const SET_SYSTEM_CALL_MUTED: &str = "setSystemCallMuted";
+    pub(super) const DRAIN_PENDING_ACTIONS: &str = "drainPendingSystemCallActions";
+    pub(super) const FULFILL_ANSWER_CALL: &str = "fulfillAnswerCall";
+    pub(super) const FULFILL_END_CALL: &str = "fulfillEndCall";
+    pub(super) const REPORT_CONNECTED: &str = "reportConnected";
     pub(super) const SET_ENCRYPTION_KEY: &str = "setNativeCallEncryptionKey";
+    pub(super) const GET_AUDIO_ROUTES: &str = "getAudioRoutes";
+    pub(super) const SET_AUDIO_ROUTE: &str = "setAudioRoute";
+    pub(super) const SEND_DTMF: &str = "sendDTMF";
+    pub(super) const UPDATE_CALL_DISPLAY: &str = "updateCallDisplay";
+    pub(super) const REPORT_ANSWERED_ELSEWHERE: &str = "reportSystemCallAnsweredElsewhere";
+    pub(super) const REPORT_DECLINED_ELSEWHERE: &str = "reportSystemCallDeclinedElsewhere";
+    pub(super) const REPORT_UNANSWERED: &str = "reportSystemCallUnanswered";
+    pub(super) const DECLINE_SYSTEM_CALL: &str = "declineSystemCall";
 }
-
 #[cfg(target_os = "ios")]
 mod platform_commands {
     pub(super) const CAPABILITIES: &str = "capabilities";
@@ -51,7 +77,26 @@ mod platform_commands {
     pub(super) const GET_STATE: &str = "getState";
     pub(super) const SET_REMOTE_VIDEO_OVERLAY: &str = "setRemoteVideoOverlay";
     pub(super) const CLEAR_REMOTE_VIDEO_OVERLAY: &str = "clearRemoteVideoOverlay";
+    pub(super) const SET_LOCAL_VIDEO_OVERLAY: &str = "setLocalVideoOverlay";
+    pub(super) const CLEAR_LOCAL_VIDEO_OVERLAY: &str = "clearLocalVideoOverlay";
+    pub(super) const REPORT_INCOMING_CALL: &str = "reportSystemIncomingCall";
+    pub(super) const START_SYSTEM_CALL: &str = "startSystemCall";
+    pub(super) const ANSWER_SYSTEM_CALL: &str = "answerSystemCall";
+    pub(super) const END_SYSTEM_CALL: &str = "endSystemCall";
+    pub(super) const SET_SYSTEM_CALL_MUTED: &str = "setSystemCallMuted";
+    pub(super) const DRAIN_PENDING_ACTIONS: &str = "drainPendingSystemCallActions";
+    pub(super) const FULFILL_ANSWER_CALL: &str = "fulfillAnswerCall";
+    pub(super) const FULFILL_END_CALL: &str = "fulfillEndCall";
+    pub(super) const REPORT_CONNECTED: &str = "reportConnected";
     pub(super) const SET_ENCRYPTION_KEY: &str = "setEncryptionKey";
+    pub(super) const GET_AUDIO_ROUTES: &str = "getAudioRoutes";
+    pub(super) const SET_AUDIO_ROUTE: &str = "setAudioRoute";
+    pub(super) const SEND_DTMF: &str = "sendDTMF";
+    pub(super) const UPDATE_CALL_DISPLAY: &str = "updateCallDisplay";
+    pub(super) const REPORT_ANSWERED_ELSEWHERE: &str = "reportSystemCallAnsweredElsewhere";
+    pub(super) const REPORT_DECLINED_ELSEWHERE: &str = "reportSystemCallDeclinedElsewhere";
+    pub(super) const REPORT_UNANSWERED: &str = "reportSystemCallUnanswered";
+    pub(super) const DECLINE_SYSTEM_CALL: &str = "declineSystemCall";
 }
 
 /// Upper bound for any single native invocation, so a hung native call
@@ -75,6 +120,8 @@ pub(crate) struct NativeCallCapabilitiesWire {
     camera: bool,
     #[serde(default)]
     native_video_overlay: bool,
+    #[serde(default)]
+    call_kit: bool,
 }
 
 impl From<NativeCallCapabilitiesWire> for NativeCallCapabilities {
@@ -87,6 +134,7 @@ impl From<NativeCallCapabilitiesWire> for NativeCallCapabilities {
             native_room: true,
             camera: native.camera,
             native_video_overlay: native.native_video_overlay,
+            call_kit: native.call_kit,
         }
     }
 }
@@ -217,11 +265,161 @@ impl<R: Runtime> MobileBackend<R> {
             .await
     }
 
+    pub(crate) async fn set_native_call_local_video_overlay(
+        &self,
+        request: NativeSetLocalVideoOverlayRequest<'_>,
+    ) -> crate::Result<NativeCallSnapshot> {
+        self.invoke(platform_commands::SET_LOCAL_VIDEO_OVERLAY, request)
+            .await
+    }
+
+    pub(crate) async fn clear_native_call_local_video_overlay(
+        &self,
+        request: NativeDisconnectCallRequest<'_>,
+    ) -> crate::Result<NativeCallSnapshot> {
+        self.invoke(platform_commands::CLEAR_LOCAL_VIDEO_OVERLAY, request)
+            .await
+    }
+
+    pub(crate) async fn report_system_incoming_call(
+        &self,
+        request: NativeReportIncomingCallRequest<'_>,
+    ) -> crate::Result<()> {
+        self.invoke(platform_commands::REPORT_INCOMING_CALL, request)
+            .await
+    }
+
+    pub(crate) async fn start_system_call(
+        &self,
+        request: NativeStartSystemCallRequest<'_>,
+    ) -> crate::Result<()> {
+        self.invoke(platform_commands::START_SYSTEM_CALL, request)
+            .await
+    }
+
+    pub(crate) async fn answer_system_call(
+        &self,
+        request: NativeAnswerSystemCallRequest<'_>,
+    ) -> crate::Result<()> {
+        self.invoke(platform_commands::ANSWER_SYSTEM_CALL, request)
+            .await
+    }
+
+    pub(crate) async fn end_system_call(
+        &self,
+        request: NativeEndSystemCallRequest<'_>,
+    ) -> crate::Result<()> {
+        self.invoke(platform_commands::END_SYSTEM_CALL, request)
+            .await
+    }
+
+    pub(crate) async fn set_system_call_muted(
+        &self,
+        request: NativeSetSystemCallMutedRequest<'_>,
+    ) -> crate::Result<()> {
+        self.invoke(platform_commands::SET_SYSTEM_CALL_MUTED, request)
+            .await
+    }
+
+    pub(crate) async fn drain_pending_system_call_actions(
+        &self,
+    ) -> crate::Result<Vec<SystemCallAction>> {
+        self.invoke(platform_commands::DRAIN_PENDING_ACTIONS, ())
+            .await
+    }
+
+    pub(crate) async fn fulfill_answer_call(
+        &self,
+        request: NativeFulfillAnswerCallRequest<'_>,
+    ) -> crate::Result<()> {
+        self.invoke(platform_commands::FULFILL_ANSWER_CALL, request)
+            .await
+    }
+
+    pub(crate) async fn fulfill_end_call(
+        &self,
+        request: NativeFulfillEndCallRequest<'_>,
+    ) -> crate::Result<()> {
+        self.invoke(platform_commands::FULFILL_END_CALL, request)
+            .await
+    }
+
+    pub(crate) async fn report_connected(
+        &self,
+        request: NativeReportConnectedRequest<'_>,
+    ) -> crate::Result<()> {
+        self.invoke(platform_commands::REPORT_CONNECTED, request)
+            .await
+    }
+
     pub(crate) async fn set_native_call_encryption_key(
         &self,
         request: NativeSetEncryptionKeyRequest<'_>,
     ) -> crate::Result<NativeCallSnapshot> {
         self.invoke(platform_commands::SET_ENCRYPTION_KEY, request)
+            .await
+    }
+
+    pub(crate) async fn get_audio_routes(
+        &self,
+        request: NativeGetAudioRoutesRequest<'_>,
+    ) -> crate::Result<GetAudioRoutesResponse> {
+        self.invoke(platform_commands::GET_AUDIO_ROUTES, request)
+            .await
+    }
+
+    pub(crate) async fn set_audio_route(
+        &self,
+        request: NativeSetAudioRouteRequest<'_>,
+    ) -> crate::Result<CommandWithSnapshotResponse> {
+        self.invoke(platform_commands::SET_AUDIO_ROUTE, request)
+            .await
+    }
+
+    pub(crate) async fn send_dtmf(
+        &self,
+        request: NativeSendDTMFRequest<'_>,
+    ) -> crate::Result<CommandWithSnapshotResponse> {
+        self.invoke(platform_commands::SEND_DTMF, request).await
+    }
+
+    pub(crate) async fn update_call_display(
+        &self,
+        request: NativeUpdateCallDisplayRequest<'_>,
+    ) -> crate::Result<CommandWithSnapshotResponse> {
+        self.invoke(platform_commands::UPDATE_CALL_DISPLAY, request)
+            .await
+    }
+
+    pub(crate) async fn report_system_call_answered_elsewhere(
+        &self,
+        request: NativeReportAnsweredElsewhereRequest<'_>,
+    ) -> crate::Result<()> {
+        self.invoke(platform_commands::REPORT_ANSWERED_ELSEWHERE, request)
+            .await
+    }
+
+    pub(crate) async fn report_system_call_declined_elsewhere(
+        &self,
+        request: NativeReportDeclinedElsewhereRequest<'_>,
+    ) -> crate::Result<()> {
+        self.invoke(platform_commands::REPORT_DECLINED_ELSEWHERE, request)
+            .await
+    }
+
+    pub(crate) async fn report_system_call_unanswered(
+        &self,
+        request: NativeReportUnansweredRequest<'_>,
+    ) -> crate::Result<()> {
+        self.invoke(platform_commands::REPORT_UNANSWERED, request)
+            .await
+    }
+
+    pub(crate) async fn decline_system_call(
+        &self,
+        request: NativeDeclineSystemCallRequest<'_>,
+    ) -> crate::Result<()> {
+        self.invoke(platform_commands::DECLINE_SYSTEM_CALL, request)
             .await
     }
 
@@ -287,6 +485,13 @@ pub(crate) struct NativeSetRemoteVideoOverlayRequest<'a> {
     pub fields: NativeSetRemoteVideoOverlayFields<'a>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NativeSetLocalVideoOverlayRequest<'a> {
+    #[serde(flatten)]
+    pub fields: NativeSetLocalVideoOverlayFields<'a>,
+}
+
 /// Native payload for `setNativeCallEncryptionKey` (Android) /
 /// `setEncryptionKey` (iOS). `Debug` redacts the key via the contained fields.
 #[derive(Debug, Serialize)]
@@ -294,6 +499,118 @@ pub(crate) struct NativeSetRemoteVideoOverlayRequest<'a> {
 pub(crate) struct NativeSetEncryptionKeyRequest<'a> {
     #[serde(flatten)]
     pub fields: NativeSetEncryptionKeyFields<'a>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NativeReportIncomingCallRequest<'a> {
+    #[serde(flatten)]
+    pub fields: NativeReportIncomingCallFields<'a>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NativeStartSystemCallRequest<'a> {
+    #[serde(flatten)]
+    pub fields: NativeStartSystemCallFields<'a>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NativeAnswerSystemCallRequest<'a> {
+    #[serde(flatten)]
+    pub fields: NativeAnswerSystemCallFields<'a>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NativeEndSystemCallRequest<'a> {
+    #[serde(flatten)]
+    pub fields: NativeEndSystemCallFields<'a>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NativeSetSystemCallMutedRequest<'a> {
+    #[serde(flatten)]
+    pub fields: NativeSetSystemCallMutedFields<'a>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NativeFulfillAnswerCallRequest<'a> {
+    #[serde(flatten)]
+    pub fields: NativeFulfillAnswerCallFields<'a>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NativeFulfillEndCallRequest<'a> {
+    #[serde(flatten)]
+    pub fields: NativeFulfillEndCallFields<'a>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NativeReportConnectedRequest<'a> {
+    #[serde(flatten)]
+    pub fields: NativeReportConnectedFields<'a>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NativeGetAudioRoutesRequest<'a> {
+    #[serde(flatten)]
+    pub fields: NativeGetAudioRoutesFields<'a>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NativeSetAudioRouteRequest<'a> {
+    #[serde(flatten)]
+    pub fields: NativeSetAudioRouteFields<'a>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NativeSendDTMFRequest<'a> {
+    #[serde(flatten)]
+    pub fields: NativeSendDTMFFields<'a>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NativeUpdateCallDisplayRequest<'a> {
+    #[serde(flatten)]
+    pub fields: NativeUpdateCallDisplayFields<'a>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NativeReportAnsweredElsewhereRequest<'a> {
+    #[serde(flatten)]
+    pub fields: NativeReportAnsweredElsewhereFields<'a>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NativeReportDeclinedElsewhereRequest<'a> {
+    #[serde(flatten)]
+    pub fields: NativeReportDeclinedElsewhereFields<'a>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NativeReportUnansweredRequest<'a> {
+    #[serde(flatten)]
+    pub fields: NativeReportUnansweredFields<'a>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NativeDeclineSystemCallRequest<'a> {
+    #[serde(flatten)]
+    pub fields: NativeDeclineSystemCallFields<'a>,
 }
 
 pub fn init<R: Runtime, C: DeserializeOwned>(

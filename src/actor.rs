@@ -13,26 +13,51 @@ use tauri::{Emitter, EventTarget};
 
 #[cfg(mobile)]
 use crate::mobile::{
-    MobileBackend, NativeConnectCallRequest, NativeDisconnectCallRequest, NativeSetCameraRequest,
-    NativeSetEncryptionKeyRequest, NativeSetMicrophoneRequest, NativeSetRemoteVideoOverlayRequest,
-    NativeSwitchCameraRequest,
+    MobileBackend, NativeAnswerSystemCallRequest, NativeConnectCallRequest,
+    NativeDisconnectCallRequest, NativeEndSystemCallRequest, NativeFulfillAnswerCallRequest,
+    NativeFulfillEndCallRequest, NativeReportConnectedRequest,
+    NativeReportIncomingCallRequest, NativeSetCameraRequest, NativeSetEncryptionKeyRequest,
+    NativeSetLocalVideoOverlayRequest, NativeSetMicrophoneRequest,
+    NativeSetRemoteVideoOverlayRequest, NativeSetSystemCallMutedRequest,
+    NativeStartSystemCallRequest, NativeSwitchCameraRequest,
+    NativeGetAudioRoutesRequest, NativeSetAudioRouteRequest, NativeSendDTMFRequest,
+    NativeUpdateCallDisplayRequest, NativeReportAnsweredElsewhereRequest,
+    NativeReportDeclinedElsewhereRequest, NativeReportUnansweredRequest,
+    NativeDeclineSystemCallRequest,
 };
 
 use crate::error::{Error, Result};
 #[cfg(not(mobile))]
 use crate::models::NativeCallConnectionState;
 use crate::models::{
+    AnswerSystemCallRequest, ClearNativeCallLocalVideoOverlayRequest,
     ClearNativeCallRemoteVideoOverlayRequest, ConnectNativeCallRequest,
-    DisconnectNativeCallRequest, NativeCallCapabilities, NativeCallFailureCode, NativeCallSnapshot,
+    DisconnectNativeCallRequest, EndSystemCallRequest, FulfillAnswerCallRequest,
+    FulfillEndCallRequest, NativeCallCapabilities,
+    NativeCallFailureCode, NativeCallSnapshot, ReportConnectedRequest,
+    ReportSystemIncomingCallRequest,
     SetNativeCallCameraEnabledRequest, SetNativeCallEncryptionKeyRequest,
-    SetNativeCallMicrophoneEnabledRequest, SetNativeCallRemoteVideoOverlayRequest,
-    SwitchNativeCallCameraRequest,
+    SetNativeCallLocalVideoOverlayRequest, SetNativeCallMicrophoneEnabledRequest,
+    SetNativeCallRemoteVideoOverlayRequest, SetSystemCallMutedRequest,
+    StartSystemCallRequest, SwitchNativeCallCameraRequest, SystemCallAction,
+    GetAudioRoutesRequest, SetAudioRouteRequest, SendDTMFRequest,
+    UpdateCallDisplayRequest, ReportAnsweredElsewhereRequest,
+    ReportDeclinedElsewhereRequest, ReportUnansweredRequest,
+    DeclineSystemCallRequest, GetAudioRoutesResponse,
 };
 #[cfg(mobile)]
 use crate::models::{
-    NativeCallChannelEvent, NativeConnectCallFields, NativeDisconnectCallFields,
-    NativeSetCameraFields, NativeSetEncryptionKeyFields, NativeSetMicrophoneFields,
-    NativeSetRemoteVideoOverlayFields,
+    NativeAnswerSystemCallFields, NativeCallChannelEvent, NativeConnectCallFields,
+    NativeDisconnectCallFields, NativeEndSystemCallFields, NativeFulfillAnswerCallFields,
+    NativeFulfillEndCallFields, NativeReportConnectedFields,
+    NativeReportIncomingCallFields,
+    NativeSetCameraFields, NativeSetEncryptionKeyFields, NativeSetLocalVideoOverlayFields,
+    NativeSetMicrophoneFields, NativeSetRemoteVideoOverlayFields,
+    NativeSetSystemCallMutedFields, NativeStartSystemCallFields,
+    NativeGetAudioRoutesFields, NativeSetAudioRouteFields, NativeSendDTMFFields,
+    NativeUpdateCallDisplayFields, NativeReportAnsweredElsewhereFields,
+    NativeReportDeclinedElsewhereFields, NativeReportUnansweredFields,
+    NativeDeclineSystemCallFields,
 };
 
 #[cfg(mobile)]
@@ -69,11 +94,61 @@ pub(crate) enum Command {
         ClearNativeCallRemoteVideoOverlayRequest,
         oneshot::Sender<Result<NativeCallSnapshot>>,
     ),
+    SetNativeCallLocalVideoOverlay(
+        SetNativeCallLocalVideoOverlayRequest,
+        oneshot::Sender<Result<NativeCallSnapshot>>,
+    ),
+    ClearNativeCallLocalVideoOverlay(
+        ClearNativeCallLocalVideoOverlayRequest,
+        oneshot::Sender<Result<NativeCallSnapshot>>,
+    ),
     SetNativeCallEncryptionKey(
         SetNativeCallEncryptionKeyRequest,
         oneshot::Sender<Result<NativeCallSnapshot>>,
     ),
     GetNativeCallState(String, oneshot::Sender<Result<NativeCallSnapshot>>),
+
+    // System call (CallKit) commands: resolve () or Vec<SystemCallAction>.
+    ReportSystemIncomingCall(
+        ReportSystemIncomingCallRequest,
+        oneshot::Sender<Result<()>>,
+    ),
+    StartSystemCall(StartSystemCallRequest, oneshot::Sender<Result<()>>),
+    AnswerSystemCall(AnswerSystemCallRequest, oneshot::Sender<Result<()>>),
+    EndSystemCall(EndSystemCallRequest, oneshot::Sender<Result<()>>),
+    SetSystemCallMuted(SetSystemCallMutedRequest, oneshot::Sender<Result<()>>),
+    DrainPendingSystemCallActions(oneshot::Sender<Result<Vec<SystemCallAction>>>),
+    FulfillAnswerCall(FulfillAnswerCallRequest, oneshot::Sender<Result<()>>),
+    FulfillEndCall(FulfillEndCallRequest, oneshot::Sender<Result<()>>),
+    ReportSystemCallConnected(ReportConnectedRequest, oneshot::Sender<Result<()>>),
+
+    // Extended CallKit commands
+    GetAudioRoutes(
+        GetAudioRoutesRequest,
+        oneshot::Sender<Result<GetAudioRoutesResponse>>,
+    ),
+    SetAudioRoute(
+        SetAudioRouteRequest,
+        oneshot::Sender<Result<NativeCallSnapshot>>,
+    ),
+    SendDTMF(SendDTMFRequest, oneshot::Sender<Result<NativeCallSnapshot>>),
+    UpdateCallDisplay(
+        UpdateCallDisplayRequest,
+        oneshot::Sender<Result<NativeCallSnapshot>>,
+    ),
+    ReportSystemCallAnsweredElsewhere(
+        ReportAnsweredElsewhereRequest,
+        oneshot::Sender<Result<()>>,
+    ),
+    ReportSystemCallDeclinedElsewhere(
+        ReportDeclinedElsewhereRequest,
+        oneshot::Sender<Result<()>>,
+    ),
+    ReportSystemCallUnanswered(
+        ReportUnansweredRequest,
+        oneshot::Sender<Result<()>>,
+    ),
+    DeclineSystemCall(DeclineSystemCallRequest, oneshot::Sender<Result<()>>),
 }
 
 #[cfg(any(mobile, test))]
@@ -121,6 +196,19 @@ fn remote_video_overlay_request_is_valid(request: &SetNativeCallRemoteVideoOverl
         && request.device_pixel_ratio > 0.0
 }
 
+#[cfg(any(mobile, test))]
+fn local_video_overlay_request_is_valid(request: &SetNativeCallLocalVideoOverlayRequest) -> bool {
+    call_id_is_valid(&request.call_id)
+        && request.x.is_finite()
+        && request.y.is_finite()
+        && request.width.is_finite()
+        && request.width > 0.0
+        && request.height.is_finite()
+        && request.height > 0.0
+        && request.device_pixel_ratio.is_finite()
+        && request.device_pixel_ratio > 0.0
+}
+
 #[cfg(mobile)]
 fn invalid_request<T>() -> Result<T> {
     Err(Error::failure(NativeCallFailureCode::InvalidRequest))
@@ -142,6 +230,7 @@ fn idle_snapshot() -> NativeCallSnapshot {
         participant_count: 0,
         remote_participants: Vec::new(),
         last_error: None,
+        local_connection_quality: None,
     }
 }
 
@@ -264,6 +353,22 @@ impl<R: Runtime> NativeCallBridge<R> {
             .await
     }
 
+    pub async fn set_native_call_local_video_overlay(
+        &self,
+        request: SetNativeCallLocalVideoOverlayRequest,
+    ) -> Result<NativeCallSnapshot> {
+        self.send(|response| Command::SetNativeCallLocalVideoOverlay(request, response))
+            .await
+    }
+
+    pub async fn clear_native_call_local_video_overlay(
+        &self,
+        request: ClearNativeCallLocalVideoOverlayRequest,
+    ) -> Result<NativeCallSnapshot> {
+        self.send(|response| Command::ClearNativeCallLocalVideoOverlay(request, response))
+            .await
+    }
+
     pub async fn set_native_call_encryption_key(
         &self,
         request: SetNativeCallEncryptionKeyRequest,
@@ -274,6 +379,117 @@ impl<R: Runtime> NativeCallBridge<R> {
 
     pub async fn get_native_call_state(&self, caller_label: String) -> Result<NativeCallSnapshot> {
         self.send(|response| Command::GetNativeCallState(caller_label, response))
+            .await
+    }
+
+    pub async fn report_system_incoming_call(
+        &self,
+        request: ReportSystemIncomingCallRequest,
+    ) -> Result<()> {
+        self.send(|response| Command::ReportSystemIncomingCall(request, response))
+            .await
+    }
+
+    pub async fn start_system_call(&self, request: StartSystemCallRequest) -> Result<()> {
+        self.send(|response| Command::StartSystemCall(request, response))
+            .await
+    }
+
+    pub async fn answer_system_call(&self, request: AnswerSystemCallRequest) -> Result<()> {
+        self.send(|response| Command::AnswerSystemCall(request, response))
+            .await
+    }
+
+    pub async fn end_system_call(&self, request: EndSystemCallRequest) -> Result<()> {
+        self.send(|response| Command::EndSystemCall(request, response))
+            .await
+    }
+
+    pub async fn set_system_call_muted(&self, request: SetSystemCallMutedRequest) -> Result<()> {
+        self.send(|response| Command::SetSystemCallMuted(request, response))
+            .await
+    }
+
+    pub async fn drain_pending_system_call_actions(&self) -> Result<Vec<SystemCallAction>> {
+        self.send(Command::DrainPendingSystemCallActions).await
+    }
+
+    pub async fn fulfill_answer_call(&self, request: FulfillAnswerCallRequest) -> Result<()> {
+        self.send(|response| Command::FulfillAnswerCall(request, response))
+            .await
+    }
+
+    pub async fn fulfill_end_call(&self, request: FulfillEndCallRequest) -> Result<()> {
+        self.send(|response| Command::FulfillEndCall(request, response))
+            .await
+    }
+
+    pub async fn report_system_call_connected(
+        &self,
+        request: ReportConnectedRequest,
+    ) -> Result<()> {
+        self.send(|response| Command::ReportSystemCallConnected(request, response))
+            .await
+    }
+
+    pub async fn get_audio_routes(
+        &self,
+        request: GetAudioRoutesRequest,
+    ) -> Result<GetAudioRoutesResponse> {
+        self.send(|response| Command::GetAudioRoutes(request, response))
+            .await
+    }
+
+    pub async fn set_audio_route(
+        &self,
+        request: SetAudioRouteRequest,
+    ) -> Result<NativeCallSnapshot> {
+        self.send(|response| Command::SetAudioRoute(request, response))
+            .await
+    }
+
+    pub async fn send_dtmf(&self, request: SendDTMFRequest) -> Result<NativeCallSnapshot> {
+        self.send(|response| Command::SendDTMF(request, response))
+            .await
+    }
+
+    pub async fn update_call_display(
+        &self,
+        request: UpdateCallDisplayRequest,
+    ) -> Result<NativeCallSnapshot> {
+        self.send(|response| Command::UpdateCallDisplay(request, response))
+            .await
+    }
+
+    pub async fn report_system_call_answered_elsewhere(
+        &self,
+        request: ReportAnsweredElsewhereRequest,
+    ) -> Result<()> {
+        self.send(|response| Command::ReportSystemCallAnsweredElsewhere(request, response))
+            .await
+    }
+
+    pub async fn report_system_call_declined_elsewhere(
+        &self,
+        request: ReportDeclinedElsewhereRequest,
+    ) -> Result<()> {
+        self.send(|response| Command::ReportSystemCallDeclinedElsewhere(request, response))
+            .await
+    }
+
+    pub async fn report_system_call_unanswered(
+        &self,
+        request: ReportUnansweredRequest,
+    ) -> Result<()> {
+        self.send(|response| Command::ReportSystemCallUnanswered(request, response))
+            .await
+    }
+
+    pub async fn decline_system_call(
+        &self,
+        request: DeclineSystemCallRequest,
+    ) -> Result<()> {
+        self.send(|response| Command::DeclineSystemCall(request, response))
             .await
     }
 }
@@ -352,12 +568,88 @@ impl<R: Runtime> Actor<R> {
                 self.handle_clear_native_call_remote_video_overlay(request, response)
                     .await
             }
+            Command::SetNativeCallLocalVideoOverlay(request, response) => {
+                self.handle_set_native_call_local_video_overlay(request, response)
+                    .await
+            }
+            Command::ClearNativeCallLocalVideoOverlay(request, response) => {
+                self.handle_clear_native_call_local_video_overlay(request, response)
+                    .await
+            }
             Command::SetNativeCallEncryptionKey(request, response) => {
                 self.handle_set_native_call_encryption_key(request, response)
                     .await
             }
             Command::GetNativeCallState(caller_label, response) => {
                 self.handle_get_native_call_state(caller_label, response)
+                    .await
+            }
+            Command::ReportSystemIncomingCall(request, response) => {
+                self.handle_report_system_incoming_call(request, response)
+                    .await
+            }
+            Command::StartSystemCall(request, response) => {
+                self.handle_start_system_call(request, response)
+                    .await
+            }
+            Command::AnswerSystemCall(request, response) => {
+                self.handle_answer_system_call(request, response)
+                    .await
+            }
+            Command::EndSystemCall(request, response) => {
+                self.handle_end_system_call(request, response)
+                    .await
+            }
+            Command::SetSystemCallMuted(request, response) => {
+                self.handle_set_system_call_muted(request, response)
+                    .await
+            }
+            Command::DrainPendingSystemCallActions(response) => {
+                self.handle_drain_pending_system_call_actions(response)
+                    .await
+            }
+            Command::FulfillAnswerCall(request, response) => {
+                self.handle_fulfill_answer_call(request, response)
+                    .await
+            }
+            Command::FulfillEndCall(request, response) => {
+                self.handle_fulfill_end_call(request, response)
+                    .await
+            }
+            Command::ReportSystemCallConnected(request, response) => {
+                self.handle_report_system_call_connected(request, response)
+                    .await
+            }
+            Command::GetAudioRoutes(request, response) => {
+                self.handle_get_audio_routes(request, response)
+                    .await
+            }
+            Command::SetAudioRoute(request, response) => {
+                self.handle_set_audio_route(request, response)
+                    .await
+            }
+            Command::SendDTMF(request, response) => {
+                self.handle_send_dtmf(request, response)
+                    .await
+            }
+            Command::UpdateCallDisplay(request, response) => {
+                self.handle_update_call_display(request, response)
+                    .await
+            }
+            Command::ReportSystemCallAnsweredElsewhere(request, response) => {
+                self.handle_report_system_call_answered_elsewhere(request, response)
+                    .await
+            }
+            Command::ReportSystemCallDeclinedElsewhere(request, response) => {
+                self.handle_report_system_call_declined_elsewhere(request, response)
+                    .await
+            }
+            Command::ReportSystemCallUnanswered(request, response) => {
+                self.handle_report_system_call_unanswered(request, response)
+                    .await
+            }
+            Command::DeclineSystemCall(request, response) => {
+                self.handle_decline_system_call(request, response)
                     .await
             }
         }
@@ -399,6 +691,8 @@ impl<R: Runtime> Actor<R> {
                     token: &request.token,
                     microphone_enabled: request.microphone_enabled,
                     encryption_keys: &request.encryption_keys,
+                    ice_servers: request.ice_servers.as_deref(),
+                    reconnect_attempts: request.reconnect_attempts,
                 },
                 channel,
             })
@@ -646,6 +940,73 @@ impl<R: Runtime> Actor<R> {
     }
 
     #[cfg(mobile)]
+    async fn handle_set_native_call_local_video_overlay(
+        &mut self,
+        request: SetNativeCallLocalVideoOverlayRequest,
+        response: oneshot::Sender<Result<NativeCallSnapshot>>,
+    ) {
+        if !local_video_overlay_request_is_valid(&request) {
+            let _ = response.send(invalid_request());
+            return;
+        }
+        let result = self
+            .mobile
+            .set_native_call_local_video_overlay(NativeSetLocalVideoOverlayRequest {
+                fields: NativeSetLocalVideoOverlayFields {
+                    call_id: &request.call_id,
+                    x: request.x,
+                    y: request.y,
+                    width: request.width,
+                    height: request.height,
+                    device_pixel_ratio: request.device_pixel_ratio,
+                },
+            })
+            .await;
+        let _ = response.send(result);
+    }
+
+    #[cfg(not(mobile))]
+    async fn handle_set_native_call_local_video_overlay(
+        &mut self,
+        request: SetNativeCallLocalVideoOverlayRequest,
+        response: oneshot::Sender<Result<NativeCallSnapshot>>,
+    ) {
+        let _ = &request;
+        let _ = response.send(unavailable());
+    }
+
+    #[cfg(mobile)]
+    async fn handle_clear_native_call_local_video_overlay(
+        &mut self,
+        request: ClearNativeCallLocalVideoOverlayRequest,
+        response: oneshot::Sender<Result<NativeCallSnapshot>>,
+    ) {
+        if !call_id_is_valid(&request.call_id) {
+            let _ = response.send(invalid_request());
+            return;
+        }
+        let result = self
+            .mobile
+            .clear_native_call_local_video_overlay(NativeDisconnectCallRequest {
+                fields: NativeDisconnectCallFields {
+                    call_id: &request.call_id,
+                },
+            })
+            .await;
+        let _ = response.send(result);
+    }
+
+    #[cfg(not(mobile))]
+    async fn handle_clear_native_call_local_video_overlay(
+        &mut self,
+        request: ClearNativeCallLocalVideoOverlayRequest,
+        response: oneshot::Sender<Result<NativeCallSnapshot>>,
+    ) {
+        let _ = &request;
+        let _ = response.send(unavailable());
+    }
+
+    #[cfg(mobile)]
     async fn handle_set_native_call_encryption_key(
         &mut self,
         request: SetNativeCallEncryptionKeyRequest,
@@ -718,6 +1079,537 @@ impl<R: Runtime> Actor<R> {
         let _ = response.send(result);
     }
 
+    // MARK: System call (CallKit) handlers
+
+    #[cfg(mobile)]
+    async fn handle_report_system_incoming_call(
+        &mut self,
+        request: ReportSystemIncomingCallRequest,
+        response: oneshot::Sender<Result<()>>,
+    ) {
+        if request.uuid.trim().is_empty() || request.caller_name.trim().is_empty() {
+            let _ = response.send(invalid_request());
+            return;
+        }
+        let result = self
+            .mobile
+            .report_system_incoming_call(NativeReportIncomingCallRequest {
+                fields: NativeReportIncomingCallFields {
+                    uuid: &request.uuid,
+                    caller_name: &request.caller_name,
+                },
+            })
+            .await;
+        let _ = response.send(result);
+    }
+
+    #[cfg(not(mobile))]
+    async fn handle_report_system_incoming_call(
+        &mut self,
+        request: ReportSystemIncomingCallRequest,
+        response: oneshot::Sender<Result<()>>,
+    ) {
+        let _ = &request;
+        let _ = response.send(unavailable());
+    }
+
+    #[cfg(mobile)]
+    async fn handle_start_system_call(
+        &mut self,
+        request: StartSystemCallRequest,
+        response: oneshot::Sender<Result<()>>,
+    ) {
+        if request.call_id.trim().is_empty()
+            || request.uuid.trim().is_empty()
+            || request.caller_name.trim().is_empty()
+        {
+            let _ = response.send(invalid_request());
+            return;
+        }
+        let result = self
+            .mobile
+            .start_system_call(NativeStartSystemCallRequest {
+                fields: NativeStartSystemCallFields {
+                    call_id: &request.call_id,
+                    uuid: &request.uuid,
+                    caller_name: &request.caller_name,
+                },
+            })
+            .await;
+        let _ = response.send(result);
+    }
+
+    #[cfg(not(mobile))]
+    async fn handle_start_system_call(
+        &mut self,
+        request: StartSystemCallRequest,
+        response: oneshot::Sender<Result<()>>,
+    ) {
+        let _ = &request;
+        let _ = response.send(unavailable());
+    }
+
+    #[cfg(mobile)]
+    async fn handle_answer_system_call(
+        &mut self,
+        request: AnswerSystemCallRequest,
+        response: oneshot::Sender<Result<()>>,
+    ) {
+        if request.call_id.trim().is_empty() || request.uuid.trim().is_empty() {
+            let _ = response.send(invalid_request());
+            return;
+        }
+        let result = self
+            .mobile
+            .answer_system_call(NativeAnswerSystemCallRequest {
+                fields: NativeAnswerSystemCallFields {
+                    call_id: &request.call_id,
+                    uuid: &request.uuid,
+                },
+            })
+            .await;
+        let _ = response.send(result);
+    }
+
+    #[cfg(not(mobile))]
+    async fn handle_answer_system_call(
+        &mut self,
+        request: AnswerSystemCallRequest,
+        response: oneshot::Sender<Result<()>>,
+    ) {
+        let _ = &request;
+        let _ = response.send(unavailable());
+    }
+
+    #[cfg(mobile)]
+    async fn handle_end_system_call(
+        &mut self,
+        request: EndSystemCallRequest,
+        response: oneshot::Sender<Result<()>>,
+    ) {
+        if request.call_id.trim().is_empty() {
+            let _ = response.send(invalid_request());
+            return;
+        }
+        let result = self
+            .mobile
+            .end_system_call(NativeEndSystemCallRequest {
+                fields: NativeEndSystemCallFields {
+                    call_id: &request.call_id,
+                    remote_ended: request.remote_ended,
+                },
+            })
+            .await;
+        let _ = response.send(result);
+    }
+
+    #[cfg(not(mobile))]
+    async fn handle_end_system_call(
+        &mut self,
+        request: EndSystemCallRequest,
+        response: oneshot::Sender<Result<()>>,
+    ) {
+        let _ = &request;
+        let _ = response.send(unavailable());
+    }
+
+    #[cfg(mobile)]
+    async fn handle_set_system_call_muted(
+        &mut self,
+        request: SetSystemCallMutedRequest,
+        response: oneshot::Sender<Result<()>>,
+    ) {
+        if request.call_id.trim().is_empty() {
+            let _ = response.send(invalid_request());
+            return;
+        }
+        let result = self
+            .mobile
+            .set_system_call_muted(NativeSetSystemCallMutedRequest {
+                fields: NativeSetSystemCallMutedFields {
+                    call_id: &request.call_id,
+                    muted: request.muted,
+                },
+            })
+            .await;
+        let _ = response.send(result);
+    }
+
+    #[cfg(not(mobile))]
+    async fn handle_set_system_call_muted(
+        &mut self,
+        request: SetSystemCallMutedRequest,
+        response: oneshot::Sender<Result<()>>,
+    ) {
+        let _ = &request;
+        let _ = response.send(unavailable());
+    }
+
+    #[cfg(mobile)]
+    async fn handle_drain_pending_system_call_actions(
+        &mut self,
+        response: oneshot::Sender<Result<Vec<SystemCallAction>>>,
+    ) {
+        let result = self.mobile.drain_pending_system_call_actions().await;
+        let _ = response.send(result);
+    }
+
+    #[cfg(not(mobile))]
+    async fn handle_drain_pending_system_call_actions(
+        &mut self,
+        response: oneshot::Sender<Result<Vec<SystemCallAction>>>,
+    ) {
+        let _ = response.send(unavailable());
+    }
+
+    #[cfg(mobile)]
+    async fn handle_fulfill_answer_call(
+        &mut self,
+        request: FulfillAnswerCallRequest,
+        response: oneshot::Sender<Result<()>>,
+    ) {
+        if request.uuid.trim().is_empty() {
+            let _ = response.send(invalid_request());
+            return;
+        }
+        let result = self
+            .mobile
+            .fulfill_answer_call(NativeFulfillAnswerCallRequest {
+                fields: NativeFulfillAnswerCallFields {
+                    uuid: &request.uuid,
+                },
+            })
+            .await;
+        let _ = response.send(result);
+    }
+
+    #[cfg(not(mobile))]
+    async fn handle_fulfill_answer_call(
+        &mut self,
+        request: FulfillAnswerCallRequest,
+        response: oneshot::Sender<Result<()>>,
+    ) {
+        let _ = &request;
+        let _ = response.send(unavailable());
+    }
+
+    #[cfg(mobile)]
+    async fn handle_fulfill_end_call(
+        &mut self,
+        request: FulfillEndCallRequest,
+        response: oneshot::Sender<Result<()>>,
+    ) {
+        if request.uuid.trim().is_empty() {
+            let _ = response.send(invalid_request());
+            return;
+        }
+        let result = self
+            .mobile
+            .fulfill_end_call(NativeFulfillEndCallRequest {
+                fields: NativeFulfillEndCallFields {
+                    uuid: &request.uuid,
+                },
+            })
+            .await;
+        let _ = response.send(result);
+    }
+
+    #[cfg(not(mobile))]
+    async fn handle_fulfill_end_call(
+        &mut self,
+        request: FulfillEndCallRequest,
+        response: oneshot::Sender<Result<()>>,
+    ) {
+        let _ = &request;
+        let _ = response.send(unavailable());
+    }
+
+    #[cfg(mobile)]
+    async fn handle_report_system_call_connected(
+        &mut self,
+        request: ReportConnectedRequest,
+        response: oneshot::Sender<Result<()>>,
+    ) {
+        if request.uuid.trim().is_empty() {
+            let _ = response.send(invalid_request());
+            return;
+        }
+        let result = self
+            .mobile
+            .report_connected(NativeReportConnectedRequest {
+                fields: NativeReportConnectedFields {
+                    uuid: &request.uuid,
+                },
+            })
+            .await;
+        let _ = response.send(result);
+    }
+
+    #[cfg(not(mobile))]
+    async fn handle_report_system_call_connected(
+        &mut self,
+        request: ReportConnectedRequest,
+        response: oneshot::Sender<Result<()>>,
+    ) {
+        let _ = &request;
+        let _ = response.send(unavailable());
+    }
+
+    // MARK: Extended CallKit handlers
+
+    #[cfg(mobile)]
+    async fn handle_get_audio_routes(
+        &mut self,
+        request: GetAudioRoutesRequest,
+        response: oneshot::Sender<Result<GetAudioRoutesResponse>>,
+    ) {
+        if !call_id_is_valid(&request.call_id) {
+            let _ = response.send(invalid_request());
+            return;
+        }
+        let result = self
+            .mobile
+            .get_audio_routes(NativeGetAudioRoutesRequest {
+                fields: NativeGetAudioRoutesFields {
+                    call_id: &request.call_id,
+                },
+            })
+            .await;
+        let _ = response.send(result);
+    }
+
+    #[cfg(not(mobile))]
+    async fn handle_get_audio_routes(
+        &mut self,
+        request: GetAudioRoutesRequest,
+        response: oneshot::Sender<Result<GetAudioRoutesResponse>>,
+    ) {
+        let _ = &request;
+        let _ = response.send(unavailable());
+    }
+
+    #[cfg(mobile)]
+    async fn handle_set_audio_route(
+        &mut self,
+        request: SetAudioRouteRequest,
+        response: oneshot::Sender<Result<NativeCallSnapshot>>,
+    ) {
+        if !call_id_is_valid(&request.call_id) || request.route_id.trim().is_empty() {
+            let _ = response.send(invalid_request());
+            return;
+        }
+        let result = self
+            .mobile
+            .set_audio_route(NativeSetAudioRouteRequest {
+                fields: NativeSetAudioRouteFields {
+                    call_id: &request.call_id,
+                    route_id: &request.route_id,
+                },
+            })
+            .await;
+        let _ = response.send(result.map(|r| r.receiver));
+    }
+
+    #[cfg(not(mobile))]
+    async fn handle_set_audio_route(
+        &mut self,
+        request: SetAudioRouteRequest,
+        response: oneshot::Sender<Result<NativeCallSnapshot>>,
+    ) {
+        let _ = &request;
+        let _ = response.send(unavailable());
+    }
+
+    #[cfg(mobile)]
+    async fn handle_send_dtmf(
+        &mut self,
+        request: SendDTMFRequest,
+        response: oneshot::Sender<Result<NativeCallSnapshot>>,
+    ) {
+        if !call_id_is_valid(&request.call_id) || request.digits.trim().is_empty() {
+            let _ = response.send(invalid_request());
+            return;
+        }
+        let result = self
+            .mobile
+            .send_dtmf(NativeSendDTMFRequest {
+                fields: NativeSendDTMFFields {
+                    call_id: &request.call_id,
+                    digits: &request.digits,
+                },
+            })
+            .await;
+        let _ = response.send(result.map(|r| r.receiver));
+    }
+
+    #[cfg(not(mobile))]
+    async fn handle_send_dtmf(
+        &mut self,
+        request: SendDTMFRequest,
+        response: oneshot::Sender<Result<NativeCallSnapshot>>,
+    ) {
+        let _ = &request;
+        let _ = response.send(unavailable());
+    }
+
+    #[cfg(mobile)]
+    async fn handle_update_call_display(
+        &mut self,
+        request: UpdateCallDisplayRequest,
+        response: oneshot::Sender<Result<NativeCallSnapshot>>,
+    ) {
+        if !call_id_is_valid(&request.call_id) || request.caller_name.trim().is_empty() {
+            let _ = response.send(invalid_request());
+            return;
+        }
+        let result = self
+            .mobile
+            .update_call_display(NativeUpdateCallDisplayRequest {
+                fields: NativeUpdateCallDisplayFields {
+                    call_id: &request.call_id,
+                    caller_name: &request.caller_name,
+                    has_video: request.has_video,
+                },
+            })
+            .await;
+        let _ = response.send(result.map(|r| r.receiver));
+    }
+
+    #[cfg(not(mobile))]
+    async fn handle_update_call_display(
+        &mut self,
+        request: UpdateCallDisplayRequest,
+        response: oneshot::Sender<Result<NativeCallSnapshot>>,
+    ) {
+        let _ = &request;
+        let _ = response.send(unavailable());
+    }
+
+    #[cfg(mobile)]
+    async fn handle_report_system_call_answered_elsewhere(
+        &mut self,
+        request: ReportAnsweredElsewhereRequest,
+        response: oneshot::Sender<Result<()>>,
+    ) {
+        if !call_id_is_valid(&request.call_id) {
+            let _ = response.send(invalid_request());
+            return;
+        }
+        let result = self
+            .mobile
+            .report_system_call_answered_elsewhere(NativeReportAnsweredElsewhereRequest {
+                fields: NativeReportAnsweredElsewhereFields {
+                    call_id: &request.call_id,
+                },
+            })
+            .await;
+        let _ = response.send(result);
+    }
+
+    #[cfg(not(mobile))]
+    async fn handle_report_system_call_answered_elsewhere(
+        &mut self,
+        request: ReportAnsweredElsewhereRequest,
+        response: oneshot::Sender<Result<()>>,
+    ) {
+        let _ = &request;
+        let _ = response.send(unavailable());
+    }
+
+    #[cfg(mobile)]
+    async fn handle_report_system_call_declined_elsewhere(
+        &mut self,
+        request: ReportDeclinedElsewhereRequest,
+        response: oneshot::Sender<Result<()>>,
+    ) {
+        if !call_id_is_valid(&request.call_id) {
+            let _ = response.send(invalid_request());
+            return;
+        }
+        let result = self
+            .mobile
+            .report_system_call_declined_elsewhere(NativeReportDeclinedElsewhereRequest {
+                fields: NativeReportDeclinedElsewhereFields {
+                    call_id: &request.call_id,
+                },
+            })
+            .await;
+        let _ = response.send(result);
+    }
+
+    #[cfg(not(mobile))]
+    async fn handle_report_system_call_declined_elsewhere(
+        &mut self,
+        request: ReportDeclinedElsewhereRequest,
+        response: oneshot::Sender<Result<()>>,
+    ) {
+        let _ = &request;
+        let _ = response.send(unavailable());
+    }
+
+    #[cfg(mobile)]
+    async fn handle_report_system_call_unanswered(
+        &mut self,
+        request: ReportUnansweredRequest,
+        response: oneshot::Sender<Result<()>>,
+    ) {
+        if !call_id_is_valid(&request.call_id) {
+            let _ = response.send(invalid_request());
+            return;
+        }
+        let result = self
+            .mobile
+            .report_system_call_unanswered(NativeReportUnansweredRequest {
+                fields: NativeReportUnansweredFields {
+                    call_id: &request.call_id,
+                },
+            })
+            .await;
+        let _ = response.send(result);
+    }
+
+    #[cfg(not(mobile))]
+    async fn handle_report_system_call_unanswered(
+        &mut self,
+        request: ReportUnansweredRequest,
+        response: oneshot::Sender<Result<()>>,
+    ) {
+        let _ = &request;
+        let _ = response.send(unavailable());
+    }
+
+    #[cfg(mobile)]
+    async fn handle_decline_system_call(
+        &mut self,
+        request: DeclineSystemCallRequest,
+        response: oneshot::Sender<Result<()>>,
+    ) {
+        if !call_id_is_valid(&request.call_id) || request.reason.trim().is_empty() {
+            let _ = response.send(invalid_request());
+            return;
+        }
+        let result = self
+            .mobile
+            .decline_system_call(NativeDeclineSystemCallRequest {
+                fields: NativeDeclineSystemCallFields {
+                    call_id: &request.call_id,
+                    reason: &request.reason,
+                },
+            })
+            .await;
+        let _ = response.send(result);
+    }
+
+    #[cfg(not(mobile))]
+    async fn handle_decline_system_call(
+        &mut self,
+        request: DeclineSystemCallRequest,
+        response: oneshot::Sender<Result<()>>,
+    ) {
+        let _ = &request;
+        let _ = response.send(unavailable());
+    }
+
     #[cfg(mobile)]
     fn handle_channel_event(&mut self, event: NativeCallChannelEvent) {
         match event {
@@ -743,10 +1635,11 @@ impl<R: Runtime> Actor<R> {
 mod tests {
     use super::{
         call_id_is_valid, connect_request_is_valid, encryption_key_material_is_valid,
-        remote_video_overlay_request_is_valid,
+        local_video_overlay_request_is_valid, remote_video_overlay_request_is_valid,
     };
     use crate::models::{
-        ConnectNativeCallRequest, EncryptionKey, SetNativeCallRemoteVideoOverlayRequest,
+        ConnectNativeCallRequest, EncryptionKey, SetNativeCallLocalVideoOverlayRequest,
+        SetNativeCallRemoteVideoOverlayRequest,
     };
 
     fn connect_request(call_id: &str) -> ConnectNativeCallRequest {
@@ -756,6 +1649,8 @@ mod tests {
             token: "jwt".into(),
             microphone_enabled: true,
             encryption_keys: Vec::new(),
+            ice_servers: None,
+            reconnect_attempts: None,
         }
     }
 
@@ -855,6 +1750,37 @@ mod tests {
         let mut blank_track = request;
         blank_track.track_id = " ".into();
         assert!(!remote_video_overlay_request_is_valid(&blank_track));
+    }
+
+    #[test]
+    fn local_video_overlay_validation_requires_valid_geometry_and_call_id() {
+        let request = SetNativeCallLocalVideoOverlayRequest {
+            call_id: "call".into(),
+            x: -120.0,
+            y: -50.0,
+            width: 320.0,
+            height: 180.0,
+            device_pixel_ratio: 2.0,
+        };
+        assert!(local_video_overlay_request_is_valid(&request));
+
+        for invalid in [f64::NAN, f64::INFINITY, 0.0, -1.0] {
+            let mut invalid_request = request.clone();
+            invalid_request.width = invalid;
+            assert!(!local_video_overlay_request_is_valid(&invalid_request));
+        }
+        let mut invalid_x = request.clone();
+        invalid_x.x = f64::NAN;
+        assert!(!local_video_overlay_request_is_valid(&invalid_x));
+        let mut invalid_y = request.clone();
+        invalid_y.y = f64::INFINITY;
+        assert!(!local_video_overlay_request_is_valid(&invalid_y));
+        let mut invalid_dpr = request.clone();
+        invalid_dpr.device_pixel_ratio = 0.0;
+        assert!(!local_video_overlay_request_is_valid(&invalid_dpr));
+        let mut blank_call = request;
+        blank_call.call_id = " ".into();
+        assert!(!local_video_overlay_request_is_valid(&blank_call));
     }
 
     #[cfg(not(mobile))]

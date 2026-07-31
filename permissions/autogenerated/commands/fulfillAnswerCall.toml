@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-fulfillAnswerCall"
+description = "Enables the fulfillAnswerCall command without any pre-configured scope."
+commands.allow = ["fulfillAnswerCall"]
+
+[[permission]]
+identifier = "deny-fulfillAnswerCall"
+description = "Denies the fulfillAnswerCall command without any pre-configured scope."
+commands.deny = ["fulfillAnswerCall"]

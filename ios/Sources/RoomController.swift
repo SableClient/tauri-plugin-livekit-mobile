@@ -47,6 +47,10 @@ final class RoomController: NSObject {
   private var participantCount = 0
   private var remoteParticipants: [BridgeRemoteParticipant] = []
   private var lastError: BridgeError?
+  /// Local connection quality from the last
+  /// `room(_:participant:didUpdateConnectionQuality:)` delegate event for the
+  /// local participant. Nil until the first such event arrives.
+  private var localConnectionQuality: BridgeConnectionQuality? = nil
   private var attempt: UInt64 = 0
 
   // MARK: Remote video overlay state
@@ -68,6 +72,18 @@ final class RoomController: NSObject {
     let trackSid: String
   }
 
+  // MARK: Local camera preview overlay state
+
+  /// Second non-interactive native renderer for the local camera track.
+  /// Independent from `overlayView`; the two can coexist on-screen.
+  private var localOverlayView: VideoView?
+
+  // MARK: CallKit integration
+
+  /// Weak reference for pushing system call start/end/mute events back to
+  /// the CallKit controller. Set by the plugin after init.
+  weak var callKitController: CallKitController?
+
   /// Called from `Plugin.load(webview:)`; the reference stays weak so the
   /// plugin never extends the webview's lifetime.
   func attachHostWebView(_ webView: WKWebView) {
@@ -85,7 +101,8 @@ final class RoomController: NSObject {
       cameraEnabled: cameraEnabled,
       participantCount: participantCount,
       remoteParticipants: remoteParticipants,
-      lastError: lastError)
+      lastError: lastError,
+      localConnectionQuality: localConnectionQuality)
   }
 
   /// Publishes the current snapshot on the active call's channel and bumps
@@ -130,6 +147,7 @@ final class RoomController: NSObject {
       keyProvider = nil
       appliedKeyIndexes = [:]
       removeOverlayView()
+      removeLocalOverlayView()
       await staleRoom.disconnect()
       guard attemptId == attempt else {
         rejectCancelled(invoke)
@@ -145,6 +163,7 @@ final class RoomController: NSObject {
     participantCount = 0
     remoteParticipants = []
     removeOverlayView()
+    removeLocalOverlayView()
     connectionState = .connecting
     emitSnapshotChanged()
 
@@ -167,19 +186,28 @@ final class RoomController: NSObject {
       }
     }
 
+    // Re-gate audio before connecting: the engine must stay suspended until
+    // CallKit grants its audio window.
+    try? AudioManager.shared.setEngineAvailability(.none)
+
     let newRoom: Room
     if let keyProvider {
       // Frame-only E2EE via the legacy options: the newer EncryptionOptions
       // also encrypts data channels, which the web peers do not support.
-      let roomOptions = RoomOptions(e2eeOptions: E2EEOptions(keyProvider: keyProvider))
+      let roomOptions = RoomOptions(adaptiveStream: true, dynacast: true,
+                               e2eeOptions: E2EEOptions(keyProvider: keyProvider),
+                               singlePeerConnection: true)
       newRoom = Room(delegate: self, roomOptions: roomOptions)
     } else {
       newRoom = Room(delegate: self)
     }
     room = newRoom
 
+    let connectOptions = Self.buildConnectOptions(from: args)
+
     do {
-      try await newRoom.connect(url: args.url, token: args.token)
+      try await newRoom.connect(url: args.url, token: args.token,
+                                connectOptions: connectOptions)
     } catch {
       // The thrown error is deliberately discarded: native errors may embed
       // the server URL, and only bounded codes may cross the bridge.
@@ -286,6 +314,10 @@ final class RoomController: NSObject {
     }
 
     microphoneEnabled = enabled
+    // Push mute state back to CallKit so the system UI stays consistent.
+    if let callId {
+      callKitController?.setMuted(!enabled, for: callId)
+    }
     emitSnapshotChanged()
     invoke.resolve(snapshot())
   }
@@ -342,6 +374,15 @@ final class RoomController: NSObject {
     }
 
     cameraEnabled = enabled
+    callKitController?.cameraActive = enabled
+
+    if enabled, #available(iOS 16.0, *) {
+      if AVCaptureSession().isMultitaskingCameraAccessSupported {
+        AVCaptureSession().isMultitaskingCameraAccessEnabled = true
+        logRoom("Multitasking camera access enabled (iOS 16+)")
+      }
+    }
+
     emitSnapshotChanged()
     invoke.resolve(snapshot())
   }
@@ -510,6 +551,32 @@ final class RoomController: NSObject {
   ) -> Bool {
     guard let applied else { return true }
     return newIndex > applied
+  }
+
+  /// Builds ``ConnectOptions`` from optional connect-args fields. Returns nil
+  /// when both `iceServers` and `reconnectAttempts` are absent: the
+  /// default-initialised ``ConnectOptions`` is equivalent and avoids an
+  /// allocation.
+  nonisolated static func buildConnectOptions(
+    from args: ConnectArgs
+  ) -> ConnectOptions? {
+    let ice = args.iceServers?.compactMap { s -> IceServer? in
+      let urls = s.urls.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+      guard !urls.isEmpty else { return nil }
+      let username = s.username.flatMap { $0.isEmpty ? nil : $0 }
+      let credential = s.credential.flatMap { $0.isEmpty ? nil : $0 }
+      return IceServer(urls: urls, username: username, credential: credential)
+    }
+    let hasIce = ice.flatMap { !$0.isEmpty } ?? false
+    let hasReconn = args.reconnectAttempts != nil
+    guard hasIce || hasReconn else { return nil }
+
+    if let attempts = args.reconnectAttempts {
+      return ConnectOptions(
+        reconnectAttempts: max(attempts, 0),
+        iceServers: ice ?? [])
+    }
+    return ConnectOptions(iceServers: ice ?? [])
   }
 
   // MARK: - Remote video overlay
@@ -707,6 +774,124 @@ final class RoomController: NSObject {
     return track
   }
 
+  // MARK: - Local camera preview overlay
+
+  /// Attaches a second, independent `VideoView` to the local camera track
+  /// and positions it over the matching DOM rect. The local camera track is
+  /// resolved internally (there is at most one camera track per room). The
+  /// view is mirrored (selfie preview). Same geometry validation and clipping
+  /// as the remote overlay.
+  func setLocalVideoOverlay(
+    callId requestedCallId: String,
+    frame: CGRect,
+    devicePixelRatio: Double,
+    invoke: Invoke
+  ) {
+    guard callId == requestedCallId, let room else {
+      invoke.resolve(snapshot())
+      return
+    }
+    guard connectionState == .connected else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+    guard Self.overlayGeometryIsValid(frame, devicePixelRatio: devicePixelRatio) else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+    guard let webView = hostWebView, let container = webView.superview else {
+      reject(invoke, .unavailable)
+      return
+    }
+    guard let clipped = Self.overlayFrame(
+      viewportRect: frame, in: webView, container: container)
+    else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+
+    let view = ensureLocalOverlayView(in: container)
+
+    guard
+      let publication = Self.cameraPublication(in: room),
+      let track = publication.track as? VideoTrack
+    else {
+      detachLocalOverlay(from: view)
+      invoke.resolve(snapshot())
+      return
+    }
+
+    if view.track !== track {
+      view.track = track
+    }
+    view.frame = clipped
+    view.isHidden = false
+    invoke.resolve(snapshot())
+  }
+
+  /// Removes the local overlay view. A stale call id is a no-op resolve.
+  func clearLocalVideoOverlay(callId requestedCallId: String, invoke: Invoke) {
+    guard callId == requestedCallId else {
+      invoke.resolve(snapshot())
+      return
+    }
+    removeLocalOverlayView()
+    invoke.resolve(snapshot())
+  }
+
+  /// Returns the single local overlay view, creating it as a non-interactive,
+  /// mirrored sibling of the host webview on first use.
+  private func ensureLocalOverlayView(in container: UIView) -> VideoView {
+    if let localOverlayView {
+      if localOverlayView.superview !== container {
+        localOverlayView.removeFromSuperview()
+        container.addSubview(localOverlayView)
+      }
+      return localOverlayView
+    }
+    let view = VideoView()
+    view.isUserInteractionEnabled = false
+    view.isHidden = true
+    view.mirrorMode = .mirror
+    container.addSubview(view)
+    localOverlayView = view
+    return view
+  }
+
+  /// Detaches the local renderer but keeps the (hidden) view.
+  private func detachLocalOverlay(from view: VideoView) {
+    view.track = nil
+    view.isHidden = true
+  }
+
+  /// Fully releases the local overlay: detach, hide, remove from hierarchy,
+  /// drop the reference.
+  private func removeLocalOverlayView() {
+    guard let view = localOverlayView else { return }
+    view.track = nil
+    view.isHidden = true
+    view.removeFromSuperview()
+    localOverlayView = nil
+  }
+
+  /// Re-resolves the local camera track after track lifecycle events:
+  /// rebinds to the (possibly replaced) live track, or clears the attachment
+  /// when the track is gone. Never recreates a removed view.
+  private func reconcileLocalOverlay(in room: Room) {
+    guard let view = localOverlayView else { return }
+    guard
+      let publication = Self.cameraPublication(in: room),
+      let track = publication.track as? VideoTrack
+    else {
+      detachLocalOverlay(from: view)
+      return
+    }
+    if view.track !== track {
+      view.track = track
+    }
+    view.isHidden = false
+  }
+
   /// Silent teardown for plugin deinit; bumps the attempt identity so
   /// in-flight work settles with `cancelled`.
   func tearDown() async {
@@ -714,16 +899,20 @@ final class RoomController: NSObject {
     let roomToClose = room
     room = nil
     channel = nil
+    if let callId { callKitController?.endCall(callId: callId, remoteEnded: true) }
     callId = nil
     connectionState = .idle
     microphoneEnabled = false
     cameraEnabled = false
+    callKitController?.cameraActive = false
     participantCount = 0
     remoteParticipants = []
     keyProvider = nil
     appliedKeyIndexes = [:]
     lastError = nil
+    localConnectionQuality = nil
     removeOverlayView()
+    removeLocalOverlayView()
     if let roomToClose {
       await roomToClose.disconnect()
     }
@@ -749,13 +938,17 @@ final class RoomController: NSObject {
     connectionState = .idle
     microphoneEnabled = false
     cameraEnabled = false
+    callKitController?.cameraActive = false
     participantCount = 0
     remoteParticipants = []
     keyProvider = nil
     appliedKeyIndexes = [:]
     lastError = nil
+    localConnectionQuality = nil
+    if let callId { callKitController?.endCall(callId: callId, remoteEnded: false) }
     callId = nil
     removeOverlayView()
+    removeLocalOverlayView()
     emitSnapshotChanged()
     channel = nil
 
@@ -788,6 +981,7 @@ final class RoomController: NSObject {
     keyProvider = nil
     appliedKeyIndexes = [:]
     lastError = error
+    localConnectionQuality = nil
     emitSnapshotChanged()
     invoke.reject(error.message, code: error.code.rawValue)
   }
@@ -820,9 +1014,19 @@ final class RoomController: NSObject {
               sid: $0.sid.stringValue, muted: $0.isMuted,
               subscribed: $0.isSubscribed)
           }
-        return BridgeRemoteParticipant(identity: identity.stringValue, camera: camera)
+        return BridgeRemoteParticipant(
+          identity: identity.stringValue, camera: camera,
+          connectionQuality: Self.connectionQualityWire(participant.connectionQuality))
       }
       .sorted { $0.identity < $1.identity }
+  }
+
+  /// Extracts a human-readable room name from a LiveKit URL for CallKit
+  /// caller-id display. Takes the last path component (after the final `/`).
+  nonisolated static func roomName(from url: String) -> String {
+    guard let parsed = URL(string: url) else { return "Call" }
+    let name = parsed.lastPathComponent
+    return name.isEmpty ? "Call" : name
   }
 
   // MARK: - Camera helpers
@@ -1013,19 +1217,39 @@ extension RoomController: RoomDelegate {
   private func handleDisconnect(from room: Room) {
     guard room === self.room else { return }
     guard connectionState != .idle, connectionState != .failed else { return }
-    // Terminal, unexpected disconnect. The LiveKitError is deliberately not
-    // forwarded (bounded codes only). Keep `callId`/channel so Rust sees the
-    // failed snapshot; drop the dead room and its key state.
+
+    // If the LiveKit engine is already trying to reconnect
+    // (didStartReconnectWithMode fired), this is not terminal; let the
+    // reconnect cycle continue.
+    if connectionState == .reconnecting {
+      logRoom("Disconnect during active reconnection: letting reconnect continue")
+      return
+    }
+
+    // The WebSocket dropped but LiveKit hasn't started reconnecting yet.
+    // Treat as reconnecting (not failed) — the phone may have locked and
+    // the WebSocket will reconnect once the network is available again.
+    // Only fail if the room is actually gone (nil) or after a timeout.
+    if self.room != nil {
+      logRoom("WebSocket dropped — treating as reconnecting, not failed")
+      applyConnectionState(.reconnecting, from: room)
+      return
+    }
+
+    // Terminal disconnect: room is actually gone.
     self.room = nil
     keyProvider = nil
     appliedKeyIndexes = [:]
     microphoneEnabled = false
     cameraEnabled = false
+    callKitController?.cameraActive = false
     participantCount = 0
     remoteParticipants = []
     lastError = BridgeError(.disconnected)
+    localConnectionQuality = nil
     connectionState = .failed
     removeOverlayView()
+    removeLocalOverlayView()
     emitSnapshotChanged()
   }
 
@@ -1041,6 +1265,50 @@ extension RoomController: RoomDelegate {
     applyConnectionState(.connected, from: room)
   }
 
+  // MARK: - Connection-quality delegate & helpers
+
+  @objc(room:participant:didUpdateConnectionQuality:) nonisolated func room(
+    _ room: Room, participant: Participant,
+    didUpdateConnectionQuality quality: ConnectionQuality
+  ) {
+    Task { @MainActor [weak self] in
+      self?.handleConnectionQuality(quality, participant: participant, from: room)
+    }
+  }
+
+  /// Maps the LiveKit ``ConnectionQuality`` enum to the bound wire string
+  /// vocabulary ("lost" / "poor" / "good" / "excellent" / "unknown").
+  nonisolated static func connectionQualityWire(
+    _ q: ConnectionQuality
+  ) -> BridgeConnectionQuality? {
+    switch q {
+    case .lost: return .lost
+    case .poor: return .poor
+    case .good: return .good
+    case .excellent: return .excellent
+    case .unknown: return nil
+    }
+  }
+
+  private func handleConnectionQuality(
+    _ quality: ConnectionQuality, participant: Participant, from room: Room
+  ) {
+    guard room === self.room else { return }
+    guard connectionState == .connected || connectionState == .reconnecting
+    else { return }
+
+    if participant is LocalParticipant {
+      let wire = Self.connectionQualityWire(quality)
+      guard localConnectionQuality != wire else { return }
+      localConnectionQuality = wire
+      emitSnapshotChanged()
+    } else {
+      // This event always changes the remote projection (at minimum the
+      // quality field), so recompute and emit unconditionally.
+      updateRemoteParticipants(from: room)
+    }
+  }
+
   /// Recomputes the remote-only projection from a room event and emits one
   /// snapshot_changed when it (and with it the count) actually changed. Any
   /// participant/publication/subscription event also reconciles the video
@@ -1051,10 +1319,19 @@ extension RoomController: RoomDelegate {
     guard connectionState == .connected || connectionState == .reconnecting
     else { return }
     reconcileOverlay(in: room)
+    reconcileLocalOverlay(in: room)
     let projection = Self.projectRemoteParticipants(in: room)
     guard projection != remoteParticipants else { return }
     remoteParticipants = projection
     participantCount = projection.count
     emitSnapshotChanged()
   }
+}
+
+// MARK: - Logging helper (RoomController)
+
+private func logRoom(_ message: String) {
+  #if DEBUG
+  NSLog("[RoomController] \(message)")
+  #endif
 }

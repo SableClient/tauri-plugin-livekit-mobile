@@ -9,6 +9,14 @@ const COMMANDS: &[&str] = &[
     "clearNativeCallRemoteVideoOverlay",
     "setNativeCallEncryptionKey",
     "getNativeCallState",
+    "getAudioRoutes",
+    "setAudioRoute",
+    "sendDTMF",
+    "updateCallDisplay",
+    "reportSystemCallAnsweredElsewhere",
+    "reportSystemCallDeclinedElsewhere",
+    "reportSystemCallUnanswered",
+    "declineSystemCall",
 ];
 
 /// Must match `platforms: [.iOS(...)]` in `ios/Package.swift`.

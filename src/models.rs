@@ -113,6 +113,7 @@ pub struct NativeCallCapabilities {
     pub native_room: bool,
     pub camera: bool,
     pub native_video_overlay: bool,
+    pub call_kit: bool,
 }
 
 impl NativeCallCapabilities {
@@ -126,6 +127,7 @@ impl NativeCallCapabilities {
             native_room: supported,
             camera: supported,
             native_video_overlay: false,
+            call_kit: false,
         }
     }
 }
@@ -163,13 +165,17 @@ pub struct NativeCallRemoteCamera {
 
 /// Remote-only participant projection; `identity` is the opaque backend
 /// identity. `camera` exists only while the participant has a remote camera
-/// publication.
+/// publication. `connection_quality` is the bounded
+/// LiveKit ``ConnectionQuality`` vocabulary (“lost”/“poor”/“good”/
+/// “excellent”); omitted when unknown.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NativeCallRemoteParticipant {
     pub identity: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub camera: Option<NativeCallRemoteCamera>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection_quality: Option<String>,
 }
 
 /// Wire shape of the native room snapshot resolved by native commands and
@@ -198,6 +204,8 @@ pub struct NativeCallSnapshot {
         deserialize_with = "deserialize_bounded_last_error"
     )]
     pub last_error: Option<NativeCallError>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_connection_quality: Option<String>,
 }
 
 impl NativeCallSnapshot {
@@ -237,6 +245,19 @@ impl std::fmt::Debug for EncryptionKey {
     }
 }
 
+/// One TURN/STUN server entry; mirrors the LiveKit ``IceServer`` shape.
+/// Empty strings for `username` and `credential` are folded to `None` by the
+/// native side.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IceServerConfig {
+    pub urls: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential: Option<String>,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectNativeCallRequest {
@@ -249,6 +270,13 @@ pub struct ConnectNativeCallRequest {
     /// LiveKit, keeping the plugin generic.
     #[serde(default)]
     pub encryption_keys: Vec<EncryptionKey>,
+    /// Optional TURN/STUN servers forwarded to LiveKit ``ConnectOptions``.
+    /// Omitted (or empty) means server-provided ICE only.
+    #[serde(default)]
+    pub ice_servers: Option<Vec<IceServerConfig>>,
+    /// Overrides the default reconnection-attempt count (10).
+    #[serde(default)]
+    pub reconnect_attempts: Option<u32>,
 }
 
 // Token and key material must never land in logs: redact them in `Debug`.
@@ -260,6 +288,8 @@ impl std::fmt::Debug for ConnectNativeCallRequest {
             .field("token", &"[redacted]")
             .field("microphone_enabled", &self.microphone_enabled)
             .field("encryption_keys", &self.encryption_keys)
+            .field("ice_servers", &self.ice_servers)
+            .field("reconnect_attempts", &self.reconnect_attempts)
             .finish()
     }
 }
@@ -309,6 +339,151 @@ pub struct ClearNativeCallRemoteVideoOverlayRequest {
     pub call_id: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetNativeCallLocalVideoOverlayRequest {
+    pub call_id: String,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    pub device_pixel_ratio: f64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClearNativeCallLocalVideoOverlayRequest {
+    pub call_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportSystemIncomingCallRequest {
+    pub uuid: String,
+    pub caller_name: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartSystemCallRequest {
+    pub call_id: String,
+    pub uuid: String,
+    pub caller_name: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnswerSystemCallRequest {
+    pub call_id: String,
+    pub uuid: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EndSystemCallRequest {
+    pub call_id: String,
+    #[serde(default)]
+    pub remote_ended: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetSystemCallMutedRequest {
+    pub call_id: String,
+    pub muted: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetAudioRoutesRequest {
+    pub call_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetAudioRouteRequest {
+    pub call_id: String,
+    pub route_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SendDTMFRequest {
+    pub call_id: String,
+    pub digits: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCallDisplayRequest {
+    pub call_id: String,
+    pub caller_name: String,
+    #[serde(default)]
+    pub has_video: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportAnsweredElsewhereRequest {
+    pub call_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportDeclinedElsewhereRequest {
+    pub call_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportUnansweredRequest {
+    pub call_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeclineSystemCallRequest {
+    pub call_id: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FulfillAnswerCallRequest {
+    pub uuid: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FulfillEndCallRequest {
+    pub uuid: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportConnectedRequest {
+    pub uuid: String,
+}
+
+/// System-call action enqueued by CallKit when JS is suspended and drained
+/// by the guest via `drainPendingSystemCallActions`.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemCallAction {
+    pub action: SystemCallActionKind,
+    pub uuid: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub muted: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SystemCallActionKind {
+    Answer,
+    End,
+    Mute,
+}
+
 /// Mid-call shared-E2EE key rotation/update for one participant identity.
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -345,6 +520,10 @@ pub struct NativeConnectCallFields<'a> {
     // Omitted entirely for ordinary unencrypted calls.
     #[serde(skip_serializing_if = "<[EncryptionKey]>::is_empty")]
     pub encryption_keys: &'a [EncryptionKey],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ice_servers: Option<&'a [IceServerConfig]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reconnect_attempts: Option<u32>,
 }
 
 // Token and key material must never land in logs: redact them in `Debug`.
@@ -356,6 +535,8 @@ impl std::fmt::Debug for NativeConnectCallFields<'_> {
             .field("token", &"[redacted]")
             .field("microphone_enabled", &self.microphone_enabled)
             .field("encryption_keys", &self.encryption_keys)
+            .field("ice_servers", &self.ice_servers)
+            .field("reconnect_attempts", &self.reconnect_attempts)
             .finish()
     }
 }
@@ -414,6 +595,150 @@ pub struct NativeSetRemoteVideoOverlayFields<'a> {
     pub width: f64,
     pub height: f64,
     pub device_pixel_ratio: f64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeSetLocalVideoOverlayFields<'a> {
+    pub call_id: &'a str,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    pub device_pixel_ratio: f64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeReportIncomingCallFields<'a> {
+    pub uuid: &'a str,
+    pub caller_name: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeStartSystemCallFields<'a> {
+    pub call_id: &'a str,
+    pub uuid: &'a str,
+    pub caller_name: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeAnswerSystemCallFields<'a> {
+    pub call_id: &'a str,
+    pub uuid: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeEndSystemCallFields<'a> {
+    pub call_id: &'a str,
+    #[serde(skip_serializing_if = "is_false")]
+    pub remote_ended: bool,
+}
+
+fn is_false(v: &bool) -> bool {
+    !*v
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeSetSystemCallMutedFields<'a> {
+    pub call_id: &'a str,
+    pub muted: bool,
+}
+
+/// Native payload for `fulfillAnswerCall`.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeFulfillAnswerCallFields<'a> {
+    pub uuid: &'a str,
+}
+
+/// Native payload for `fulfillEndCall`.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeFulfillEndCallFields<'a> {
+    pub uuid: &'a str,
+}
+
+/// Native payload for `reportConnected`.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeReportConnectedFields<'a> {
+    pub uuid: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeGetAudioRoutesFields<'a> {
+    pub call_id: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeSetAudioRouteFields<'a> {
+    pub call_id: &'a str,
+    pub route_id: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeSendDTMFFields<'a> {
+    pub call_id: &'a str,
+    pub digits: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeUpdateCallDisplayFields<'a> {
+    pub call_id: &'a str,
+    pub caller_name: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub has_video: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeReportAnsweredElsewhereFields<'a> {
+    pub call_id: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeReportDeclinedElsewhereFields<'a> {
+    pub call_id: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeReportUnansweredFields<'a> {
+    pub call_id: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeDeclineSystemCallFields<'a> {
+    pub call_id: &'a str,
+    pub reason: &'a str,
+}
+
+/// Wire shape for `getAudioRoutes` response: an array of audio routes plus
+/// the native room snapshot.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetAudioRoutesResponse {
+    pub routes: serde_json::Value,
+    pub receiver: NativeCallSnapshot,
+}
+
+/// Wire shape for commands that wrap a snapshot in a `receiver` key
+/// (`setAudioRoute`, `sendDTMF`, `updateCallDisplay`).
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandWithSnapshotResponse {
+    pub receiver: NativeCallSnapshot,
 }
 
 #[cfg(test)]
@@ -555,6 +880,7 @@ mod tests {
             participant_count: 3,
             remote_participants: Vec::new(),
             last_error: None,
+            local_connection_quality: None,
         })
         .unwrap();
         assert_eq!(
@@ -581,6 +907,7 @@ mod tests {
             last_error: Some(NativeCallError::from_code(
                 NativeCallFailureCode::Disconnected,
             )),
+            local_connection_quality: None,
         })
         .unwrap();
         assert_eq!(
@@ -620,10 +947,12 @@ mod tests {
                         muted: false,
                         subscribed: true,
                     }),
+                    connection_quality: None,
                 },
                 NativeCallRemoteParticipant {
                     identity: "@bob:example.org".into(),
                     camera: None,
+                    connection_quality: None,
                 },
             ]
         );
@@ -746,6 +1075,8 @@ mod tests {
             token: "secret-jwt",
             microphone_enabled: true,
             encryption_keys: &[],
+            ice_servers: None,
+            reconnect_attempts: None,
         };
         // No E2EE keys: the `encryptionKeys` key is omitted entirely, so
         // natives that predate the field see an unchanged payload.
@@ -850,6 +1181,25 @@ mod tests {
                 "devicePixelRatio": 2.0
             })
         );
+        assert_eq!(
+            serde_json::to_value(NativeSetLocalVideoOverlayFields {
+                call_id: "call-1",
+                x: 10.0,
+                y: 20.0,
+                width: 320.0,
+                height: 180.0,
+                device_pixel_ratio: 2.0,
+            })
+            .unwrap(),
+            serde_json::json!({
+                "callId": "call-1",
+                "x": 10.0,
+                "y": 20.0,
+                "width": 320.0,
+                "height": 180.0,
+                "devicePixelRatio": 2.0
+            })
+        );
     }
 
     #[test]
@@ -862,6 +1212,7 @@ mod tests {
                 native_room: true,
                 camera: false,
                 native_video_overlay: true,
+                call_kit: true,
             })
             .unwrap(),
             serde_json::json!({
@@ -870,7 +1221,8 @@ mod tests {
                 "backgroundAudio": true,
                 "nativeRoom": true,
                 "camera": false,
-                "nativeVideoOverlay": true
+                "nativeVideoOverlay": true,
+                "callKit": true
             })
         );
     }

@@ -39,8 +39,27 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::switchNativeCallCamera,
             commands::setNativeCallRemoteVideoOverlay,
             commands::clearNativeCallRemoteVideoOverlay,
+            commands::setNativeCallLocalVideoOverlay,
+            commands::clearNativeCallLocalVideoOverlay,
+            commands::reportSystemIncomingCall,
+            commands::startSystemCall,
+            commands::answerSystemCall,
+            commands::endSystemCall,
+            commands::setSystemCallMuted,
+            commands::drainPendingSystemCallActions,
+            commands::fulfillAnswerCall,
+            commands::fulfillEndCall,
+            commands::reportSystemCallConnected,
             commands::setNativeCallEncryptionKey,
-            commands::getNativeCallState
+            commands::getNativeCallState,
+            commands::getAudioRoutes,
+            commands::setAudioRoute,
+            commands::sendDTMF,
+            commands::updateCallDisplay,
+            commands::reportSystemCallAnsweredElsewhere,
+            commands::reportSystemCallDeclinedElsewhere,
+            commands::reportSystemCallUnanswered,
+            commands::declineSystemCall,
         ])
         .setup(|app, api| {
             #[cfg(mobile)]

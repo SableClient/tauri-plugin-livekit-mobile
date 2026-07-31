@@ -1,4 +1,6 @@
 import Foundation
+import LiveKit
+import PushKit
 import Tauri
 import WebKit
 
@@ -17,6 +19,15 @@ import WebKit
 // exposed through snapshots. Only bounded codes and static messages cross
 // this boundary; native errors (which may embed URLs) are discarded.
 
+/// A single TURN/STUN server entry: the wire shape for one array element.
+/// Mirrors the LiveKit ``IceServer`` initialiser: urls (array of URLs),
+/// optional `username` and `credential`.
+struct BridgeIceServer: Decodable {
+  let urls: [String]
+  let username: String?
+  let credential: String?
+}
+
 struct ConnectArgs: Decodable {
   let callId: String
   let url: String
@@ -26,6 +37,8 @@ struct ConnectArgs: Decodable {
   /// unencrypted (generic) call.
   let encryptionKeys: [EncryptionKeyPayload]?
   let channel: Channel?
+  let iceServers: [BridgeIceServer]?
+  let reconnectAttempts: Int?
 }
 
 struct EncryptionKeyPayload: Decodable {
@@ -57,8 +70,80 @@ struct SetCameraEnabledArgs: Decodable {
   let enabled: Bool
 }
 
-// `cancelConnect`, `switchCamera` and `clearRemoteVideoOverlay` reuse the
-// `{ callId }` payload of `DisconnectArgs`.
+// `cancelConnect`, `switchCamera`, `clearRemoteVideoOverlay` and
+// `clearLocalVideoOverlay` reuse the `{ callId }` payload of `DisconnectArgs`.
+
+struct SetLocalVideoOverlayArgs: Decodable {
+  let callId: String
+  let x: Double
+  let y: Double
+  let width: Double
+  let height: Double
+  let devicePixelRatio: Double
+}
+
+struct ReportSystemIncomingCallArgs: Decodable {
+  let uuid: String
+  let callerName: String
+}
+
+struct StartSystemCallArgs: Decodable {
+  let callId: String
+  let uuid: String
+  let callerName: String
+}
+
+struct AnswerSystemCallArgs: Decodable {
+  let callId: String
+  let uuid: String
+}
+
+struct EndSystemCallArgs: Decodable {
+  let callId: String
+  let remoteEnded: Bool?
+}
+
+struct SetSystemCallMutedArgs: Decodable {
+  let callId: String
+  let muted: Bool
+}
+
+struct FulfillAnswerCallArgs: Decodable {
+  let uuid: String
+}
+
+struct FulfillEndCallArgs: Decodable {
+  let uuid: String
+}
+
+struct GetAudioRoutesArgs: Decodable {
+  let callId: String
+}
+
+struct SetAudioRouteArgs: Decodable {
+  let callId: String
+  let routeId: String
+}
+
+struct SendDTMFArgs: Decodable {
+  let callId: String
+  let digits: String
+}
+
+struct UpdateCallDisplayArgs: Decodable {
+  let callId: String
+  let callerName: String
+  let hasVideo: Bool?
+}
+
+struct DeclineSystemCallArgs: Decodable {
+  let callId: String
+  let reason: String
+}
+
+struct ReportConnectedArgs: Decodable {
+  let uuid: String
+}
 
 struct SetRemoteVideoOverlayArgs: Decodable {
   let callId: String
@@ -73,6 +158,16 @@ struct SetRemoteVideoOverlayArgs: Decodable {
   /// logical points, which already match CSS pixels, so this must never
   /// scale the rect.
   let devicePixelRatio: Double
+}
+
+/// Bounded connection-quality vocabulary mirrored from
+/// LiveKit ``ConnectionQuality``. `.unknown` is intentionally omitted: absent
+/// quality encodes as `nil` rather than an explicit wire string.
+enum BridgeConnectionQuality: String, Encodable {
+  case lost
+  case poor
+  case good
+  case excellent
 }
 
 enum BridgeConnectionState: String, Encodable {
@@ -132,6 +227,8 @@ struct BridgeRemoteParticipant: Encodable, Equatable {
   let identity: String
   /// Present only while the participant has a camera publication.
   let camera: BridgeRemoteCamera?
+  /// Omitted when the SDK reports `.unknown`.
+  let connectionQuality: BridgeConnectionQuality?
 }
 
 struct BridgeStateResponse: Encodable {
@@ -143,6 +240,9 @@ struct BridgeStateResponse: Encodable {
   let participantCount: Int
   let remoteParticipants: [BridgeRemoteParticipant]
   let lastError: BridgeError?
+  /// Omitted when empty (e.g. before the first quality event or when the SDK
+  /// reports `.unknown`).
+  let localConnectionQuality: BridgeConnectionQuality?
 
   // Custom encoding: `callId` must be an explicit JSON null when idle, while
   // the optional `lastError` key is omitted when absent.
@@ -155,6 +255,7 @@ struct BridgeStateResponse: Encodable {
     case participantCount
     case remoteParticipants
     case lastError
+    case localConnectionQuality
   }
 
   func encode(to encoder: Encoder) throws {
@@ -167,6 +268,7 @@ struct BridgeStateResponse: Encodable {
     try container.encode(participantCount, forKey: .participantCount)
     try container.encode(remoteParticipants, forKey: .remoteParticipants)
     try container.encodeIfPresent(lastError, forKey: .lastError)
+    try container.encodeIfPresent(localConnectionQuality, forKey: .localConnectionQuality)
   }
 }
 
@@ -185,6 +287,7 @@ struct BridgeCapabilities: Encodable {
   let backgroundAudio: Bool
   let camera: Bool
   let nativeVideoOverlay: Bool
+  let callKit: Bool
 }
 
 /// Tauri-facing surface; all work is serialized through ``RoomController`` on
@@ -195,28 +298,38 @@ struct BridgeCapabilities: Encodable {
 /// `UIBackgroundModes` entry for room audio to survive backgrounding.
 final class LivekitMobilePlugin: Plugin {
   private let controller = RoomController()
+  /// CallKit bridge: system call UI + audio-session arbitration.
+  private let callKitController = CallKitController()
 
   deinit {
     // The task retains the controller until teardown finishes; teardown bumps
     // the attempt identity so in-flight work settles with `cancelled`.
-    Task { @MainActor [controller] in
+    Task { @MainActor [controller, callKitController] in
+      callKitController.reset()
       await controller.tearDown()
     }
   }
 
   /// Retains the host webview (weakly, on the controller) so the remote
   /// video overlay can be positioned in its superview's coordinate space.
+  /// Also sets up the LiveKit audio recipe (disable auto config + engine
+  /// until CallKit grants a window) and wires the CallKitController's
+  /// plugin reference for trigger delivery.
   @objc public override func load(webview: WKWebView) {
     forceLinkLiveKitObjCSurface()
-    Task { @MainActor [weak controller] in
+    Task { @MainActor [weak controller, weak callKitController] in
+      CallKitController.disableAutomaticAudioConfiguration()
       controller?.attachHostWebView(webview)
+      controller?.callKitController = callKitController
+      callKitController?.plugin = self
     }
   }
 
   @objc public func capabilities(_ invoke: Invoke) throws {
     invoke.resolve(
       BridgeCapabilities(
-        microphone: true, backgroundAudio: true, camera: true, nativeVideoOverlay: true))
+        microphone: true, backgroundAudio: true, camera: true, nativeVideoOverlay: true,
+        callKit: true))
   }
 
   @objc public func connect(_ invoke: Invoke) throws {
@@ -370,6 +483,334 @@ final class LivekitMobilePlugin: Plugin {
         return
       }
       controller.clearRemoteVideoOverlay(callId: args.callId, invoke: invoke)
+    }
+  }
+
+  @objc public func setLocalVideoOverlay(_ invoke: Invoke) throws {
+    guard let args = try? invoke.parseArgs(SetLocalVideoOverlayArgs.self) else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+    Task { @MainActor [weak controller] in
+      guard let controller else {
+        reject(invoke, .unavailable)
+        return
+      }
+      controller.setLocalVideoOverlay(
+        callId: args.callId,
+        frame: CGRect(x: args.x, y: args.y, width: args.width, height: args.height),
+        devicePixelRatio: args.devicePixelRatio,
+        invoke: invoke)
+    }
+  }
+
+  @objc public func clearLocalVideoOverlay(_ invoke: Invoke) throws {
+    guard let args = try? invoke.parseArgs(DisconnectArgs.self) else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+    Task { @MainActor [weak controller] in
+      guard let controller else {
+        reject(invoke, .unavailable)
+        return
+      }
+      controller.clearLocalVideoOverlay(callId: args.callId, invoke: invoke)
+    }
+  }
+
+  // MARK: - System call (CallKit) commands
+
+  @objc public func reportSystemIncomingCall(_ invoke: Invoke) throws {
+    guard let args = try? invoke.parseArgs(ReportSystemIncomingCallArgs.self) else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+    Task { @MainActor [weak callKitController] in
+      guard let callKitController else {
+        reject(invoke, .unavailable)
+        return
+      }
+      guard let uuid = UUID(uuidString: args.uuid) else {
+        reject(invoke, .invalidRequest)
+        return
+      }
+      callKitController.reportIncomingCall(uuid: uuid, callerName: args.callerName)
+      invoke.resolve()
+    }
+  }
+
+  @objc public func startSystemCall(_ invoke: Invoke) throws {
+    guard let args = try? invoke.parseArgs(StartSystemCallArgs.self) else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+    Task { @MainActor [weak callKitController] in
+      guard let callKitController else {
+        reject(invoke, .unavailable)
+        return
+      }
+      guard let uuid = UUID(uuidString: args.uuid) else {
+        reject(invoke, .invalidRequest)
+        return
+      }
+      callKitController.startOutgoingCall(
+        uuid: uuid, callId: args.callId, callerName: args.callerName)
+      invoke.resolve()
+    }
+  }
+
+  @objc public func answerSystemCall(_ invoke: Invoke) throws {
+    guard let args = try? invoke.parseArgs(AnswerSystemCallArgs.self) else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+    Task { @MainActor [weak callKitController] in
+      guard let callKitController else {
+        reject(invoke, .unavailable)
+        return
+      }
+      guard let uuid = UUID(uuidString: args.uuid) else {
+        reject(invoke, .invalidRequest)
+        return
+      }
+      callKitController.answerCall(uuid: uuid, callId: args.callId)
+      invoke.resolve()
+    }
+  }
+
+  @objc public func endSystemCall(_ invoke: Invoke) throws {
+    guard let args = try? invoke.parseArgs(EndSystemCallArgs.self) else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+    Task { @MainActor [weak callKitController] in
+      guard let callKitController else {
+        reject(invoke, .unavailable)
+        return
+      }
+      callKitController.endCall(callId: args.callId, remoteEnded: args.remoteEnded ?? false)
+      invoke.resolve()
+    }
+  }
+
+  @objc public func setSystemCallMuted(_ invoke: Invoke) throws {
+    guard let args = try? invoke.parseArgs(SetSystemCallMutedArgs.self) else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+    Task { @MainActor [weak callKitController] in
+      guard let callKitController else {
+        reject(invoke, .unavailable)
+        return
+      }
+      callKitController.setMuted(args.muted, for: args.callId)
+      invoke.resolve()
+    }
+  }
+
+  @objc public func drainPendingSystemCallActions(_ invoke: Invoke) throws {
+    Task { @MainActor [weak callKitController] in
+      guard let callKitController else {
+        reject(invoke, .unavailable)
+        return
+      }
+      invoke.resolve(callKitController.drainPendingActions())
+    }
+  }
+
+  @objc public func fulfillAnswerCall(_ invoke: Invoke) throws {
+    guard let args = try? invoke.parseArgs(FulfillAnswerCallArgs.self) else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+    Task { @MainActor [weak callKitController] in
+      guard let callKitController else {
+        reject(invoke, .unavailable)
+        return
+      }
+      guard let uuid = UUID(uuidString: args.uuid) else {
+        reject(invoke, .invalidRequest)
+        return
+      }
+      callKitController.fulfillAnswerCall(uuid: uuid)
+      invoke.resolve()
+    }
+  }
+
+  @objc public func fulfillEndCall(_ invoke: Invoke) throws {
+    guard let args = try? invoke.parseArgs(FulfillEndCallArgs.self) else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+    Task { @MainActor [weak callKitController] in
+      guard let callKitController else {
+        reject(invoke, .unavailable)
+        return
+      }
+      guard let uuid = UUID(uuidString: args.uuid) else {
+        reject(invoke, .invalidRequest)
+        return
+      }
+      callKitController.fulfillEndCall(uuid: uuid)
+      invoke.resolve()
+    }
+  }
+
+  @objc public func reportConnected(_ invoke: Invoke) throws {
+    guard let args = try? invoke.parseArgs(ReportConnectedArgs.self) else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+    Task { @MainActor [weak callKitController] in
+      guard let callKitController else {
+        reject(invoke, .unavailable)
+        return
+      }
+      guard let uuid = UUID(uuidString: args.uuid) else {
+        reject(invoke, .invalidRequest)
+        return
+      }
+      callKitController.reportConnected(uuid: uuid)
+      invoke.resolve()
+    }
+  }
+
+  // MARK: - Extended CallKit commands
+
+  @objc public func getAudioRoutes(_ invoke: Invoke) throws {
+    guard let args = try? invoke.parseArgs(GetAudioRoutesArgs.self) else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+    Task { @MainActor [weak callKitController, weak controller] in
+      guard let callKitController, let controller else {
+        reject(invoke, .unavailable)
+        return
+      }
+      let routes = callKitController.getAudioRoutes(callId: args.callId)
+      let snapshot = controller.snapshot()
+      invoke.resolve(["routes": routes, "receiver": snapshot])
+    }
+  }
+
+  @objc public func setAudioRoute(_ invoke: Invoke) throws {
+    guard let args = try? invoke.parseArgs(SetAudioRouteArgs.self) else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+    Task { @MainActor [weak callKitController, weak controller] in
+      guard let callKitController, let controller else {
+        reject(invoke, .unavailable)
+        return
+      }
+      callKitController.setAudioRoute(callId: args.callId, routeId: args.routeId)
+      invoke.resolve(["receiver": controller.snapshot()])
+    }
+  }
+
+  @objc public func sendDTMF(_ invoke: Invoke) throws {
+    guard let args = try? invoke.parseArgs(SendDTMFArgs.self) else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+    Task { @MainActor [weak callKitController, weak controller] in
+      guard let callKitController, let controller else {
+        reject(invoke, .unavailable)
+        return
+      }
+      callKitController.sendDTMF(callId: args.callId, digits: args.digits)
+      invoke.resolve(["receiver": controller.snapshot()])
+    }
+  }
+
+  @objc public func updateCallDisplay(_ invoke: Invoke) throws {
+    guard let args = try? invoke.parseArgs(UpdateCallDisplayArgs.self) else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+    Task { @MainActor [weak callKitController, weak controller] in
+      guard let callKitController, let controller else {
+        reject(invoke, .unavailable)
+        return
+      }
+      callKitController.updateCallDisplay(
+        callId: args.callId, callerName: args.callerName, hasVideo: args.hasVideo)
+      invoke.resolve(["receiver": controller.snapshot()])
+    }
+  }
+
+  @objc public func reportSystemCallAnsweredElsewhere(_ invoke: Invoke) throws {
+    guard let args = try? invoke.parseArgs(DisconnectArgs.self) else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+    Task { @MainActor [weak callKitController] in
+      guard let callKitController else {
+        reject(invoke, .unavailable)
+        return
+      }
+      callKitController.reportAnsweredElsewhere(callId: args.callId)
+      invoke.resolve()
+    }
+  }
+
+  @objc public func reportSystemCallDeclinedElsewhere(_ invoke: Invoke) throws {
+    guard let args = try? invoke.parseArgs(DisconnectArgs.self) else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+    Task { @MainActor [weak callKitController] in
+      guard let callKitController else {
+        reject(invoke, .unavailable)
+        return
+      }
+      callKitController.reportDeclinedElsewhere(callId: args.callId)
+      invoke.resolve()
+    }
+  }
+
+  @objc public func reportSystemCallUnanswered(_ invoke: Invoke) throws {
+    guard let args = try? invoke.parseArgs(DisconnectArgs.self) else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+    Task { @MainActor [weak callKitController] in
+      guard let callKitController else {
+        reject(invoke, .unavailable)
+        return
+      }
+      callKitController.reportUnanswered(callId: args.callId)
+      invoke.resolve()
+    }
+  }
+
+  @objc public func declineSystemCall(_ invoke: Invoke) throws {
+    guard let args = try? invoke.parseArgs(DeclineSystemCallArgs.self) else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+    Task { @MainActor [weak callKitController] in
+      guard let callKitController else {
+        reject(invoke, .unavailable)
+        return
+      }
+      callKitController.declineCall(callId: args.callId, reason: args.reason)
+      invoke.resolve()
+    }
+  }
+
+  // MARK: - PushKit VoIP forwarding
+
+  @objc public func pushRegistry(
+    _ registry: PKPushRegistry,
+    didReceiveIncomingPushWith payload: PKPushPayload,
+    for type: PKPushType,
+    completion: @escaping () -> Void
+  ) {
+    Task { @MainActor [weak callKitController] in
+      callKitController?.pushRegistry(
+        registry, didReceiveIncomingPushWith: payload,
+        for: type, completion: completion)
     }
   }
 

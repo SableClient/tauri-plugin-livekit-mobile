@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { addPluginListener, type PluginListener } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 export type NativeCallConnectionState =
@@ -56,6 +57,16 @@ export interface EncryptionKey {
 }
 
 /**
+ * One TURN/STUN server entry: `urls` is an array of URLs (at least one
+ * nonempty), with optional `username` and `credential`.
+ */
+export interface IceServer {
+  urls: string[];
+  username?: string;
+  credential?: string;
+}
+
+/**
  * `url` is the LiveKit server URL and `token` a LiveKit access token (JWT),
  * both supplied by the host app (e.g. MatrixRTC focus negotiation). The
  * plugin never mints, refreshes, logs, or echoes the token.
@@ -63,6 +74,9 @@ export interface EncryptionKey {
  * `encryptionKeys` are initial shared-E2EE keys installed by the native side
  * before `room.connect`. Omitted or empty means an ordinary unencrypted
  * LiveKit call; use `setNativeCallEncryptionKey` for later rotations.
+ *
+ * `iceServers` are optional TURN/STUN servers forwarded to LiveKit
+ * ``ConnectOptions``. `reconnectAttempts` overrides the default count (10).
  */
 export interface ConnectNativeCallRequest {
   callId: string;
@@ -70,6 +84,8 @@ export interface ConnectNativeCallRequest {
   token: string;
   microphoneEnabled: boolean;
   encryptionKeys?: EncryptionKey[];
+  iceServers?: IceServer[];
+  reconnectAttempts?: number;
 }
 
 /** Rotates or installs a shared-E2EE key mid-call. */
@@ -119,6 +135,99 @@ export interface ClearNativeCallRemoteVideoOverlayRequest {
 }
 
 /**
+ * Positions a native-rendered local camera preview in CSS pixels. No
+ * `participantIdentity`/`trackId`: the local camera is singular per room.
+ */
+export interface SetNativeCallLocalVideoOverlayRequest {
+  callId: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  devicePixelRatio: number;
+}
+
+export interface ClearNativeCallLocalVideoOverlayRequest {
+  callId: string;
+}
+
+/**
+ * System-call (CallKit) commands. These commands are fire-and-forget from
+ * the JS perspective: they resolve `void` / `null`. Only
+ * `drainPendingSystemCallActions` returns data (the queued actions).
+ */
+export interface ReportSystemIncomingCallRequest {
+  uuid: string;
+  callerName: string;
+}
+
+export interface StartSystemCallRequest {
+  callId: string;
+  uuid: string;
+  callerName: string;
+}
+
+export interface AnswerSystemCallRequest {
+  callId: string;
+  uuid: string;
+}
+
+export interface EndSystemCallRequest {
+  callId: string;
+  remoteEnded?: boolean;
+}
+
+export interface SetSystemCallMutedRequest {
+  callId: string;
+  muted: boolean;
+}
+
+export interface GetAudioRoutesRequest {
+  callId: string;
+}
+
+export interface SetAudioRouteRequest {
+  callId: string;
+  routeId: string;
+}
+
+export interface SendDTMFRequest {
+  callId: string;
+  digits: string;
+}
+
+export interface UpdateCallDisplayRequest {
+  callId: string;
+  callerName: string;
+  hasVideo?: boolean;
+}
+
+export interface ReportAnsweredElsewhereRequest {
+  callId: string;
+}
+
+export interface ReportDeclinedElsewhereRequest {
+  callId: string;
+}
+
+export interface ReportUnansweredRequest {
+  callId: string;
+}
+
+export interface DeclineSystemCallRequest {
+  callId: string;
+  reason: string;
+}
+
+export type SystemCallActionKind = 'answer' | 'end' | 'mute';
+
+export interface SystemCallAction {
+  action: SystemCallActionKind;
+  uuid: string;
+  muted?: boolean;
+}
+
+/**
  * One remote participant's camera publication (track id, mute and
  * subscription state).
  */
@@ -136,6 +245,9 @@ export interface NativeCallRemoteCamera {
 export interface NativeCallRemoteParticipant {
   identity: string;
   camera?: NativeCallRemoteCamera;
+  /** Bounded connection-quality string: "lost"/"poor"/"good"/"excellent";
+   *  omitted when unknown. */
+  connectionQuality?: string;
 }
 
 /**
@@ -153,6 +265,18 @@ export interface NativeCallSnapshot {
   participantCount: number;
   remoteParticipants: NativeCallRemoteParticipant[];
   lastError?: NativeCallError;
+  /** Bounded connection-quality string for the local participant:
+   *  "lost"/"poor"/"good"/"excellent"; omitted when unknown. */
+  localConnectionQuality?: string;
+}
+
+/**
+ * Wire shape for `getAudioRoutes` response: an array of audio routes plus
+ * the native room snapshot.
+ */
+export interface GetAudioRoutesResponse {
+  routes: unknown;
+  receiver: NativeCallSnapshot;
 }
 
 /**
@@ -226,8 +350,140 @@ export async function clearNativeCallRemoteVideoOverlay(
   );
 }
 
+export async function setNativeCallLocalVideoOverlay(
+  request: SetNativeCallLocalVideoOverlayRequest
+): Promise<NativeCallSnapshot> {
+  return await invoke<NativeCallSnapshot>(
+    'plugin:livekit-mobile|setNativeCallLocalVideoOverlay',
+    { payload: request }
+  );
+}
+
+export async function clearNativeCallLocalVideoOverlay(
+  request: ClearNativeCallLocalVideoOverlayRequest
+): Promise<NativeCallSnapshot> {
+  return await invoke<NativeCallSnapshot>(
+    'plugin:livekit-mobile|clearNativeCallLocalVideoOverlay',
+    { payload: request }
+  );
+}
+
 export async function getNativeCallState(): Promise<NativeCallSnapshot> {
   return await invoke<NativeCallSnapshot>('plugin:livekit-mobile|getNativeCallState');
+}
+
+export async function reportSystemIncomingCall(
+  request: ReportSystemIncomingCallRequest
+): Promise<void> {
+  return await invoke<void>('plugin:livekit-mobile|reportSystemIncomingCall', {
+    payload: request,
+  });
+}
+
+export async function startSystemCall(request: StartSystemCallRequest): Promise<void> {
+  return await invoke<void>('plugin:livekit-mobile|startSystemCall', { payload: request });
+}
+
+export async function answerSystemCall(request: AnswerSystemCallRequest): Promise<void> {
+  return await invoke<void>('plugin:livekit-mobile|answerSystemCall', { payload: request });
+}
+
+export async function endSystemCall(request: EndSystemCallRequest): Promise<void> {
+  return await invoke<void>('plugin:livekit-mobile|endSystemCall', { payload: request });
+}
+
+export async function setSystemCallMuted(request: SetSystemCallMutedRequest): Promise<void> {
+  return await invoke<void>('plugin:livekit-mobile|setSystemCallMuted', { payload: request });
+}
+
+export async function drainPendingSystemCallActions(): Promise<SystemCallAction[]> {
+  return await invoke<SystemCallAction[]>('plugin:livekit-mobile|drainPendingSystemCallActions');
+}
+
+export async function fulfillAnswerCall(uuid: string): Promise<void> {
+  return await invoke<void>('plugin:livekit-mobile|fulfillAnswerCall', { payload: { uuid } });
+}
+
+export async function fulfillEndCall(uuid: string): Promise<void> {
+  return await invoke<void>('plugin:livekit-mobile|fulfillEndCall', { payload: { uuid } });
+}
+
+export async function reportSystemCallConnected(uuid: string): Promise<void> {
+  return await invoke<void>('plugin:livekit-mobile|reportSystemCallConnected', { payload: { uuid } });
+}
+
+export async function getAudioRoutes(
+  request: GetAudioRoutesRequest
+): Promise<GetAudioRoutesResponse> {
+  return await invoke<GetAudioRoutesResponse>('plugin:livekit-mobile|getAudioRoutes', {
+    payload: request,
+  });
+}
+
+export async function setAudioRoute(
+  request: SetAudioRouteRequest
+): Promise<NativeCallSnapshot> {
+  return await invoke<NativeCallSnapshot>('plugin:livekit-mobile|setAudioRoute', {
+    payload: request,
+  });
+}
+
+export async function sendDTMF(request: SendDTMFRequest): Promise<NativeCallSnapshot> {
+  return await invoke<NativeCallSnapshot>('plugin:livekit-mobile|sendDTMF', {
+    payload: request,
+  });
+}
+
+export async function updateCallDisplay(
+  request: UpdateCallDisplayRequest
+): Promise<NativeCallSnapshot> {
+  return await invoke<NativeCallSnapshot>('plugin:livekit-mobile|updateCallDisplay', {
+    payload: request,
+  });
+}
+
+export async function reportSystemCallAnsweredElsewhere(
+  request: ReportAnsweredElsewhereRequest
+): Promise<void> {
+  return await invoke<void>('plugin:livekit-mobile|reportSystemCallAnsweredElsewhere', {
+    payload: request,
+  });
+}
+
+export async function reportSystemCallDeclinedElsewhere(
+  request: ReportDeclinedElsewhereRequest
+): Promise<void> {
+  return await invoke<void>('plugin:livekit-mobile|reportSystemCallDeclinedElsewhere', {
+    payload: request,
+  });
+}
+
+export async function reportSystemCallUnanswered(
+  request: ReportUnansweredRequest
+): Promise<void> {
+  return await invoke<void>('plugin:livekit-mobile|reportSystemCallUnanswered', {
+    payload: request,
+  });
+}
+
+export async function declineSystemCall(
+  request: DeclineSystemCallRequest
+): Promise<void> {
+  return await invoke<void>('plugin:livekit-mobile|declineSystemCall', {
+    payload: request,
+  });
+}
+
+/**
+ * Listens for system-call actions triggered by CallKit (answer, end, mute).
+ * These arrive from the native side when the system UI (lock screen, call
+ * screen) is interacted with. The listener must be registered before any
+ * call starts: it's a plugin-level listener, not per-call.
+ */
+export async function onSystemCallAction(
+  handler: (action: SystemCallAction) => void
+): Promise<PluginListener> {
+  return await addPluginListener('livekit-mobile', 'callkit_event', handler);
 }
 
 /**

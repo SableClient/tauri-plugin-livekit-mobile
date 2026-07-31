@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-reportSystemCallUnanswered"
+description = "Enables the reportSystemCallUnanswered command without any pre-configured scope."
+commands.allow = ["reportSystemCallUnanswered"]
+
+[[permission]]
+identifier = "deny-reportSystemCallUnanswered"
+description = "Denies the reportSystemCallUnanswered command without any pre-configured scope."
+commands.deny = ["reportSystemCallUnanswered"]

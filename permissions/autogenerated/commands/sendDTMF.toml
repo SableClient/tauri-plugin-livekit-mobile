@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-sendDTMF"
+description = "Enables the sendDTMF command without any pre-configured scope."
+commands.allow = ["sendDTMF"]
+
+[[permission]]
+identifier = "deny-sendDTMF"
+description = "Denies the sendDTMF command without any pre-configured scope."
+commands.deny = ["sendDTMF"]

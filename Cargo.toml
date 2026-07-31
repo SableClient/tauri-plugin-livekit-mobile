@@ -16,6 +16,7 @@ links = "tauri-plugin-livekit-mobile"
 tauri = { version = "2.11.3", default-features = false }
 base64 = "0.22"
 serde = "1.0"
+serde_json = "1.0"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 

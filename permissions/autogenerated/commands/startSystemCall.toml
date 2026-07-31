@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-startSystemCall"
+description = "Enables the startSystemCall command without any pre-configured scope."
+commands.allow = ["startSystemCall"]
+
+[[permission]]
+identifier = "deny-startSystemCall"
+description = "Denies the startSystemCall command without any pre-configured scope."
+commands.deny = ["startSystemCall"]

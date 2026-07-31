@@ -295,6 +295,30 @@
       "type": "string",
       "oneOf": [
         {
+          "description": "Enables the answerSystemCall command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-answerSystemCall",
+          "markdownDescription": "Enables the answerSystemCall command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the answerSystemCall command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-answerSystemCall",
+          "markdownDescription": "Denies the answerSystemCall command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the clearNativeCallLocalVideoOverlay command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-clearNativeCallLocalVideoOverlay",
+          "markdownDescription": "Enables the clearNativeCallLocalVideoOverlay command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the clearNativeCallLocalVideoOverlay command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-clearNativeCallLocalVideoOverlay",
+          "markdownDescription": "Denies the clearNativeCallLocalVideoOverlay command without any pre-configured scope."
+        },
+        {
           "description": "Enables the clearNativeCallRemoteVideoOverlay command without any pre-configured scope.",
           "type": "string",
           "const": "allow-clearNativeCallRemoteVideoOverlay",
@@ -319,6 +343,18 @@
           "markdownDescription": "Denies the connectNativeCall command without any pre-configured scope."
         },
         {
+          "description": "Enables the declineSystemCall command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-declineSystemCall",
+          "markdownDescription": "Enables the declineSystemCall command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the declineSystemCall command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-declineSystemCall",
+          "markdownDescription": "Denies the declineSystemCall command without any pre-configured scope."
+        },
+        {
           "description": "Enables the disconnectNativeCall command without any pre-configured scope.",
           "type": "string",
           "const": "allow-disconnectNativeCall",
@@ -329,6 +365,66 @@
           "type": "string",
           "const": "deny-disconnectNativeCall",
           "markdownDescription": "Denies the disconnectNativeCall command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the drainPendingSystemCallActions command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-drainPendingSystemCallActions",
+          "markdownDescription": "Enables the drainPendingSystemCallActions command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the drainPendingSystemCallActions command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-drainPendingSystemCallActions",
+          "markdownDescription": "Denies the drainPendingSystemCallActions command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the endSystemCall command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-endSystemCall",
+          "markdownDescription": "Enables the endSystemCall command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the endSystemCall command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-endSystemCall",
+          "markdownDescription": "Denies the endSystemCall command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the fulfillAnswerCall command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-fulfillAnswerCall",
+          "markdownDescription": "Enables the fulfillAnswerCall command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the fulfillAnswerCall command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-fulfillAnswerCall",
+          "markdownDescription": "Denies the fulfillAnswerCall command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the fulfillEndCall command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-fulfillEndCall",
+          "markdownDescription": "Enables the fulfillEndCall command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the fulfillEndCall command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-fulfillEndCall",
+          "markdownDescription": "Denies the fulfillEndCall command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the getAudioRoutes command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-getAudioRoutes",
+          "markdownDescription": "Enables the getAudioRoutes command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the getAudioRoutes command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-getAudioRoutes",
+          "markdownDescription": "Denies the getAudioRoutes command without any pre-configured scope."
         },
         {
           "description": "Enables the getNativeCallCapabilities command without any pre-configured scope.",
@@ -355,6 +451,90 @@
           "markdownDescription": "Denies the getNativeCallState command without any pre-configured scope."
         },
         {
+          "description": "Enables the reportSystemCallAnsweredElsewhere command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-reportSystemCallAnsweredElsewhere",
+          "markdownDescription": "Enables the reportSystemCallAnsweredElsewhere command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the reportSystemCallAnsweredElsewhere command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-reportSystemCallAnsweredElsewhere",
+          "markdownDescription": "Denies the reportSystemCallAnsweredElsewhere command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the reportSystemCallConnected command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-reportSystemCallConnected",
+          "markdownDescription": "Enables the reportSystemCallConnected command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the reportSystemCallConnected command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-reportSystemCallConnected",
+          "markdownDescription": "Denies the reportSystemCallConnected command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the reportSystemCallDeclinedElsewhere command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-reportSystemCallDeclinedElsewhere",
+          "markdownDescription": "Enables the reportSystemCallDeclinedElsewhere command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the reportSystemCallDeclinedElsewhere command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-reportSystemCallDeclinedElsewhere",
+          "markdownDescription": "Denies the reportSystemCallDeclinedElsewhere command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the reportSystemCallUnanswered command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-reportSystemCallUnanswered",
+          "markdownDescription": "Enables the reportSystemCallUnanswered command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the reportSystemCallUnanswered command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-reportSystemCallUnanswered",
+          "markdownDescription": "Denies the reportSystemCallUnanswered command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the reportSystemIncomingCall command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-reportSystemIncomingCall",
+          "markdownDescription": "Enables the reportSystemIncomingCall command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the reportSystemIncomingCall command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-reportSystemIncomingCall",
+          "markdownDescription": "Denies the reportSystemIncomingCall command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the sendDTMF command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-sendDTMF",
+          "markdownDescription": "Enables the sendDTMF command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the sendDTMF command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-sendDTMF",
+          "markdownDescription": "Denies the sendDTMF command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the setAudioRoute command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-setAudioRoute",
+          "markdownDescription": "Enables the setAudioRoute command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the setAudioRoute command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-setAudioRoute",
+          "markdownDescription": "Denies the setAudioRoute command without any pre-configured scope."
+        },
+        {
           "description": "Enables the setNativeCallCameraEnabled command without any pre-configured scope.",
           "type": "string",
           "const": "allow-setNativeCallCameraEnabled",
@@ -377,6 +557,18 @@
           "type": "string",
           "const": "deny-setNativeCallEncryptionKey",
           "markdownDescription": "Denies the setNativeCallEncryptionKey command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the setNativeCallLocalVideoOverlay command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-setNativeCallLocalVideoOverlay",
+          "markdownDescription": "Enables the setNativeCallLocalVideoOverlay command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the setNativeCallLocalVideoOverlay command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-setNativeCallLocalVideoOverlay",
+          "markdownDescription": "Denies the setNativeCallLocalVideoOverlay command without any pre-configured scope."
         },
         {
           "description": "Enables the setNativeCallMicrophoneEnabled command without any pre-configured scope.",
@@ -403,6 +595,30 @@
           "markdownDescription": "Denies the setNativeCallRemoteVideoOverlay command without any pre-configured scope."
         },
         {
+          "description": "Enables the setSystemCallMuted command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-setSystemCallMuted",
+          "markdownDescription": "Enables the setSystemCallMuted command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the setSystemCallMuted command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-setSystemCallMuted",
+          "markdownDescription": "Denies the setSystemCallMuted command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the startSystemCall command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-startSystemCall",
+          "markdownDescription": "Enables the startSystemCall command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the startSystemCall command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-startSystemCall",
+          "markdownDescription": "Denies the startSystemCall command without any pre-configured scope."
+        },
+        {
           "description": "Enables the switchNativeCallCamera command without any pre-configured scope.",
           "type": "string",
           "const": "allow-switchNativeCallCamera",
@@ -415,10 +631,22 @@
           "markdownDescription": "Denies the switchNativeCallCamera command without any pre-configured scope."
         },
         {
-          "description": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-getNativeCallCapabilities`\n- `allow-connectNativeCall`\n- `allow-disconnectNativeCall`\n- `allow-setNativeCallMicrophoneEnabled`\n- `allow-setNativeCallCameraEnabled`\n- `allow-switchNativeCallCamera`\n- `allow-setNativeCallRemoteVideoOverlay`\n- `allow-clearNativeCallRemoteVideoOverlay`\n- `allow-setNativeCallEncryptionKey`\n- `allow-getNativeCallState`",
+          "description": "Enables the updateCallDisplay command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-updateCallDisplay",
+          "markdownDescription": "Enables the updateCallDisplay command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the updateCallDisplay command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-updateCallDisplay",
+          "markdownDescription": "Denies the updateCallDisplay command without any pre-configured scope."
+        },
+        {
+          "description": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-getNativeCallCapabilities`\n- `allow-connectNativeCall`\n- `allow-disconnectNativeCall`\n- `allow-setNativeCallMicrophoneEnabled`\n- `allow-setNativeCallCameraEnabled`\n- `allow-switchNativeCallCamera`\n- `allow-setNativeCallRemoteVideoOverlay`\n- `allow-clearNativeCallRemoteVideoOverlay`\n- `allow-setNativeCallLocalVideoOverlay`\n- `allow-clearNativeCallLocalVideoOverlay`\n- `allow-reportSystemIncomingCall`\n- `allow-startSystemCall`\n- `allow-answerSystemCall`\n- `allow-endSystemCall`\n- `allow-setSystemCallMuted`\n- `allow-drainPendingSystemCallActions`\n- `allow-fulfillAnswerCall`\n- `allow-fulfillEndCall`\n- `allow-reportSystemCallConnected`\n- `allow-setNativeCallEncryptionKey`\n- `allow-getNativeCallState`\n- `allow-getAudioRoutes`\n- `allow-setAudioRoute`\n- `allow-sendDTMF`\n- `allow-updateCallDisplay`\n- `allow-reportSystemCallAnsweredElsewhere`\n- `allow-reportSystemCallDeclinedElsewhere`\n- `allow-reportSystemCallUnanswered`\n- `allow-declineSystemCall`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-getNativeCallCapabilities`\n- `allow-connectNativeCall`\n- `allow-disconnectNativeCall`\n- `allow-setNativeCallMicrophoneEnabled`\n- `allow-setNativeCallCameraEnabled`\n- `allow-switchNativeCallCamera`\n- `allow-setNativeCallRemoteVideoOverlay`\n- `allow-clearNativeCallRemoteVideoOverlay`\n- `allow-setNativeCallEncryptionKey`\n- `allow-getNativeCallState`"
+          "markdownDescription": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-getNativeCallCapabilities`\n- `allow-connectNativeCall`\n- `allow-disconnectNativeCall`\n- `allow-setNativeCallMicrophoneEnabled`\n- `allow-setNativeCallCameraEnabled`\n- `allow-switchNativeCallCamera`\n- `allow-setNativeCallRemoteVideoOverlay`\n- `allow-clearNativeCallRemoteVideoOverlay`\n- `allow-setNativeCallLocalVideoOverlay`\n- `allow-clearNativeCallLocalVideoOverlay`\n- `allow-reportSystemIncomingCall`\n- `allow-startSystemCall`\n- `allow-answerSystemCall`\n- `allow-endSystemCall`\n- `allow-setSystemCallMuted`\n- `allow-drainPendingSystemCallActions`\n- `allow-fulfillAnswerCall`\n- `allow-fulfillEndCall`\n- `allow-reportSystemCallConnected`\n- `allow-setNativeCallEncryptionKey`\n- `allow-getNativeCallState`\n- `allow-getAudioRoutes`\n- `allow-setAudioRoute`\n- `allow-sendDTMF`\n- `allow-updateCallDisplay`\n- `allow-reportSystemCallAnsweredElsewhere`\n- `allow-reportSystemCallDeclinedElsewhere`\n- `allow-reportSystemCallUnanswered`\n- `allow-declineSystemCall`"
         }
       ]
     }

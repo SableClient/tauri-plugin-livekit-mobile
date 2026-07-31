@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-drainPendingSystemCallActions"
+description = "Enables the drainPendingSystemCallActions command without any pre-configured scope."
+commands.allow = ["drainPendingSystemCallActions"]
+
+[[permission]]
+identifier = "deny-drainPendingSystemCallActions"
+description = "Denies the drainPendingSystemCallActions command without any pre-configured scope."
+commands.deny = ["drainPendingSystemCallActions"]

@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-getAudioRoutes"
+description = "Enables the getAudioRoutes command without any pre-configured scope."
+commands.allow = ["getAudioRoutes"]
+
+[[permission]]
+identifier = "deny-getAudioRoutes"
+description = "Denies the getAudioRoutes command without any pre-configured scope."
+commands.deny = ["getAudioRoutes"]
