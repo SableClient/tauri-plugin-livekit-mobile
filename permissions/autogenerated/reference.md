@@ -4,37 +4,36 @@ Default permissions for the plugin
 
 #### This default permission set includes the following:
 
-- `allow-getNativeCallCapabilities`
-- `allow-connectNativeCall`
-- `allow-disconnectNativeCall`
-- `allow-setNativeCallMicrophoneEnabled`
-- `allow-setNativeCallCameraEnabled`
-- `allow-setNativeCallScreenShareEnabled`
-- `allow-setNativeCallPiPEnabled`
-- `allow-switchNativeCallCamera`
-- `allow-setNativeCallRemoteVideoOverlay`
-- `allow-clearNativeCallRemoteVideoOverlay`
-- `allow-setNativeCallLocalVideoOverlay`
-- `allow-clearNativeCallLocalVideoOverlay`
-- `allow-reportSystemIncomingCall`
-- `allow-startSystemCall`
-- `allow-answerSystemCall`
-- `allow-endSystemCall`
-- `allow-setSystemCallMuted`
-- `allow-drainPendingSystemCallActions`
-- `allow-fulfillAnswerCall`
-- `allow-fulfillEndCall`
-- `allow-reportSystemCallConnected`
-- `allow-setNativeCallEncryptionKey`
-- `allow-getNativeCallState`
-- `allow-getAudioRoutes`
-- `allow-setAudioRoute`
-- `allow-sendDTMF`
-- `allow-updateCallDisplay`
-- `allow-reportSystemCallAnsweredElsewhere`
-- `allow-reportSystemCallDeclinedElsewhere`
-- `allow-reportSystemCallUnanswered`
-- `allow-declineSystemCall`
+- `allow-get-native-call-capabilities`
+- `allow-connect-native-call`
+- `allow-disconnect-native-call`
+- `allow-set-native-call-microphone-enabled`
+- `allow-set-native-call-camera-enabled`
+- `allow-set-native-call-screen-share-enabled`
+- `allow-set-native-call-pip-enabled`
+- `allow-switch-native-call-camera`
+- `allow-set-native-call-remote-video-overlay`
+- `allow-clear-native-call-remote-video-overlay`
+- `allow-set-native-call-local-video-overlay`
+- `allow-clear-native-call-local-video-overlay`
+- `allow-report-system-incoming-call`
+- `allow-start-system-call`
+- `allow-answer-system-call`
+- `allow-end-system-call`
+- `allow-set-system-call-muted`
+- `allow-drain-pending-system-call-actions`
+- `allow-fulfill-answer-call`
+- `allow-fulfill-end-call`
+- `allow-report-system-call-connected`
+- `allow-set-native-call-encryption-key`
+- `allow-get-native-call-state`
+- `allow-get-audio-routes`
+- `allow-set-audio-route`
+- `allow-update-call-display`
+- `allow-report-system-call-answered-elsewhere`
+- `allow-report-system-call-declined-elsewhere`
+- `allow-report-system-call-unanswered`
+- `allow-decline-system-call`
 
 ## Permission Table
 
@@ -48,25 +47,12 @@ Default permissions for the plugin
 <tr>
 <td>
 
-`livekit-mobile:allow-answerSystemCall`
+`livekit-mobile:allow-answer-system-call`
 
 </td>
 <td>
 
-Enables the answerSystemCall command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-answerSystemCall`
-
-</td>
-<td>
-
-Denies the answerSystemCall command without any pre-configured scope.
+Enables the answer_system_call command without any pre-configured scope.
 
 </td>
 </tr>
@@ -74,25 +60,12 @@ Denies the answerSystemCall command without any pre-configured scope.
 <tr>
 <td>
 
-`livekit-mobile:allow-clearNativeCallLocalVideoOverlay`
+`livekit-mobile:deny-answer-system-call`
 
 </td>
 <td>
 
-Enables the clearNativeCallLocalVideoOverlay command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-clearNativeCallLocalVideoOverlay`
-
-</td>
-<td>
-
-Denies the clearNativeCallLocalVideoOverlay command without any pre-configured scope.
+Denies the answer_system_call command without any pre-configured scope.
 
 </td>
 </tr>
@@ -100,25 +73,12 @@ Denies the clearNativeCallLocalVideoOverlay command without any pre-configured s
 <tr>
 <td>
 
-`livekit-mobile:allow-clearNativeCallRemoteVideoOverlay`
+`livekit-mobile:allow-clear-native-call-local-video-overlay`
 
 </td>
 <td>
 
-Enables the clearNativeCallRemoteVideoOverlay command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-clearNativeCallRemoteVideoOverlay`
-
-</td>
-<td>
-
-Denies the clearNativeCallRemoteVideoOverlay command without any pre-configured scope.
+Enables the clear_native_call_local_video_overlay command without any pre-configured scope.
 
 </td>
 </tr>
@@ -126,25 +86,12 @@ Denies the clearNativeCallRemoteVideoOverlay command without any pre-configured 
 <tr>
 <td>
 
-`livekit-mobile:allow-connectNativeCall`
+`livekit-mobile:deny-clear-native-call-local-video-overlay`
 
 </td>
 <td>
 
-Enables the connectNativeCall command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-connectNativeCall`
-
-</td>
-<td>
-
-Denies the connectNativeCall command without any pre-configured scope.
+Denies the clear_native_call_local_video_overlay command without any pre-configured scope.
 
 </td>
 </tr>
@@ -152,25 +99,12 @@ Denies the connectNativeCall command without any pre-configured scope.
 <tr>
 <td>
 
-`livekit-mobile:allow-declineSystemCall`
+`livekit-mobile:allow-clear-native-call-remote-video-overlay`
 
 </td>
 <td>
 
-Enables the declineSystemCall command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-declineSystemCall`
-
-</td>
-<td>
-
-Denies the declineSystemCall command without any pre-configured scope.
+Enables the clear_native_call_remote_video_overlay command without any pre-configured scope.
 
 </td>
 </tr>
@@ -178,25 +112,12 @@ Denies the declineSystemCall command without any pre-configured scope.
 <tr>
 <td>
 
-`livekit-mobile:allow-disconnectNativeCall`
+`livekit-mobile:deny-clear-native-call-remote-video-overlay`
 
 </td>
 <td>
 
-Enables the disconnectNativeCall command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-disconnectNativeCall`
-
-</td>
-<td>
-
-Denies the disconnectNativeCall command without any pre-configured scope.
+Denies the clear_native_call_remote_video_overlay command without any pre-configured scope.
 
 </td>
 </tr>
@@ -204,25 +125,12 @@ Denies the disconnectNativeCall command without any pre-configured scope.
 <tr>
 <td>
 
-`livekit-mobile:allow-drainPendingSystemCallActions`
+`livekit-mobile:allow-connect-native-call`
 
 </td>
 <td>
 
-Enables the drainPendingSystemCallActions command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-drainPendingSystemCallActions`
-
-</td>
-<td>
-
-Denies the drainPendingSystemCallActions command without any pre-configured scope.
+Enables the connect_native_call command without any pre-configured scope.
 
 </td>
 </tr>
@@ -230,25 +138,12 @@ Denies the drainPendingSystemCallActions command without any pre-configured scop
 <tr>
 <td>
 
-`livekit-mobile:allow-endSystemCall`
+`livekit-mobile:deny-connect-native-call`
 
 </td>
 <td>
 
-Enables the endSystemCall command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-endSystemCall`
-
-</td>
-<td>
-
-Denies the endSystemCall command without any pre-configured scope.
+Denies the connect_native_call command without any pre-configured scope.
 
 </td>
 </tr>
@@ -256,25 +151,12 @@ Denies the endSystemCall command without any pre-configured scope.
 <tr>
 <td>
 
-`livekit-mobile:allow-fulfillAnswerCall`
+`livekit-mobile:allow-decline-system-call`
 
 </td>
 <td>
 
-Enables the fulfillAnswerCall command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-fulfillAnswerCall`
-
-</td>
-<td>
-
-Denies the fulfillAnswerCall command without any pre-configured scope.
+Enables the decline_system_call command without any pre-configured scope.
 
 </td>
 </tr>
@@ -282,25 +164,12 @@ Denies the fulfillAnswerCall command without any pre-configured scope.
 <tr>
 <td>
 
-`livekit-mobile:allow-fulfillEndCall`
+`livekit-mobile:deny-decline-system-call`
 
 </td>
 <td>
 
-Enables the fulfillEndCall command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-fulfillEndCall`
-
-</td>
-<td>
-
-Denies the fulfillEndCall command without any pre-configured scope.
+Denies the decline_system_call command without any pre-configured scope.
 
 </td>
 </tr>
@@ -308,25 +177,12 @@ Denies the fulfillEndCall command without any pre-configured scope.
 <tr>
 <td>
 
-`livekit-mobile:allow-getAudioRoutes`
+`livekit-mobile:allow-disconnect-native-call`
 
 </td>
 <td>
 
-Enables the getAudioRoutes command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-getAudioRoutes`
-
-</td>
-<td>
-
-Denies the getAudioRoutes command without any pre-configured scope.
+Enables the disconnect_native_call command without any pre-configured scope.
 
 </td>
 </tr>
@@ -334,25 +190,12 @@ Denies the getAudioRoutes command without any pre-configured scope.
 <tr>
 <td>
 
-`livekit-mobile:allow-getNativeCallCapabilities`
+`livekit-mobile:deny-disconnect-native-call`
 
 </td>
 <td>
 
-Enables the getNativeCallCapabilities command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-getNativeCallCapabilities`
-
-</td>
-<td>
-
-Denies the getNativeCallCapabilities command without any pre-configured scope.
+Denies the disconnect_native_call command without any pre-configured scope.
 
 </td>
 </tr>
@@ -360,25 +203,12 @@ Denies the getNativeCallCapabilities command without any pre-configured scope.
 <tr>
 <td>
 
-`livekit-mobile:allow-getNativeCallState`
+`livekit-mobile:allow-drain-pending-system-call-actions`
 
 </td>
 <td>
 
-Enables the getNativeCallState command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-getNativeCallState`
-
-</td>
-<td>
-
-Denies the getNativeCallState command without any pre-configured scope.
+Enables the drain_pending_system_call_actions command without any pre-configured scope.
 
 </td>
 </tr>
@@ -386,25 +216,12 @@ Denies the getNativeCallState command without any pre-configured scope.
 <tr>
 <td>
 
-`livekit-mobile:allow-reportSystemCallAnsweredElsewhere`
+`livekit-mobile:deny-drain-pending-system-call-actions`
 
 </td>
 <td>
 
-Enables the reportSystemCallAnsweredElsewhere command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-reportSystemCallAnsweredElsewhere`
-
-</td>
-<td>
-
-Denies the reportSystemCallAnsweredElsewhere command without any pre-configured scope.
+Denies the drain_pending_system_call_actions command without any pre-configured scope.
 
 </td>
 </tr>
@@ -412,25 +229,12 @@ Denies the reportSystemCallAnsweredElsewhere command without any pre-configured 
 <tr>
 <td>
 
-`livekit-mobile:allow-reportSystemCallConnected`
+`livekit-mobile:allow-end-system-call`
 
 </td>
 <td>
 
-Enables the reportSystemCallConnected command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-reportSystemCallConnected`
-
-</td>
-<td>
-
-Denies the reportSystemCallConnected command without any pre-configured scope.
+Enables the end_system_call command without any pre-configured scope.
 
 </td>
 </tr>
@@ -438,25 +242,12 @@ Denies the reportSystemCallConnected command without any pre-configured scope.
 <tr>
 <td>
 
-`livekit-mobile:allow-reportSystemCallDeclinedElsewhere`
+`livekit-mobile:deny-end-system-call`
 
 </td>
 <td>
 
-Enables the reportSystemCallDeclinedElsewhere command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-reportSystemCallDeclinedElsewhere`
-
-</td>
-<td>
-
-Denies the reportSystemCallDeclinedElsewhere command without any pre-configured scope.
+Denies the end_system_call command without any pre-configured scope.
 
 </td>
 </tr>
@@ -464,25 +255,12 @@ Denies the reportSystemCallDeclinedElsewhere command without any pre-configured 
 <tr>
 <td>
 
-`livekit-mobile:allow-reportSystemCallUnanswered`
+`livekit-mobile:allow-fulfill-answer-call`
 
 </td>
 <td>
 
-Enables the reportSystemCallUnanswered command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-reportSystemCallUnanswered`
-
-</td>
-<td>
-
-Denies the reportSystemCallUnanswered command without any pre-configured scope.
+Enables the fulfill_answer_call command without any pre-configured scope.
 
 </td>
 </tr>
@@ -490,25 +268,12 @@ Denies the reportSystemCallUnanswered command without any pre-configured scope.
 <tr>
 <td>
 
-`livekit-mobile:allow-reportSystemIncomingCall`
+`livekit-mobile:deny-fulfill-answer-call`
 
 </td>
 <td>
 
-Enables the reportSystemIncomingCall command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-reportSystemIncomingCall`
-
-</td>
-<td>
-
-Denies the reportSystemIncomingCall command without any pre-configured scope.
+Denies the fulfill_answer_call command without any pre-configured scope.
 
 </td>
 </tr>
@@ -516,25 +281,12 @@ Denies the reportSystemIncomingCall command without any pre-configured scope.
 <tr>
 <td>
 
-`livekit-mobile:allow-sendDTMF`
+`livekit-mobile:allow-fulfill-end-call`
 
 </td>
 <td>
 
-Enables the sendDTMF command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-sendDTMF`
-
-</td>
-<td>
-
-Denies the sendDTMF command without any pre-configured scope.
+Enables the fulfill_end_call command without any pre-configured scope.
 
 </td>
 </tr>
@@ -542,25 +294,12 @@ Denies the sendDTMF command without any pre-configured scope.
 <tr>
 <td>
 
-`livekit-mobile:allow-setAudioRoute`
+`livekit-mobile:deny-fulfill-end-call`
 
 </td>
 <td>
 
-Enables the setAudioRoute command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-setAudioRoute`
-
-</td>
-<td>
-
-Denies the setAudioRoute command without any pre-configured scope.
+Denies the fulfill_end_call command without any pre-configured scope.
 
 </td>
 </tr>
@@ -568,25 +307,12 @@ Denies the setAudioRoute command without any pre-configured scope.
 <tr>
 <td>
 
-`livekit-mobile:allow-setNativeCallCameraEnabled`
+`livekit-mobile:allow-get-audio-routes`
 
 </td>
 <td>
 
-Enables the setNativeCallCameraEnabled command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-setNativeCallCameraEnabled`
-
-</td>
-<td>
-
-Denies the setNativeCallCameraEnabled command without any pre-configured scope.
+Enables the get_audio_routes command without any pre-configured scope.
 
 </td>
 </tr>
@@ -594,25 +320,12 @@ Denies the setNativeCallCameraEnabled command without any pre-configured scope.
 <tr>
 <td>
 
-`livekit-mobile:allow-setNativeCallEncryptionKey`
+`livekit-mobile:deny-get-audio-routes`
 
 </td>
 <td>
 
-Enables the setNativeCallEncryptionKey command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-setNativeCallEncryptionKey`
-
-</td>
-<td>
-
-Denies the setNativeCallEncryptionKey command without any pre-configured scope.
+Denies the get_audio_routes command without any pre-configured scope.
 
 </td>
 </tr>
@@ -620,25 +333,12 @@ Denies the setNativeCallEncryptionKey command without any pre-configured scope.
 <tr>
 <td>
 
-`livekit-mobile:allow-setNativeCallLocalVideoOverlay`
+`livekit-mobile:allow-get-native-call-capabilities`
 
 </td>
 <td>
 
-Enables the setNativeCallLocalVideoOverlay command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-setNativeCallLocalVideoOverlay`
-
-</td>
-<td>
-
-Denies the setNativeCallLocalVideoOverlay command without any pre-configured scope.
+Enables the get_native_call_capabilities command without any pre-configured scope.
 
 </td>
 </tr>
@@ -646,25 +346,12 @@ Denies the setNativeCallLocalVideoOverlay command without any pre-configured sco
 <tr>
 <td>
 
-`livekit-mobile:allow-setNativeCallMicrophoneEnabled`
+`livekit-mobile:deny-get-native-call-capabilities`
 
 </td>
 <td>
 
-Enables the setNativeCallMicrophoneEnabled command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-setNativeCallMicrophoneEnabled`
-
-</td>
-<td>
-
-Denies the setNativeCallMicrophoneEnabled command without any pre-configured scope.
+Denies the get_native_call_capabilities command without any pre-configured scope.
 
 </td>
 </tr>
@@ -672,25 +359,12 @@ Denies the setNativeCallMicrophoneEnabled command without any pre-configured sco
 <tr>
 <td>
 
-`livekit-mobile:allow-setNativeCallPiPEnabled`
+`livekit-mobile:allow-get-native-call-state`
 
 </td>
 <td>
 
-Enables the setNativeCallPiPEnabled command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-setNativeCallPiPEnabled`
-
-</td>
-<td>
-
-Denies the setNativeCallPiPEnabled command without any pre-configured scope.
+Enables the get_native_call_state command without any pre-configured scope.
 
 </td>
 </tr>
@@ -698,25 +372,12 @@ Denies the setNativeCallPiPEnabled command without any pre-configured scope.
 <tr>
 <td>
 
-`livekit-mobile:allow-setNativeCallRemoteVideoOverlay`
+`livekit-mobile:deny-get-native-call-state`
 
 </td>
 <td>
 
-Enables the setNativeCallRemoteVideoOverlay command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-setNativeCallRemoteVideoOverlay`
-
-</td>
-<td>
-
-Denies the setNativeCallRemoteVideoOverlay command without any pre-configured scope.
+Denies the get_native_call_state command without any pre-configured scope.
 
 </td>
 </tr>
@@ -724,25 +385,12 @@ Denies the setNativeCallRemoteVideoOverlay command without any pre-configured sc
 <tr>
 <td>
 
-`livekit-mobile:allow-setNativeCallScreenShareEnabled`
+`livekit-mobile:allow-report-system-call-answered-elsewhere`
 
 </td>
 <td>
 
-Enables the setNativeCallScreenShareEnabled command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-setNativeCallScreenShareEnabled`
-
-</td>
-<td>
-
-Denies the setNativeCallScreenShareEnabled command without any pre-configured scope.
+Enables the report_system_call_answered_elsewhere command without any pre-configured scope.
 
 </td>
 </tr>
@@ -750,25 +398,12 @@ Denies the setNativeCallScreenShareEnabled command without any pre-configured sc
 <tr>
 <td>
 
-`livekit-mobile:allow-setSystemCallMuted`
+`livekit-mobile:deny-report-system-call-answered-elsewhere`
 
 </td>
 <td>
 
-Enables the setSystemCallMuted command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-setSystemCallMuted`
-
-</td>
-<td>
-
-Denies the setSystemCallMuted command without any pre-configured scope.
+Denies the report_system_call_answered_elsewhere command without any pre-configured scope.
 
 </td>
 </tr>
@@ -776,25 +411,12 @@ Denies the setSystemCallMuted command without any pre-configured scope.
 <tr>
 <td>
 
-`livekit-mobile:allow-startSystemCall`
+`livekit-mobile:allow-report-system-call-connected`
 
 </td>
 <td>
 
-Enables the startSystemCall command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-startSystemCall`
-
-</td>
-<td>
-
-Denies the startSystemCall command without any pre-configured scope.
+Enables the report_system_call_connected command without any pre-configured scope.
 
 </td>
 </tr>
@@ -802,25 +424,12 @@ Denies the startSystemCall command without any pre-configured scope.
 <tr>
 <td>
 
-`livekit-mobile:allow-switchNativeCallCamera`
+`livekit-mobile:deny-report-system-call-connected`
 
 </td>
 <td>
 
-Enables the switchNativeCallCamera command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-switchNativeCallCamera`
-
-</td>
-<td>
-
-Denies the switchNativeCallCamera command without any pre-configured scope.
+Denies the report_system_call_connected command without any pre-configured scope.
 
 </td>
 </tr>
@@ -828,12 +437,12 @@ Denies the switchNativeCallCamera command without any pre-configured scope.
 <tr>
 <td>
 
-`livekit-mobile:allow-updateCallDisplay`
+`livekit-mobile:allow-report-system-call-declined-elsewhere`
 
 </td>
 <td>
 
-Enables the updateCallDisplay command without any pre-configured scope.
+Enables the report_system_call_declined_elsewhere command without any pre-configured scope.
 
 </td>
 </tr>
@@ -841,12 +450,376 @@ Enables the updateCallDisplay command without any pre-configured scope.
 <tr>
 <td>
 
-`livekit-mobile:deny-updateCallDisplay`
+`livekit-mobile:deny-report-system-call-declined-elsewhere`
 
 </td>
 <td>
 
-Denies the updateCallDisplay command without any pre-configured scope.
+Denies the report_system_call_declined_elsewhere command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:allow-report-system-call-unanswered`
+
+</td>
+<td>
+
+Enables the report_system_call_unanswered command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:deny-report-system-call-unanswered`
+
+</td>
+<td>
+
+Denies the report_system_call_unanswered command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:allow-report-system-incoming-call`
+
+</td>
+<td>
+
+Enables the report_system_incoming_call command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:deny-report-system-incoming-call`
+
+</td>
+<td>
+
+Denies the report_system_incoming_call command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:allow-set-audio-route`
+
+</td>
+<td>
+
+Enables the set_audio_route command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:deny-set-audio-route`
+
+</td>
+<td>
+
+Denies the set_audio_route command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:allow-set-native-call-camera-enabled`
+
+</td>
+<td>
+
+Enables the set_native_call_camera_enabled command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:deny-set-native-call-camera-enabled`
+
+</td>
+<td>
+
+Denies the set_native_call_camera_enabled command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:allow-set-native-call-encryption-key`
+
+</td>
+<td>
+
+Enables the set_native_call_encryption_key command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:deny-set-native-call-encryption-key`
+
+</td>
+<td>
+
+Denies the set_native_call_encryption_key command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:allow-set-native-call-local-video-overlay`
+
+</td>
+<td>
+
+Enables the set_native_call_local_video_overlay command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:deny-set-native-call-local-video-overlay`
+
+</td>
+<td>
+
+Denies the set_native_call_local_video_overlay command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:allow-set-native-call-microphone-enabled`
+
+</td>
+<td>
+
+Enables the set_native_call_microphone_enabled command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:deny-set-native-call-microphone-enabled`
+
+</td>
+<td>
+
+Denies the set_native_call_microphone_enabled command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:allow-set-native-call-pip-enabled`
+
+</td>
+<td>
+
+Enables the set_native_call_pip_enabled command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:deny-set-native-call-pip-enabled`
+
+</td>
+<td>
+
+Denies the set_native_call_pip_enabled command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:allow-set-native-call-remote-video-overlay`
+
+</td>
+<td>
+
+Enables the set_native_call_remote_video_overlay command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:deny-set-native-call-remote-video-overlay`
+
+</td>
+<td>
+
+Denies the set_native_call_remote_video_overlay command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:allow-set-native-call-screen-share-enabled`
+
+</td>
+<td>
+
+Enables the set_native_call_screen_share_enabled command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:deny-set-native-call-screen-share-enabled`
+
+</td>
+<td>
+
+Denies the set_native_call_screen_share_enabled command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:allow-set-system-call-muted`
+
+</td>
+<td>
+
+Enables the set_system_call_muted command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:deny-set-system-call-muted`
+
+</td>
+<td>
+
+Denies the set_system_call_muted command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:allow-start-system-call`
+
+</td>
+<td>
+
+Enables the start_system_call command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:deny-start-system-call`
+
+</td>
+<td>
+
+Denies the start_system_call command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:allow-switch-native-call-camera`
+
+</td>
+<td>
+
+Enables the switch_native_call_camera command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:deny-switch-native-call-camera`
+
+</td>
+<td>
+
+Denies the switch_native_call_camera command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:allow-update-call-display`
+
+</td>
+<td>
+
+Enables the update_call_display command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:deny-update-call-display`
+
+</td>
+<td>
+
+Denies the update_call_display command without any pre-configured scope.
 
 </td>
 </tr>

@@ -58,26 +58,16 @@ accepts remote-video overlay placement commands.
 
 ## Install
 
-The crate and npm package are not yet published to crates.io / npm; use a Git
-or path dependency.
-
-Rust:
+The crate is not yet published to crates.io; use a Git or path dependency.
 
 ```toml
 [dependencies]
 tauri-plugin-livekit-mobile = { git = "https://github.com/SableClient/tauri-plugin-livekit-mobile.git" }
 ```
 
-JavaScript (build output in `dist-js/` is committed, so consumers do not need
-a build step):
-
-```sh
-pnpm add git+https://github.com/SableClient/tauri-plugin-livekit-mobile.git
-```
-
-Once published, the registry equivalents will be
-`cargo add tauri-plugin-livekit-mobile` and
-`pnpm add @sable-client/tauri-plugin-livekit-mobile`.
+This plugin ships no JavaScript package: call the commands with
+`invoke('plugin:livekit-mobile|<command>')` from `@tauri-apps/api/core`, and
+subscribe to snapshots with `addPluginListener`.
 
 Register the plugin in `src-tauri/src/lib.rs` (or `main.rs`):
 
@@ -189,7 +179,7 @@ import {
   clearNativeCallRemoteVideoOverlay,
   getNativeCallState,
   listenNativeCallSnapshot,
-} from '@sable-client/tauri-plugin-livekit-mobile';
+} from './livekitMobileBridge';
 
 const capabilities = await getNativeCallCapabilities();
 if (!capabilities.supported || !capabilities.nativeRoom) {
@@ -347,12 +337,6 @@ bounded vocabulary shared with snapshot `lastError`: `invalid_request`,
 bridge-level `timeout`. Messages are static strings derived from the code;
 raw native error strings and platform-specific codes are folded into this
 vocabulary at the boundary and never forwarded to JavaScript.
-
-## `dist-js` policy
-
-`dist-js/` contains the built guest API and is **generated and committed**.
-After changing `guest-js/`, run `pnpm build` and commit the result; CI fails
-if `dist-js/` is stale.
 
 ## License
 

@@ -9,7 +9,7 @@ homepage = "https://github.com/SableClient/tauri-plugin-livekit-mobile"
 documentation = "https://github.com/SableClient/tauri-plugin-livekit-mobile"
 edition = "2021"
 rust-version = "1.85"
-exclude = ["/examples", "/dist-js", "/guest-js", "/node_modules"]
+exclude = ["/examples"]
 links = "tauri-plugin-livekit-mobile"
 
 [dependencies]
