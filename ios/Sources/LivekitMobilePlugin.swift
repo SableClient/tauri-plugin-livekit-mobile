@@ -1,3 +1,4 @@
+import AVKit
 import Foundation
 import LiveKit
 import PushKit
@@ -128,11 +129,6 @@ struct GetAudioRoutesArgs: Decodable {
 struct SetAudioRouteArgs: Decodable {
   let callId: String
   let routeId: String
-}
-
-struct SendDTMFArgs: Decodable {
-  let callId: String
-  let digits: String
 }
 
 struct UpdateCallDisplayArgs: Decodable {
@@ -366,7 +362,7 @@ final class LivekitMobilePlugin: Plugin {
   @objc public override func load(webview: WKWebView) {
     forceLinkLiveKitObjCSurface()
     Task { @MainActor [weak controller, weak callKitController] in
-      CallKitController.disableAutomaticAudioConfiguration()
+      callKitController?.applyAudioSessionOwnership()
       controller?.attachHostWebView(webview)
       controller?.callKitController = callKitController
       callKitController?.plugin = self
@@ -376,7 +372,7 @@ final class LivekitMobilePlugin: Plugin {
   @objc public func capabilities(_ invoke: Invoke) throws {
     let piPAvailable: Bool
     if #available(iOS 15.0, *) {
-      piPAvailable = true
+      piPAvailable = AVPictureInPictureController.isPictureInPictureSupported()
     } else {
       piPAvailable = false
     }
@@ -788,21 +784,6 @@ final class LivekitMobilePlugin: Plugin {
         return
       }
       callKitController.setAudioRoute(callId: args.callId, routeId: args.routeId)
-      invoke.resolve(SnapshotReceiverResponse(receiver: controller.snapshot()))
-    }
-  }
-
-  @objc public func sendDTMF(_ invoke: Invoke) throws {
-    guard let args = try? invoke.parseArgs(SendDTMFArgs.self) else {
-      reject(invoke, .invalidRequest)
-      return
-    }
-    Task { @MainActor [weak callKitController, weak controller] in
-      guard let callKitController, let controller else {
-        reject(invoke, .unavailable)
-        return
-      }
-      callKitController.sendDTMF(callId: args.callId, digits: args.digits)
       invoke.resolve(SnapshotReceiverResponse(receiver: controller.snapshot()))
     }
   }

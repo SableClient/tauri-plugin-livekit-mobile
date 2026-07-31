@@ -29,6 +29,12 @@ final class RoomController: NSObject {
   // actor; all state access stays main-actor serialized.
   nonisolated override init() {
     super.init()
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleCaptureSessionInterruption(_:)),
+      name: AVCaptureSession.wasInterruptedNotification,
+      object: nil
+    )
   }
 
   private var room: Room?
@@ -77,15 +83,19 @@ final class RoomController: NSObject {
   // MARK: Native Picture-in-Picture (iOS 15+)
 
   /// Whether native PiP is enabled for the current call. The JS lane
-  /// controls this via `setNativeCallPiPEnabled`. PiP uses the overlay
-  /// view's AVSampleBufferDisplayLayer as a content source.
+  /// controls this via `setNativeCallPiPEnabled`.
   private var pipEnabled: Bool = false
   /// The AVPictureInPictureController (iOS 15+) that manages the PiP
-  /// lifecycle. Non-nil when PiP is active or ready to auto-start.
+  /// lifecycle. Non-nil once PiP is armed against a bound overlay track.
   private var pipController: Any? = nil
-  /// The AVPictureInPictureVideoCallViewController that hosts the sample
-  /// buffer display layer for PiP content.
+  /// The AVPictureInPictureVideoCallViewController that hosts the PiP
+  /// renderer.
   private var pipViewController: Any? = nil
+  /// The PiP window's own renderer, bound to the same track as `overlayView`.
+  /// Apple's video-call PiP expects a separate content view controller with
+  /// the on-screen view as the distinct `activeVideoCallSourceView`, so the
+  /// in-app tile is never re-parented into the PiP window.
+  private var pipVideoView: VideoView?
 
   private struct OverlaySelection {
     let participantIdentity: String
@@ -210,19 +220,13 @@ final class RoomController: NSObject {
 
     // Re-gate audio before connecting: the engine must stay suspended until
     // CallKit grants its audio window.
-    try? AudioManager.shared.setEngineAvailability(.none)
+    callKitController?.suspendEngineUntilActivation()
 
-    let newRoom: Room
-    if let keyProvider {
-      // Frame-only E2EE via the legacy options: the newer EncryptionOptions
-      // also encrypts data channels, which the web peers do not support.
-      let roomOptions = RoomOptions(adaptiveStream: true, dynacast: true,
-                               e2eeOptions: E2EEOptions(keyProvider: keyProvider),
-                               singlePeerConnection: true)
-      newRoom = Room(delegate: self, roomOptions: roomOptions)
-    } else {
-      newRoom = Room(delegate: self)
-    }
+    // Frame-only E2EE via the legacy options: the newer EncryptionOptions
+    // also encrypts data channels, which the web peers do not support.
+    let e2eeOptions = keyProvider.map { E2EEOptions(keyProvider: $0) }
+    let newRoom = Room(
+      delegate: self, roomOptions: Self.makeRoomOptions(e2eeOptions: e2eeOptions))
     room = newRoom
 
     let connectOptions = Self.buildConnectOptions(from: args)
@@ -396,14 +400,9 @@ final class RoomController: NSObject {
     }
 
     cameraEnabled = enabled
-    callKitController?.cameraActive = enabled
+    callKitController?.setCameraActive(enabled)
 
-    if enabled, #available(iOS 16.0, *) {
-      if AVCaptureSession().isMultitaskingCameraAccessSupported {
-        AVCaptureSession().isMultitaskingCameraAccessEnabled = true
-        logRoom("Multitasking camera access enabled (iOS 16+)")
-      }
-    }
+    if enabled { Self.enableMultitaskingCameraAccess(in: room) }
 
     emitSnapshotChanged()
     invoke.resolve(snapshot())
@@ -422,11 +421,7 @@ final class RoomController: NSObject {
     attempt &+= 1
     let attemptId = attempt
 
-    guard
-      let publication = Self.cameraPublication(in: room),
-      let track = publication.track as? LocalVideoTrack,
-      let capturer = track.capturer as? CameraCapturer
-    else {
+    guard let capturer = Self.cameraCapturer(in: room) else {
       // Nothing to toggle until the camera is publishing.
       reject(invoke, .invalidRequest)
       return
@@ -612,6 +607,17 @@ final class RoomController: NSObject {
     return newIndex > applied
   }
 
+  /// The room options for every attempt, encrypted or not: the SDK defaults
+  /// leave adaptive stream and dynacast off, and would suspend the local
+  /// camera as soon as the app backgrounds, which freezes the video in PiP.
+  nonisolated static func makeRoomOptions(e2eeOptions: E2EEOptions?) -> RoomOptions {
+    RoomOptions(
+      adaptiveStream: true, dynacast: true,
+      suspendLocalVideoTracksInBackground: false,
+      e2eeOptions: e2eeOptions,
+      singlePeerConnection: true)
+  }
+
   /// Builds ``ConnectOptions`` from optional connect-args fields. Returns nil
   /// when both `iceServers` and `reconnectAttempts` are absent: the
   /// default-initialised ``ConnectOptions`` is equivalent and avoids an
@@ -708,6 +714,7 @@ final class RoomController: NSObject {
     }
     view.frame = clipped
     view.isHidden = false
+    if #available(iOS 15.0, *) { refreshPiP() }
     invoke.resolve(snapshot())
   }
 
@@ -719,6 +726,7 @@ final class RoomController: NSObject {
       return
     }
     removeOverlayView()
+    if #available(iOS 15.0, *) { refreshPiP() }
     invoke.resolve(snapshot())
   }
 
@@ -776,13 +784,14 @@ final class RoomController: NSObject {
         trackSid: selection.trackSid, in: room)
     else {
       detachOverlay(from: view)
+      if #available(iOS 15.0, *) { refreshPiP() }
       return
     }
     if view.track !== track {
       view.track = track
     }
     view.isHidden = false
-    refreshPiPContentSourceIfNeeded()
+    if #available(iOS 15.0, *) { refreshPiP() }
   }
 
   /// Bounds for the overlay rect and pixel ratio. Tiles may be partially
@@ -966,7 +975,7 @@ final class RoomController: NSObject {
     microphoneEnabled = false
     cameraEnabled = false
     screenShareEnabled = false
-    callKitController?.cameraActive = false
+    callKitController?.setCameraActive(false)
     participantCount = 0
     remoteParticipants = []
     keyProvider = nil
@@ -983,13 +992,13 @@ final class RoomController: NSObject {
 
   // MARK: - Native Picture-in-Picture (iOS 15+)
 
-  /// Enables or disables native PiP for the current call. When enabled, the
-  /// overlay renderer is switched to sample-buffer mode so that
-  /// `AVSampleBufferDisplayLayer` is accessible as the PiP content source.
-  /// The controller's `canStartPictureInPictureAutomaticallyFromInline` flag
-  /// lets the system auto-start PiP when the app backgrounds.
+  /// Enables or disables native PiP for the current call. Arming needs a bound
+  /// overlay track, which the lane usually only creates after this call, so
+  /// the request is recorded and `refreshPiP` arms it as soon as the overlay
+  /// binds. The controller's `canStartPictureInPictureAutomaticallyFromInline`
+  /// flag lets the system auto-start PiP when the app backgrounds.
   func setNativeCallPiPEnabled(callId requestedCallId: String, enabled: Bool, invoke: Invoke) {
-    guard callId == requestedCallId, let _ = room else {
+    guard callId == requestedCallId, room != nil else {
       invoke.resolve(snapshot())
       return
     }
@@ -999,26 +1008,14 @@ final class RoomController: NSObject {
     }
 
     pipEnabled = enabled
-
-    if enabled {
-      // Switch overlay to sample-buffer mode so the display layer is available.
-      if let view = overlayView {
-        view.renderMode = .sampleBuffer
-        if let track = view.track {
-          view.track = nil
-          view.track = track
-        }
-      }
-      setupPiPControllerIfPossible()
-      // If already in background, start PiP explicitly.
-      if UIApplication.shared.applicationState == .background,
-         let ctrl = pipController as? AVPictureInPictureController,
-         ctrl.isPictureInPicturePossible {
+    if #available(iOS 15.0, *) {
+      refreshPiP()
+      if enabled, UIApplication.shared.applicationState == .background,
+        let ctrl = pipController as? AVPictureInPictureController,
+        ctrl.isPictureInPicturePossible
+      {
         ctrl.startPictureInPicture()
       }
-    } else {
-      if #available(iOS 15.0, *) { stopPiP() }
-      fallbackOverlayToMetal()
     }
 
     invoke.resolve(snapshot())
@@ -1026,126 +1023,88 @@ final class RoomController: NSObject {
 
   // MARK: PiP controller lifecycle (private)
 
-  /// Creates the `AVPictureInPictureController` with the overlay view as
-  /// source and the `AVPictureInPictureVideoCallViewController` hosting the
-  /// sample buffer display layer. Only called when PiP is enabled and a track
-  /// is bound to the overlay.
-  private func setupPiPControllerIfPossible() {
-    guard #available(iOS 15.0, *), pipEnabled, pipController == nil else { return }
-    guard let view = overlayView, view.track != nil,
-          hostWebView?.window ?? view.window != nil else { return }
-    guard let displayLayer = pipDisplayLayer() else { return }
+  /// Arms, rebinds or releases PiP against the current overlay binding. Called
+  /// whenever `pipEnabled` or the overlay's track changes.
+  @available(iOS 15.0, *)
+  private func refreshPiP() {
+    guard pipEnabled, let sourceView = overlayView, let track = sourceView.track
+    else {
+      stopPiP()
+      return
+    }
+    guard let renderer = pipVideoView else {
+      armPiP(sourceView: sourceView, track: track)
+      return
+    }
+    if renderer.track !== track {
+      renderer.track = track
+    }
+  }
+
+  /// Builds the PiP controller over its own renderer. The on-screen overlay is
+  /// only handed over as the `activeVideoCallSourceView`, so the in-app tile
+  /// keeps rendering untouched.
+  @available(iOS 15.0, *)
+  private func armPiP(sourceView: VideoView, track: VideoTrack) {
+    guard AVPictureInPictureController.isPictureInPictureSupported() else { return }
 
     let vc = AVPictureInPictureVideoCallViewController()
-    vc.preferredContentSize = displayLayer.bounds.size.width > 0
-      ? displayLayer.bounds.size
-      : CGSize(width: 180, height: 320)
-    displayLayer.removeFromSuperlayer()
-    displayLayer.frame = vc.view.bounds
-    vc.view.layer.addSublayer(displayLayer)
+    // Drives the PiP window's aspect ratio.
+    if let dimensions = track.dimensions {
+      vc.preferredContentSize = CGSize(
+        width: CGFloat(dimensions.width), height: CGFloat(dimensions.height))
+    }
+
+    // Sample-buffer rendering: the Metal path stops drawing once the app is
+    // backgrounded, which is exactly when the PiP window is on screen.
+    let renderer = VideoView()
+    renderer.isUserInteractionEnabled = false
+    renderer.renderMode = .sampleBuffer
+    renderer.translatesAutoresizingMaskIntoConstraints = false
+    vc.view.addSubview(renderer)
+    NSLayoutConstraint.activate([
+      renderer.leadingAnchor.constraint(equalTo: vc.view.leadingAnchor),
+      renderer.trailingAnchor.constraint(equalTo: vc.view.trailingAnchor),
+      renderer.topAnchor.constraint(equalTo: vc.view.topAnchor),
+      renderer.bottomAnchor.constraint(equalTo: vc.view.bottomAnchor),
+    ])
+    renderer.track = track
 
     let source = AVPictureInPictureController.ContentSource(
-      activeVideoCallSourceView: view, contentViewController: vc)
+      activeVideoCallSourceView: sourceView, contentViewController: vc)
     let controller = AVPictureInPictureController(contentSource: source)
     controller.canStartPictureInPictureAutomaticallyFromInline = true
     controller.delegate = self
     pipController = controller
     pipViewController = vc
-    logRoom("PiP controller configured (auto-start on background)")
+    pipVideoView = renderer
+    logRoom("PiP armed (auto-start on background)")
   }
 
-  /// Refreshes PiP availability as the overlay track binds or unbinds.
-  /// Called from `reconcileOverlay(in:)` after a remote camera publication
-  /// arrives or departs.
-  private func refreshPiPContentSourceIfNeeded() {
-    guard pipEnabled else { return }
-    if overlayView?.track != nil {
-      // Track is available: create the controller if it doesn't exist yet.
-      if pipController == nil {
-        setupPiPControllerIfPossible()
-      }
-    } else {
-      // Track was removed: tear down so PiP isn't stale.
-      if #available(iOS 15.0, *) { stopPiP() }
-    }
-  }
-
-  /// Returns the sample buffer display layer from the overlay, forcing
-  /// sample-buffer mode if needed. Nil when there is no overlay or no track.
-  private func pipDisplayLayer() -> AVSampleBufferDisplayLayer? {
-    guard let view = overlayView, view.track != nil else { return nil }
-    if view.renderMode != .sampleBuffer {
-      view.renderMode = .sampleBuffer
-      if let t = view.track {
-        view.track = nil
-        view.track = t
-      }
-    }
-    return view.avSampleBufferDisplayLayer
-  }
-
-  /// Stops active PiP, returns the display layer to the overlay, and
-  /// releases both the video-call VC and the controller.
+  /// Stops active PiP and releases the controller. An active PiP window is
+  /// dismissed with an animation, so the release is handed off to the stop
+  /// callback rather than pulling the renderer out mid-animation.
   @available(iOS 15.0, *)
   private func stopPiP() {
     guard let ctrl = pipController as? AVPictureInPictureController else { return }
-
-    // stopPictureInPicture is asynchronous and animated. Tearing the layer out
-    // now would leave the dismissal animating against a detached layer, so hand
-    // off to pictureInPictureControllerDidStopPictureInPicture and keep the
-    // controller alive until it fires.
     if ctrl.isPictureInPictureActive {
       ctrl.stopPictureInPicture()
-      logRoom("PiP stopping: teardown deferred to the stop callback")
       return
     }
-
-    teardownPiPLayer()
+    releasePiP()
   }
 
-  /// Returns the display layer to the overlay and releases the PiP controller.
-  /// Safe to call once PiP is no longer active.
-  @available(iOS 15.0, *)
-  private func teardownPiPLayer() {
-    if let vc = pipViewController as? AVPictureInPictureVideoCallViewController,
-       let layer = vc.view.layer.sublayers?.first {
-      layer.removeFromSuperlayer()
-      returnDisplayLayerToOverlay(layer)
-      vc.willMove(toParent: nil)
-      vc.removeFromParent()
-    }
-
-    pipController = nil
+  /// Drops the PiP renderer, view controller and controller.
+  private func releasePiP() {
+    pipVideoView?.track = nil
+    pipVideoView?.removeFromSuperview()
+    pipVideoView = nil
     pipViewController = nil
-    fallbackOverlayToMetal()
-    logRoom("PiP stopped")
+    pipController = nil
+    logRoom("PiP released")
   }
 
-  /// Places a display layer back into the overlay VideoView's renderer
-  /// subview (the SampleBufferVideoRenderer).
-  private func returnDisplayLayerToOverlay(_ layer: CALayer) {
-    guard let view = overlayView else { return }
-    for subview in view.subviews {
-      if subview.layer.sublayers?.isEmpty == true || subview.layer.sublayers == nil {
-        subview.layer.insertSublayer(layer, at: 0)
-        layer.frame = subview.bounds
-        return
-      }
-    }
-    view.layer.insertSublayer(layer, at: 0)
-    layer.frame = view.bounds
-  }
-
-  /// Reverts the overlay renderer to Metal mode (default) when PiP is
-  /// disabled, so rendering uses the GPU path for best performance.
-  private func fallbackOverlayToMetal() {
-    guard let view = overlayView, view.renderMode != .auto else { return }
-    view.renderMode = .auto
-    if let t = view.track {
-      view.track = nil
-      view.track = t
-    }
-  }  // MARK: - Shared helpers (main actor)
+  // MARK: - Shared helpers (main actor)
 
   /// Tears down the matching attempt, emits the final idle snapshot on its
   /// outgoing channel, and resolves. A stale call id is a no-op resolve: it
@@ -1167,7 +1126,7 @@ final class RoomController: NSObject {
     microphoneEnabled = false
     cameraEnabled = false
     screenShareEnabled = false
-    callKitController?.cameraActive = false
+    callKitController?.setCameraActive(false)
     participantCount = 0
     remoteParticipants = []
     keyProvider = nil
@@ -1278,6 +1237,39 @@ final class RoomController: NSObject {
   /// the public local video list.
   nonisolated static func cameraPublication(in room: Room) -> LocalTrackPublication? {
     room.localParticipant.localVideoTracks.first(where: { $0.source == .camera })
+  }
+
+  /// The capturer behind the published camera track, which owns the real
+  /// `AVCaptureSession`.
+  nonisolated static func cameraCapturer(in room: Room) -> CameraCapturer? {
+    guard
+      let publication = cameraPublication(in: room),
+      let track = publication.track as? LocalVideoTrack
+    else { return nil }
+    return track.capturer as? CameraCapturer
+  }
+
+  /// Lets the camera keep capturing while the app is not the only foreground
+  /// app, which is what PiP is. The capturer reports it unsupported below
+  /// iOS 16, where the setter is a no-op.
+  nonisolated static func enableMultitaskingCameraAccess(in room: Room) {
+    guard let capturer = cameraCapturer(in: room),
+      capturer.isMultitaskingAccessSupported
+    else { return }
+    capturer.isMultitaskingAccessEnabled = true
+    logRoom("Multitasking camera access enabled")
+  }
+
+  /// The camera capture session was interrupted. While the call runs in PiP the
+  /// expected reason is `videoDeviceNotAvailableWithMultipleForegroundApps`,
+  /// which means multitasking camera access was refused; the video track stays
+  /// published and resumes on its own once the interruption ends.
+  @objc private nonisolated func handleCaptureSessionInterruption(
+    _ notification: Notification
+  ) {
+    let reason =
+      notification.userInfo?[AVCaptureSessionInterruptionReasonKey] as? Int ?? 0
+    logRoom("Camera capture session interrupted: reason=\(reason)")
   }
 
   // MARK: - Media permissions
@@ -1480,12 +1472,13 @@ extension RoomController: RoomDelegate {
   private func failCall(from room: Room) {
     guard room === self.room, connectionState != .idle, connectionState != .failed else { return }
     self.room = nil
+    pipEnabled = false
     keyProvider = nil
     appliedKeyIndexes = [:]
     microphoneEnabled = false
     cameraEnabled = false
     screenShareEnabled = false
-    callKitController?.cameraActive = false
+    callKitController?.setCameraActive(false)
     participantCount = 0
     remoteParticipants = []
     lastError = BridgeError(.disconnected)
@@ -1576,32 +1569,23 @@ extension RoomController: RoomDelegate {
 
 @available(iOS 15.0, *)
 extension RoomController: AVPictureInPictureControllerDelegate {
+  /// The in-app tile was never handed to PiP, so there is nothing to restore.
   nonisolated func pictureInPictureController(
     _ controller: AVPictureInPictureController,
     restoreUserInterfaceForPictureInPictureStopWithCompletionHandler
     completionHandler: @escaping (Bool) -> Void
   ) {
-    Task { @MainActor [weak self] in
-      guard let self else {
-        completionHandler(true)
-        return
-      }
-      if let vc = self.pipViewController as? AVPictureInPictureVideoCallViewController,
-         let layer = vc.view.layer.sublayers?.first {
-        layer.removeFromSuperlayer()
-        self.returnDisplayLayerToOverlay(layer)
-        vc.willMove(toParent: nil)
-        vc.removeFromParent()
-      }
-      completionHandler(true)
-    }
+    completionHandler(true)
   }
 
+  /// The controller stays armed when PiP is still enabled, so the system can
+  /// auto-start it again the next time the app backgrounds.
   nonisolated func pictureInPictureControllerDidStopPictureInPicture(
     _ controller: AVPictureInPictureController
   ) {
     Task { @MainActor [weak self] in
-      self?.teardownPiPLayer()
+      guard let self, !pipEnabled else { return }
+      releasePiP()
     }
   }
 }
