@@ -18,7 +18,8 @@ use crate::mobile::{
     NativeFulfillEndCallRequest, NativeReportConnectedRequest,
     NativeReportIncomingCallRequest, NativeSetCameraRequest, NativeSetEncryptionKeyRequest,
     NativeSetLocalVideoOverlayRequest, NativeSetMicrophoneRequest,
-    NativeSetRemoteVideoOverlayRequest, NativeSetSystemCallMutedRequest,
+    NativeSetRemoteVideoOverlayRequest, NativeSetScreenShareRequest,
+    NativeSetSystemCallMutedRequest,
     NativeStartSystemCallRequest, NativeSwitchCameraRequest,
     NativeGetAudioRoutesRequest, NativeSetAudioRouteRequest, NativeSendDTMFRequest,
     NativeUpdateCallDisplayRequest, NativeReportAnsweredElsewhereRequest,
@@ -38,7 +39,7 @@ use crate::models::{
     ReportSystemIncomingCallRequest,
     SetNativeCallCameraEnabledRequest, SetNativeCallEncryptionKeyRequest,
     SetNativeCallLocalVideoOverlayRequest, SetNativeCallMicrophoneEnabledRequest,
-    SetNativeCallRemoteVideoOverlayRequest, SetSystemCallMutedRequest,
+    SetNativeCallRemoteVideoOverlayRequest, SetNativeCallScreenShareEnabledRequest, SetSystemCallMutedRequest,
     StartSystemCallRequest, SwitchNativeCallCameraRequest, SystemCallAction,
     GetAudioRoutesRequest, SetAudioRouteRequest, SendDTMFRequest,
     UpdateCallDisplayRequest, ReportAnsweredElsewhereRequest,
@@ -53,6 +54,7 @@ use crate::models::{
     NativeReportIncomingCallFields,
     NativeSetCameraFields, NativeSetEncryptionKeyFields, NativeSetLocalVideoOverlayFields,
     NativeSetMicrophoneFields, NativeSetRemoteVideoOverlayFields,
+    NativeSetScreenShareFields,
     NativeSetSystemCallMutedFields, NativeStartSystemCallFields,
     NativeGetAudioRoutesFields, NativeSetAudioRouteFields, NativeSendDTMFFields,
     NativeUpdateCallDisplayFields, NativeReportAnsweredElsewhereFields,
@@ -80,6 +82,10 @@ pub(crate) enum Command {
     ),
     SetNativeCallCameraEnabled(
         SetNativeCallCameraEnabledRequest,
+        oneshot::Sender<Result<NativeCallSnapshot>>,
+    ),
+    SetNativeCallScreenShareEnabled(
+        SetNativeCallScreenShareEnabledRequest,
         oneshot::Sender<Result<NativeCallSnapshot>>,
     ),
     SwitchNativeCallCamera(
@@ -227,6 +233,7 @@ fn idle_snapshot() -> NativeCallSnapshot {
         connection_state: NativeCallConnectionState::Idle,
         microphone_enabled: false,
         camera_enabled: false,
+        screen_share_enabled: false,
         participant_count: 0,
         remote_participants: Vec::new(),
         last_error: None,
@@ -326,6 +333,14 @@ impl<R: Runtime> NativeCallBridge<R> {
         request: SetNativeCallCameraEnabledRequest,
     ) -> Result<NativeCallSnapshot> {
         self.send(|response| Command::SetNativeCallCameraEnabled(request, response))
+            .await
+    }
+
+    pub async fn set_native_call_screen_share_enabled(
+        &self,
+        request: SetNativeCallScreenShareEnabledRequest,
+    ) -> Result<NativeCallSnapshot> {
+        self.send(|response| Command::SetNativeCallScreenShareEnabled(request, response))
             .await
     }
 
@@ -554,6 +569,10 @@ impl<R: Runtime> Actor<R> {
             }
             Command::SetNativeCallCameraEnabled(request, response) => {
                 self.handle_set_native_call_camera_enabled(request, response)
+                    .await
+            }
+            Command::SetNativeCallScreenShareEnabled(request, response) => {
+                self.handle_set_native_call_screen_share_enabled(request, response)
                     .await
             }
             Command::SwitchNativeCallCamera(request, response) => {
@@ -839,10 +858,42 @@ impl<R: Runtime> Actor<R> {
         let _ = response.send(result);
     }
 
+    #[cfg(mobile)]
+    async fn handle_set_native_call_screen_share_enabled(
+        &mut self,
+        request: SetNativeCallScreenShareEnabledRequest,
+        response: oneshot::Sender<Result<NativeCallSnapshot>>,
+    ) {
+        if !call_id_is_valid(&request.call_id) {
+            let _ = response.send(invalid_request());
+            return;
+        }
+        let result = self
+            .mobile
+            .set_native_call_screen_share_enabled(NativeSetScreenShareRequest {
+                fields: NativeSetScreenShareFields {
+                    call_id: &request.call_id,
+                    enabled: request.enabled,
+                },
+            })
+            .await;
+        let _ = response.send(result);
+    }
+
     #[cfg(not(mobile))]
     async fn handle_set_native_call_camera_enabled(
         &mut self,
         request: SetNativeCallCameraEnabledRequest,
+        response: oneshot::Sender<Result<NativeCallSnapshot>>,
+    ) {
+        let _ = &request;
+        let _ = response.send(unavailable());
+    }
+
+    #[cfg(not(mobile))]
+    async fn handle_set_native_call_screen_share_enabled(
+        &mut self,
+        request: SetNativeCallScreenShareEnabledRequest,
         response: oneshot::Sender<Result<NativeCallSnapshot>>,
     ) {
         let _ = &request;

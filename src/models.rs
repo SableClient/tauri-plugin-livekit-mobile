@@ -163,17 +163,30 @@ pub struct NativeCallRemoteCamera {
     pub subscribed: bool,
 }
 
+/// Screen-share projection of one remote participant's screen-share
+/// publication.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeCallScreenShare {
+    pub sid: String,
+    pub muted: bool,
+    pub subscribed: bool,
+}
+
 /// Remote-only participant projection; `identity` is the opaque backend
 /// identity. `camera` exists only while the participant has a remote camera
-/// publication. `connection_quality` is the bounded
-/// LiveKit ``ConnectionQuality`` vocabulary (“lost”/“poor”/“good”/
-/// “excellent”); omitted when unknown.
+/// publication. `screen_share` exists only while the participant has a
+/// remote screen-share publication. `connection_quality` is the bounded
+/// LiveKit ``ConnectionQuality`` vocabulary ("lost"/"poor"/"good"/
+/// "excellent"); omitted when unknown.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NativeCallRemoteParticipant {
     pub identity: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub camera: Option<NativeCallRemoteCamera>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub screen_share: Option<NativeCallScreenShare>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connection_quality: Option<String>,
 }
@@ -193,6 +206,8 @@ pub struct NativeCallSnapshot {
     pub microphone_enabled: bool,
     #[serde(default)]
     pub camera_enabled: bool,
+    #[serde(default)]
+    pub screen_share_enabled: bool,
     #[serde(default)]
     pub participant_count: u32,
     // `default` keeps natives that predate the roster decodable.
@@ -310,6 +325,13 @@ pub struct SetNativeCallMicrophoneEnabledRequest {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetNativeCallCameraEnabledRequest {
+    pub call_id: String,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetNativeCallScreenShareEnabledRequest {
     pub call_id: String,
     pub enabled: bool,
 }
@@ -557,6 +579,13 @@ pub struct NativeSetMicrophoneFields<'a> {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NativeSetCameraFields<'a> {
+    pub call_id: &'a str,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeSetScreenShareFields<'a> {
     pub call_id: &'a str,
     pub enabled: bool,
 }
@@ -877,6 +906,7 @@ mod tests {
             connection_state: NativeCallConnectionState::Connected,
             microphone_enabled: true,
             camera_enabled: true,
+            screen_share_enabled: false,
             participant_count: 3,
             remote_participants: Vec::new(),
             last_error: None,
@@ -891,6 +921,7 @@ mod tests {
                 "connectionState": "connected",
                 "microphoneEnabled": true,
                 "cameraEnabled": true,
+                "screenShareEnabled": false,
                 "participantCount": 3,
                 "remoteParticipants": []
             })
@@ -902,6 +933,7 @@ mod tests {
             connection_state: NativeCallConnectionState::Failed,
             microphone_enabled: true,
             camera_enabled: false,
+            screen_share_enabled: false,
             participant_count: 3,
             remote_participants: Vec::new(),
             last_error: Some(NativeCallError::from_code(
@@ -947,11 +979,13 @@ mod tests {
                         muted: false,
                         subscribed: true,
                     }),
+                    screen_share: None,
                     connection_quality: None,
                 },
                 NativeCallRemoteParticipant {
                     identity: "@bob:example.org".into(),
                     camera: None,
+                    screen_share: None,
                     connection_quality: None,
                 },
             ]

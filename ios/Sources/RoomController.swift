@@ -45,6 +45,7 @@ final class RoomController: NSObject {
   private var connectionState: BridgeConnectionState = .idle
   private var microphoneEnabled = false
   private var cameraEnabled = false
+  private var screenShareEnabled = false
   private var participantCount = 0
   private var remoteParticipants: [BridgeRemoteParticipant] = []
   private var lastError: BridgeError?
@@ -112,6 +113,7 @@ final class RoomController: NSObject {
       connectionState: connectionState,
       microphoneEnabled: microphoneEnabled,
       cameraEnabled: cameraEnabled,
+      screenShareEnabled: screenShareEnabled,
       participantCount: participantCount,
       remoteParticipants: remoteParticipants,
       lastError: lastError,
@@ -173,6 +175,7 @@ final class RoomController: NSObject {
     lastError = nil
     microphoneEnabled = false
     cameraEnabled = false
+    screenShareEnabled = false
     participantCount = 0
     remoteParticipants = []
     removeOverlayView()
@@ -441,6 +444,43 @@ final class RoomController: NSObject {
     }
 
     // The camera position is intentionally not part of the snapshot.
+    invoke.resolve(snapshot())
+  }
+
+  func setScreenShareEnabled(
+    callId requestedCallId: String, enabled: Bool, invoke: Invoke
+  ) async {
+    guard callId == requestedCallId, let room else {
+      invoke.resolve(snapshot())
+      return
+    }
+    guard connectionState == .connected else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+
+    attempt &+= 1
+    let attemptId = attempt
+
+    do {
+      try await room.localParticipant.setScreenShare(enabled: enabled)
+    } catch {
+      guard attemptId == attempt else {
+        rejectCancelled(invoke)
+        return
+      }
+      lastError = BridgeError(.mediaFailed)
+      emitSnapshotChanged()
+      reject(invoke, .mediaFailed)
+      return
+    }
+    guard attemptId == attempt else {
+      rejectCancelled(invoke)
+      return
+    }
+
+    screenShareEnabled = enabled
+    emitSnapshotChanged()
     invoke.resolve(snapshot())
   }
 
@@ -917,6 +957,7 @@ final class RoomController: NSObject {
     connectionState = .idle
     microphoneEnabled = false
     cameraEnabled = false
+    screenShareEnabled = false
     callKitController?.cameraActive = false
     participantCount = 0
     remoteParticipants = []
@@ -1131,6 +1172,7 @@ final class RoomController: NSObject {
     connectionState = .idle
     microphoneEnabled = false
     cameraEnabled = false
+    screenShareEnabled = false
     callKitController?.cameraActive = false
     participantCount = 0
     remoteParticipants = []
@@ -1161,6 +1203,7 @@ final class RoomController: NSObject {
     if newState == .connected, let room {
       microphoneEnabled = room.localParticipant.isMicrophoneEnabled()
       cameraEnabled = room.localParticipant.isCameraEnabled()
+      screenShareEnabled = room.localParticipant.isScreenShareEnabled()
       remoteParticipants = Self.projectRemoteParticipants(in: room)
       participantCount = remoteParticipants.count
     }
@@ -1171,6 +1214,7 @@ final class RoomController: NSObject {
     connectionState = .failed
     microphoneEnabled = false
     cameraEnabled = false
+    screenShareEnabled = false
     participantCount = 0
     remoteParticipants = []
     keyProvider = nil
@@ -1192,8 +1236,8 @@ final class RoomController: NSObject {
   // MARK: - Remote participant projection
 
   /// Minimal remote-only projection: identity (from the room's participant
-  /// key) plus the camera publication with remote-aware mute/subscription
-  /// state. Sorted by identity so the snapshot is stable.
+  /// key) plus the camera and screen-share publications with remote-aware
+  /// mute/subscription state. Sorted by identity so the snapshot is stable.
   nonisolated static func projectRemoteParticipants(
     in room: Room
   ) -> [BridgeRemoteParticipant] {
@@ -1209,8 +1253,19 @@ final class RoomController: NSObject {
               sid: $0.sid.stringValue, muted: $0.isMuted,
               subscribed: $0.isSubscribed)
           }
+        let screenShare =
+          participant.trackPublications.values
+          .filter { $0.source == .screenShareVideo }
+          .sorted { $0.sid.stringValue < $1.sid.stringValue }
+          .first
+          .map {
+            BridgeRemoteScreenShare(
+              sid: $0.sid.stringValue, muted: $0.isMuted,
+              subscribed: $0.isSubscribed)
+          }
         return BridgeRemoteParticipant(
           identity: identity.stringValue, camera: camera,
+          screenShare: screenShare,
           connectionQuality: Self.connectionQualityWire(participant.connectionQuality))
       }
       .sorted { $0.identity < $1.identity }
@@ -1437,6 +1492,7 @@ extension RoomController: RoomDelegate {
     appliedKeyIndexes = [:]
     microphoneEnabled = false
     cameraEnabled = false
+    screenShareEnabled = false
     callKitController?.cameraActive = false
     participantCount = 0
     remoteParticipants = []

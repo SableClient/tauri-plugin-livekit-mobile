@@ -70,6 +70,11 @@ struct SetCameraEnabledArgs: Decodable {
   let enabled: Bool
 }
 
+struct SetScreenShareEnabledArgs: Decodable {
+  let callId: String
+  let enabled: Bool
+}
+
 // `cancelConnect`, `switchCamera`, `clearRemoteVideoOverlay` and
 // `clearLocalVideoOverlay` reuse the `{ callId }` payload of `DisconnectArgs`.
 
@@ -228,10 +233,18 @@ struct BridgeRemoteCamera: Encodable, Equatable {
   let subscribed: Bool
 }
 
+struct BridgeRemoteScreenShare: Encodable, Equatable {
+  let sid: String
+  let muted: Bool
+  let subscribed: Bool
+}
+
 struct BridgeRemoteParticipant: Encodable, Equatable {
   let identity: String
   /// Present only while the participant has a camera publication.
   let camera: BridgeRemoteCamera?
+  /// Present only while the participant has a screen-share publication.
+  let screenShare: BridgeRemoteScreenShare?
   /// Omitted when the SDK reports `.unknown`.
   let connectionQuality: BridgeConnectionQuality?
 }
@@ -242,6 +255,7 @@ struct BridgeStateResponse: Encodable {
   let connectionState: BridgeConnectionState
   let microphoneEnabled: Bool
   let cameraEnabled: Bool
+  let screenShareEnabled: Bool
   let participantCount: Int
   let remoteParticipants: [BridgeRemoteParticipant]
   let lastError: BridgeError?
@@ -257,6 +271,7 @@ struct BridgeStateResponse: Encodable {
     case connectionState
     case microphoneEnabled
     case cameraEnabled
+    case screenShareEnabled
     case participantCount
     case remoteParticipants
     case lastError
@@ -270,6 +285,7 @@ struct BridgeStateResponse: Encodable {
     try container.encode(connectionState, forKey: .connectionState)
     try container.encode(microphoneEnabled, forKey: .microphoneEnabled)
     try container.encode(cameraEnabled, forKey: .cameraEnabled)
+    try container.encode(screenShareEnabled, forKey: .screenShareEnabled)
     try container.encode(participantCount, forKey: .participantCount)
     try container.encode(remoteParticipants, forKey: .remoteParticipants)
     try container.encodeIfPresent(lastError, forKey: .lastError)
@@ -414,6 +430,21 @@ final class LivekitMobilePlugin: Plugin {
         return
       }
       await controller.setCameraEnabled(
+        callId: args.callId, enabled: args.enabled, invoke: invoke)
+    }
+  }
+
+  @objc public func setScreenShareEnabled(_ invoke: Invoke) throws {
+    guard let args = try? invoke.parseArgs(SetScreenShareEnabledArgs.self) else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+    Task { @MainActor [weak controller] in
+      guard let controller else {
+        reject(invoke, .unavailable)
+        return
+      }
+      await controller.setScreenShareEnabled(
         callId: args.callId, enabled: args.enabled, invoke: invoke)
     }
   }

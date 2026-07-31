@@ -9,6 +9,7 @@ Default permissions for the plugin
 - `allow-disconnectNativeCall`
 - `allow-setNativeCallMicrophoneEnabled`
 - `allow-setNativeCallCameraEnabled`
+- `allow-setNativeCallScreenShareEnabled`
 - `allow-switchNativeCallCamera`
 - `allow-setNativeCallRemoteVideoOverlay`
 - `allow-clearNativeCallRemoteVideoOverlay`
@@ -689,6 +690,32 @@ Enables the setNativeCallRemoteVideoOverlay command without any pre-configured s
 <td>
 
 Denies the setNativeCallRemoteVideoOverlay command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:allow-setNativeCallScreenShareEnabled`
+
+</td>
+<td>
+
+Enables the setNativeCallScreenShareEnabled command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:deny-setNativeCallScreenShareEnabled`
+
+</td>
+<td>
+
+Denies the setNativeCallScreenShareEnabled command without any pre-configured scope.
 
 </td>
 </tr>

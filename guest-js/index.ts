@@ -110,6 +110,11 @@ export interface SetNativeCallCameraEnabledRequest {
   enabled: boolean;
 }
 
+export interface SetNativeCallScreenShareEnabledRequest {
+  callId: string;
+  enabled: boolean;
+}
+
 export interface SwitchNativeCallCameraRequest {
   callId: string;
 }
@@ -238,13 +243,25 @@ export interface NativeCallRemoteCamera {
 }
 
 /**
+ * One remote participant's screen-share publication (track id, mute and
+ * subscription state).
+ */
+export interface NativeCallScreenShare {
+  sid: string;
+  muted: boolean;
+  subscribed: boolean;
+}
+
+/**
  * Remote-only participant projection. `identity` is the opaque
  * LiveKit/MatrixRTC backend identity. `camera` exists only while the
- * participant has a remote camera publication.
+ * participant has a remote camera publication. `screenShare` exists only
+ * while the participant has a remote screen-share publication.
  */
 export interface NativeCallRemoteParticipant {
   identity: string;
   camera?: NativeCallRemoteCamera;
+  screenShare?: NativeCallScreenShare;
   /** Bounded connection-quality string: "lost"/"poor"/"good"/"excellent";
    *  omitted when unknown. */
   connectionQuality?: string;
@@ -262,6 +279,7 @@ export interface NativeCallSnapshot {
   connectionState: NativeCallConnectionState;
   microphoneEnabled: boolean;
   cameraEnabled: boolean;
+  screenShareEnabled: boolean;
   participantCount: number;
   remoteParticipants: NativeCallRemoteParticipant[];
   lastError?: NativeCallError;
@@ -322,6 +340,15 @@ export async function setNativeCallCameraEnabled(
   return await invoke<NativeCallSnapshot>('plugin:livekit-mobile|setNativeCallCameraEnabled', {
     payload: request,
   });
+}
+
+export async function setNativeCallScreenShareEnabled(
+  request: SetNativeCallScreenShareEnabledRequest
+): Promise<NativeCallSnapshot> {
+  return await invoke<NativeCallSnapshot>(
+    'plugin:livekit-mobile|setNativeCallScreenShareEnabled',
+    { payload: request }
+  );
 }
 
 export async function switchNativeCallCamera(
