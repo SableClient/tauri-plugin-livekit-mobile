@@ -1,3 +1,5 @@
+/// Must list every command in `lib.rs`'s `generate_handler!`: this is what
+/// generates the per-command permission files.
 const COMMANDS: &[&str] = &[
     "getNativeCallCapabilities",
     "connectNativeCall",
@@ -9,6 +11,17 @@ const COMMANDS: &[&str] = &[
     "switchNativeCallCamera",
     "setNativeCallRemoteVideoOverlay",
     "clearNativeCallRemoteVideoOverlay",
+    "setNativeCallLocalVideoOverlay",
+    "clearNativeCallLocalVideoOverlay",
+    "reportSystemIncomingCall",
+    "startSystemCall",
+    "answerSystemCall",
+    "endSystemCall",
+    "setSystemCallMuted",
+    "drainPendingSystemCallActions",
+    "fulfillAnswerCall",
+    "fulfillEndCall",
+    "reportSystemCallConnected",
     "setNativeCallEncryptionKey",
     "getNativeCallState",
     "getAudioRoutes",
