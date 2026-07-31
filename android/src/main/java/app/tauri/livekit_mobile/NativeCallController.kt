@@ -13,6 +13,7 @@ import io.livekit.android.e2ee.E2EEOptions
 import io.livekit.android.events.RoomEvent
 import io.livekit.android.events.collect
 import io.livekit.android.room.Room
+import io.livekit.android.room.participant.ConnectionQuality
 import io.livekit.android.room.participant.Participant
 import io.livekit.android.room.participant.RemoteParticipant
 import io.livekit.android.room.track.LocalVideoTrack
@@ -91,6 +92,9 @@ internal class NativeCallController(
                                             .put("muted", camera.muted)
                                             .put("subscribed", camera.subscribed),
                                     )
+                                }
+                                participant.connectionQuality?.let { quality ->
+                                    put("connectionQuality", quality)
                                 }
                             },
                         )
@@ -240,14 +244,21 @@ internal class NativeCallController(
 
     fun cancelConnect(callId: String, invoke: Invoke) = endCall(callId, invoke)
 
+    /** Ends whatever call is live; the notification hangup button is not a
+     * command, so there is no invoke to settle. */
+    fun disconnectActiveCall() {
+        val callId = snapshot.callId ?: return
+        endCall(callId, null)
+    }
+
     /** Cancels any in-flight connect and tears the matching room down; safe to
      * run while a connect is suspended. Settles with an idle snapshot. */
-    private fun endCall(callId: String, invoke: Invoke) {
+    private fun endCall(callId: String, invoke: Invoke?) {
         scope.launch {
             ++attempt
             if (snapshot.callId != callId) {
                 // A stale request must never tear down a replacement call.
-                invoke.resolve(snapshotJson())
+                invoke?.resolve(snapshotJson())
                 return@launch
             }
             intentionalDisconnect = true
@@ -257,7 +268,7 @@ internal class NativeCallController(
             transition { toIdle() }
             emitSnapshotChanged()
             channel = null
-            invoke.resolve(snapshotJson())
+            invoke?.resolve(snapshotJson())
         }
     }
 
@@ -395,14 +406,14 @@ internal class NativeCallController(
                     devicePixelRatio,
                 )
             ) {
-                is RemoteVideoOverlay.AttachResult.Attached -> invoke.resolve(snapshotJson())
-                is RemoteVideoOverlay.AttachResult.InvalidGeometry ->
+                is OverlayAttachResult.Attached -> invoke.resolve(snapshotJson())
+                is OverlayAttachResult.InvalidGeometry ->
                     reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
-                is RemoteVideoOverlay.AttachResult.TrackUnavailable ->
+                is OverlayAttachResult.TrackUnavailable ->
                     reject(invoke, NativeCallWire.ERR_UNAVAILABLE)
-                is RemoteVideoOverlay.AttachResult.HostUnavailable ->
+                is OverlayAttachResult.HostUnavailable ->
                     reject(invoke, NativeCallWire.ERR_UNAVAILABLE)
-                is RemoteVideoOverlay.AttachResult.Failed ->
+                is OverlayAttachResult.Failed ->
                     reject(invoke, NativeCallWire.ERR_UNEXPECTED)
             }
         }
@@ -441,16 +452,16 @@ internal class NativeCallController(
             when (
                 localVideoOverlay.attach(currentRoom, x, y, width, height, devicePixelRatio)
             ) {
-                is LocalVideoOverlay.AttachResult.Attached -> invoke.resolve(snapshotJson())
+                is OverlayAttachResult.Attached -> invoke.resolve(snapshotJson())
                 // The app reports geometry optimistically, possibly before the
                 // camera publishes; the publish event rebinds the tile.
-                is LocalVideoOverlay.AttachResult.TrackUnavailable ->
+                is OverlayAttachResult.TrackUnavailable ->
                     invoke.resolve(snapshotJson())
-                is LocalVideoOverlay.AttachResult.InvalidGeometry ->
+                is OverlayAttachResult.InvalidGeometry ->
                     reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
-                is LocalVideoOverlay.AttachResult.HostUnavailable ->
+                is OverlayAttachResult.HostUnavailable ->
                     reject(invoke, NativeCallWire.ERR_UNAVAILABLE)
-                is LocalVideoOverlay.AttachResult.Failed ->
+                is OverlayAttachResult.Failed ->
                     reject(invoke, NativeCallWire.ERR_UNEXPECTED)
             }
         }
@@ -625,13 +636,16 @@ internal class NativeCallController(
                 applyRemoteProjectionIfChanged()
                 videoOverlay.reconcile(room)
             }
+            is RoomEvent.ConnectionQualityChanged ->
+                applyRemoteProjectionIfChanged(event.participant)
             else -> Unit
         }
     }
 
     /**
-     * Smallest authoritative remote-only projection: identity, plus the remote
-     * CAMERA publication (sid, muted, remote-aware subscribed) when one exists.
+     * Smallest authoritative remote-only projection: identity, connection
+     * quality, plus the remote CAMERA publication (sid, muted, remote-aware
+     * subscribed) when one exists.
      * Sorted so identical room state always projects to an equal list.
      */
     private fun remoteParticipantsProjection(
@@ -654,10 +668,23 @@ internal class NativeCallController(
                                 subscribed = publication.subscribed,
                             )
                         }
-                NativeRemoteParticipant(identity = identity.value, camera = camera)
+                NativeRemoteParticipant(
+                    identity = identity.value,
+                    camera = camera,
+                    connectionQuality = connectionQualityWire(participant.connectionQuality),
+                )
             }
             .sortedBy { it.identity }
     }
+
+    private fun connectionQualityWire(quality: ConnectionQuality): String? =
+        when (quality) {
+            ConnectionQuality.LOST -> NativeCallWire.QUALITY_LOST
+            ConnectionQuality.POOR -> NativeCallWire.QUALITY_POOR
+            ConnectionQuality.GOOD -> NativeCallWire.QUALITY_GOOD
+            ConnectionQuality.EXCELLENT -> NativeCallWire.QUALITY_EXCELLENT
+            ConnectionQuality.UNKNOWN -> null
+        }
 
     /** Recomputes the remote-only projection after a publication event, skipping
      * local participants and no-op changes (no revision bump, no emit). */

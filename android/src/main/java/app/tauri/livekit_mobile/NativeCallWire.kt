@@ -13,6 +13,13 @@ internal object NativeCallWire {
     const val STATE_RECONNECTING = "reconnecting"
     const val STATE_FAILED = "failed"
 
+    /** Bounded connection-quality vocabulary mirrored from LiveKit's
+     * ConnectionQuality; UNKNOWN has no wire value and omits the field. */
+    const val QUALITY_LOST = "lost"
+    const val QUALITY_POOR = "poor"
+    const val QUALITY_GOOD = "good"
+    const val QUALITY_EXCELLENT = "excellent"
+
     /** Single channel event protocol: full authoritative snapshot per emit. */
     const val EVENT_SNAPSHOT_CHANGED = "snapshot_changed"
 

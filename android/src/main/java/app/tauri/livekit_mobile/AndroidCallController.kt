@@ -84,8 +84,6 @@ internal class AndroidCallController(
 
     // ── Surfaces (called by plugin commands) ──────────────────────────────
 
-    fun hasRegisteredCall(): Boolean = activeCalls.isNotEmpty()
-
     /**
      * Shows an incoming call on the system UI (lock screen, notification).
      * The caller MUST post a foreground notification within 5s.
@@ -105,6 +103,16 @@ internal class AndroidCallController(
     fun answerCall(callId: String) {
         val control = activeCalls[callId]?.control ?: return
         control.launch { control.answer(CallAttributesCompat.CALL_TYPE_AUDIO_CALL) }
+    }
+
+    /** Ends every registered call and queues an end action for each. Telecom
+     * only calls onDisconnect for system-initiated disconnects, so an app-side
+     * hangup has to queue the action JS drains itself. */
+    fun endCallsFromNotification() {
+        for (callId in activeCalls.keys.toList()) {
+            endCall(callId)
+            enqueue(SystemCallAction.end(callId))
+        }
     }
 
     /** Ends a call: both local hangup and remote-end path. */

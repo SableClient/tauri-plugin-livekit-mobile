@@ -179,23 +179,10 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
         override fun onReceive(context: Context, intent: Intent) {
             val action = intent.getStringExtra(LivekitMobileForegroundService.EXTRA_ACTION)
             when (action) {
-                LivekitMobileForegroundService.ACTION_ANSWER -> {
-                    // The user tapped "Answer" on the incoming-call notification.
-                    // Delegate to the call controller; it will route via CallStyle.
-                }
-                LivekitMobileForegroundService.ACTION_DECLINE -> {
-                    // The user tapped "Decline" on the incoming-call notification.
-                    // End any active call.
-                    for ((callId, _) in callController.drainPendingActions()) {
-                        // Just clear pending; the actual decline is handled
-                        // through the system-call path.
-                    }
-                    callController.reset()
-                }
+                LivekitMobileForegroundService.ACTION_DECLINE,
                 LivekitMobileForegroundService.ACTION_HANGUP -> {
-                    // The user tapped "Hang up" on the ongoing-call notification.
-                    // End any active call.
-                    callController.reset()
+                    callController.endCallsFromNotification()
+                    controller.disconnectActiveCall()
                 }
             }
         }
