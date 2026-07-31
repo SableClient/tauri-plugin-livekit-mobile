@@ -1094,12 +1094,23 @@ final class RoomController: NSObject {
   private func stopPiP() {
     guard let ctrl = pipController as? AVPictureInPictureController else { return }
 
-    // Stop any in-progress PiP session.
+    // stopPictureInPicture is asynchronous and animated. Tearing the layer out
+    // now would leave the dismissal animating against a detached layer, so hand
+    // off to pictureInPictureControllerDidStopPictureInPicture and keep the
+    // controller alive until it fires.
     if ctrl.isPictureInPictureActive {
       ctrl.stopPictureInPicture()
+      logRoom("PiP stopping: teardown deferred to the stop callback")
+      return
     }
 
-    // Return the display layer back to the overlay.
+    teardownPiPLayer()
+  }
+
+  /// Returns the display layer to the overlay and releases the PiP controller.
+  /// Safe to call once PiP is no longer active.
+  @available(iOS 15.0, *)
+  private func teardownPiPLayer() {
     if let vc = pipViewController as? AVPictureInPictureVideoCallViewController,
        let layer = vc.view.layer.sublayers?.first {
       layer.removeFromSuperlayer()
@@ -1610,12 +1621,7 @@ extension RoomController: AVPictureInPictureControllerDelegate {
     _ controller: AVPictureInPictureController
   ) {
     Task { @MainActor [weak self] in
-      guard let self else { return }
-      if let vc = self.pipViewController as? AVPictureInPictureVideoCallViewController,
-         let layer = vc.view.layer.sublayers?.first,
-         layer.superlayer == nil {
-        self.returnDisplayLayerToOverlay(layer)
-      }
+      self?.teardownPiPLayer()
     }
   }
 }
