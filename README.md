@@ -154,7 +154,7 @@ app fails at launch with `dyld: Library not loaded:
 @rpath/LiveKitWebRTC.framework/LiveKitWebRTC`.
 
 Download the versions pinned by `ios/Package.resolved` and list them in
-`tauri.conf.json` — any `.xcframework` entry is treated as a vendor framework
+`tauri.conf.json`. Any `.xcframework` entry is treated as a vendor framework
 and gets embedded and signed into the bundle:
 
 ```json
