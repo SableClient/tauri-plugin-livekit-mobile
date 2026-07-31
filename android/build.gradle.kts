@@ -32,6 +32,7 @@ android {
 dependencies {
     implementation(project(":tauri-android"))
     implementation("androidx.core:core-ktx:1.16.0")
+    implementation("androidx.core:core-telecom:1.0.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("io.livekit:livekit-android:2.27.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")

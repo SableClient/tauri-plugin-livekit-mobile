@@ -3,7 +3,9 @@ package app.tauri.livekit_mobile
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
@@ -11,30 +13,44 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 
 /**
- * Foreground-service notification shown while a native room exists. Audio
- * focus and routing are owned by the LiveKit SDK, not by this plugin.
+ * Foreground-service notification shown while a native room exists.
+ *
+ * Uses {@link NotificationCompat.CallStyle} on Android 12+ for the system
+ * call UI (incoming call chip, ongoing call notification). On older
+ * platforms falls back to the simpler ongoing-call style.
+ *
+ * Audio focus and routing are owned by the LiveKit SDK, not by this plugin.
  */
 class LivekitMobileForegroundService : Service() {
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannel()
+        createNotificationChannels()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val callDirection = intent?.getStringExtra(EXTRA_CALL_DIRECTION) ?: DIRECTION_ONGOING
+        val callerName = intent?.getStringExtra(EXTRA_CALLER_NAME) ?: ""
         val wantsMicrophone = intent?.getBooleanExtra(EXTRA_MICROPHONE, false) ?: false
         val wantsPlayback = intent?.getBooleanExtra(EXTRA_PLAYBACK, true) ?: true
+
+        val notification = when (callDirection) {
+            DIRECTION_INCOMING -> buildIncomingCallNotification(callerName)
+            DIRECTION_OUTGOING -> buildOutgoingCallNotification(callerName)
+            else -> buildOngoingCallNotification(callerName)
+        }
+
         val started = try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 var types = 0
                 if (wantsMicrophone) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
                 if (wantsPlayback) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
-                if (types != 0) {
-                    startForeground(NOTIFICATION_ID, buildNotification(), types)
-                } else {
-                    startForeground(NOTIFICATION_ID, buildNotification())
+                // FOREGROUND_SERVICE_TYPE_PHONE_CALL for targetSdk 34+ system-call usage.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
                 }
+                startForeground(NOTIFICATION_ID, notification, types)
             } else {
-                startForeground(NOTIFICATION_ID, buildNotification())
+                startForeground(NOTIFICATION_ID, notification)
             }
             true
         } catch (_: SecurityException) {
@@ -62,35 +78,223 @@ class LivekitMobileForegroundService : Service() {
         super.onDestroy()
     }
 
-    private fun createNotificationChannel() {
+    private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        val channel = NotificationChannel(
-            CHANNEL_ID,
-            "Call audio",
-            NotificationManager.IMPORTANCE_LOW,
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_ID_ONGOING,
+                "Call in progress",
+                NotificationManager.IMPORTANCE_LOW,
+            ),
         )
-        getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+        manager.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_ID_INCOMING,
+                "Incoming call",
+                NotificationManager.IMPORTANCE_HIGH,
+            ),
+        )
     }
 
-    // Branding comes from the host application (launcher icon and label); the
-    // plugin does not ship its own notification assets.
-    private fun buildNotification(): Notification {
+    // ── Incoming call notification (Android 12+ CallStyle) ─────────────────
+
+    private fun buildIncomingCallNotification(callerName: String): Notification {
         val appInfo = applicationInfo
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(appInfo.icon)
-            .setContentTitle(appInfo.loadLabel(packageManager))
-            .setContentText("Call in progress")
-            .setCategory(Notification.CATEGORY_CALL)
-            .setOngoing(true)
-            .setOnlyAlertOnce(true)
-            .build()
+        val appLabel = appInfo.loadLabel(packageManager).toString()
+
+        val declineIntent = buildActionIntent(ACTION_DECLINE)
+        val answerIntent = buildActionIntent(ACTION_ANSWER)
+        val declinePending = PendingIntent.getBroadcast(
+            this, 0, declineIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val answerPending = PendingIntent.getBroadcast(
+            this, 1, answerIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val person = Person.Builder()
+                .setName(callerName)
+                .build()
+            NotificationCompat.Builder(this, CHANNEL_ID_INCOMING)
+                .setSmallIcon(appInfo.icon)
+                .setContentTitle(appLabel)
+                .setContentText("Incoming call from $callerName")
+                .setCategory(Notification.CATEGORY_CALL)
+                .setOngoing(true)
+                .setOnlyAlertOnce(false)
+                .setStyle(
+                    NotificationCompat.CallStyle.forIncomingCall(
+                        person,
+                        declinePending,
+                        answerPending,
+                    ),
+                )
+                .setFullScreenIntent(buildFullScreenIntent(), true)
+                .addAction(
+                    NotificationCompat.Action.Builder(
+                        android.R.drawable.ic_menu_call,
+                        "Answer",
+                        answerPending,
+                    ).build(),
+                )
+                .addAction(
+                    NotificationCompat.Action.Builder(
+                        android.R.drawable.ic_menu_close_clear_cancel,
+                        "Decline",
+                        declinePending,
+                    ).build(),
+                )
+        } else {
+            // Pre-Android 12: simple ongoing notification.
+            NotificationCompat.Builder(this, CHANNEL_ID_INCOMING)
+                .setSmallIcon(appInfo.icon)
+                .setContentTitle(appLabel)
+                .setContentText("Incoming call from $callerName")
+                .setCategory(Notification.CATEGORY_CALL)
+                .setOngoing(true)
+                .setOnlyAlertOnce(false)
+                .setFullScreenIntent(buildFullScreenIntent(), true)
+        }
+        return builder.build()
+    }
+
+    // ── Outgoing call notification ─────────────────────────────────────────
+
+    private fun buildOutgoingCallNotification(callerName: String): Notification {
+        val appInfo = applicationInfo
+        val appLabel = appInfo.loadLabel(packageManager).toString()
+
+        val hangupIntent = buildActionIntent(ACTION_HANGUP)
+        val hangupPending = PendingIntent.getBroadcast(
+            this, 2, hangupIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val person = Person.Builder()
+                .setName(callerName)
+                .build()
+            NotificationCompat.Builder(this, CHANNEL_ID_ONGOING)
+                .setSmallIcon(appInfo.icon)
+                .setContentTitle(appLabel)
+                .setContentText("Calling $callerName…")
+                .setCategory(Notification.CATEGORY_CALL)
+                .setOngoing(true)
+                .setStyle(
+                    NotificationCompat.CallStyle.forOngoingCall(
+                        person,
+                        hangupPending,
+                    ),
+                )
+                .addAction(
+                    NotificationCompat.Action.Builder(
+                        android.R.drawable.ic_menu_call,
+                        "Hang up",
+                        hangupPending,
+                    ).build(),
+                )
+        } else {
+            NotificationCompat.Builder(this, CHANNEL_ID_ONGOING)
+                .setSmallIcon(appInfo.icon)
+                .setContentTitle(appLabel)
+                .setContentText("Calling $callerName…")
+                .setCategory(Notification.CATEGORY_CALL)
+                .setOngoing(true)
+        }
+        return builder.build()
+    }
+
+    // ── Ongoing call notification ──────────────────────────────────────────
+
+    private fun buildOngoingCallNotification(callerName: String): Notification {
+        val appInfo = applicationInfo
+        val appLabel = appInfo.loadLabel(packageManager).toString()
+
+        val hangupIntent = buildActionIntent(ACTION_HANGUP)
+        val hangupPending = PendingIntent.getBroadcast(
+            this, 3, hangupIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val person = Person.Builder()
+                .setName(callerName)
+                .build()
+            NotificationCompat.Builder(this, CHANNEL_ID_ONGOING)
+                .setSmallIcon(appInfo.icon)
+                .setContentTitle(appLabel)
+                .setContentText("Call with $callerName")
+                .setCategory(Notification.CATEGORY_CALL)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setStyle(
+                    NotificationCompat.CallStyle.forOngoingCall(
+                        person,
+                        hangupPending,
+                    ),
+                )
+                .addAction(
+                    NotificationCompat.Action.Builder(
+                        android.R.drawable.ic_menu_call,
+                        "Hang up",
+                        hangupPending,
+                    ).build(),
+                )
+        } else {
+            NotificationCompat.Builder(this, CHANNEL_ID_ONGOING)
+                .setSmallIcon(appInfo.icon)
+                .setContentTitle(appLabel)
+                .setContentText("Call with $callerName")
+                .setCategory(Notification.CATEGORY_CALL)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+        }
+        return builder.build()
+    }
+
+    // ── Helpers ────────────────────────────────────────────────────────────
+
+    /** Builds a broadcast intent to be handled by the plugin for system call actions. */
+    private fun buildActionIntent(action: String): Intent =
+        Intent(ACTION_BROADCAST)
+            .setPackage(packageName)
+            .putExtra(EXTRA_ACTION, action)
+
+    private fun buildFullScreenIntent(): PendingIntent {
+        val intent = packageManager.getLaunchIntentForPackage(packageName)
+            ?: Intent()
+        return PendingIntent.getActivity(
+            this, 0, intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
     }
 
     companion object {
+        // Extras from the plugin to the service.
         const val EXTRA_MICROPHONE = "app.tauri.livekit_mobile.extra.MICROPHONE"
         const val EXTRA_PLAYBACK = "app.tauri.livekit_mobile.extra.PLAYBACK"
+        const val EXTRA_CALL_DIRECTION = "app.tauri.livekit_mobile.extra.CALL_DIRECTION"
+        const val EXTRA_CALLER_NAME = "app.tauri.livekit_mobile.extra.CALLER_NAME"
 
-        private const val CHANNEL_ID = "livekit_mobile_audio"
+        // Broadcast action from notification buttons back to the plugin.
+        const val ACTION_BROADCAST = "app.tauri.livekit_mobile.CALL_ACTION"
+
+        // Action values inside ACTION_BROADCAST.
+        const val EXTRA_ACTION = "app.tauri.livekit_mobile.extra.CALL_ACTION"
+        const val ACTION_ANSWER = "answer"
+        const val ACTION_DECLINE = "decline"
+        const val ACTION_HANGUP = "hangup"
+
+        // Call direction values for EXTRA_CALL_DIRECTION.
+        const val DIRECTION_INCOMING = "incoming"
+        const val DIRECTION_OUTGOING = "outgoing"
+        const val DIRECTION_ONGOING = "ongoing"
+
+        private const val CHANNEL_ID_ONGOING = "livekit_mobile_ongoing"
+        private const val CHANNEL_ID_INCOMING = "livekit_mobile_incoming"
         private const val NOTIFICATION_ID = 1396
     }
 }
