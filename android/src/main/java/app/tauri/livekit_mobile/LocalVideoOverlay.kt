@@ -27,17 +27,6 @@ import java.util.concurrent.TimeoutException
 internal class LocalVideoOverlay(
     private val webViewProvider: () -> WebView?,
 ) {
-    internal sealed interface AttachResult {
-        data object Attached : AttachResult
-
-        data object InvalidGeometry : AttachResult
-
-        data object TrackUnavailable : AttachResult
-
-        data object HostUnavailable : AttachResult
-
-        data object Failed : AttachResult
-    }
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -54,7 +43,7 @@ internal class LocalVideoOverlay(
      * Attaches the local camera track to the overlay. The same track only
      * re-lays the view; a replaced track moves the sink over. An unpublished
      * camera records the geometry, detaches/hides any current tile, and reports
-     * [AttachResult.TrackUnavailable]; a later publish rebinds it via
+     * [OverlayAttachResult.TrackUnavailable]; a later publish rebinds it via
      * [reconcile].
      */
     fun attach(
@@ -64,7 +53,7 @@ internal class LocalVideoOverlay(
         width: Double,
         height: Double,
         devicePixelRatio: Double,
-    ): AttachResult {
+    ): OverlayAttachResult {
         val spec = OverlaySpec(x, y, width, height, devicePixelRatio)
         val track = resolveCameraTrack(room)
         if (track == null) {
@@ -72,18 +61,18 @@ internal class LocalVideoOverlay(
             if (!detachOnMainThread()) {
                 clear()
             }
-            return AttachResult.TrackUnavailable
+            return OverlayAttachResult.TrackUnavailable
         }
         val capturedGeneration = generation
         return runCatching {
                 onMainThread {
                     if (generation != capturedGeneration) {
-                        return@onMainThread AttachResult.Failed
+                        return@onMainThread OverlayAttachResult.Failed
                     }
                     val webView = webViewProvider()
-                        ?: return@onMainThread AttachResult.HostUnavailable
+                        ?: return@onMainThread OverlayAttachResult.HostUnavailable
                     val parent = webView.parent as? ViewGroup
-                        ?: return@onMainThread AttachResult.HostUnavailable
+                        ?: return@onMainThread OverlayAttachResult.HostUnavailable
                     val rect =
                         overlayRectFromCss(
                             x,
@@ -94,7 +83,7 @@ internal class LocalVideoOverlay(
                             webView.width,
                             webView.height,
                         )
-                            ?: return@onMainThread AttachResult.InvalidGeometry
+                            ?: return@onMainThread OverlayAttachResult.InvalidGeometry
 
                     val previous = renderer
                     val view = previous ?: PassThroughVideoRenderer(webView.context)
@@ -113,15 +102,15 @@ internal class LocalVideoOverlay(
                             // this block ran: rollback instead of resurrecting
                             // state the bridge already forgot.
                             rollbackFailedAttach(view, track)
-                            return@onMainThread AttachResult.Failed
+                            return@onMainThread OverlayAttachResult.Failed
                         }
                         renderer = view
                         attachedTrack = track
                         selectedSpec = spec
-                        AttachResult.Attached
+                        OverlayAttachResult.Attached
                     } catch (failure: Exception) {
                         rollbackFailedAttach(view, track)
-                        AttachResult.Failed
+                        OverlayAttachResult.Failed
                     }
                 }
             }
@@ -130,7 +119,7 @@ internal class LocalVideoOverlay(
                 // any partial state through the wedged-main-safe clear path.
                 generation++
                 clear()
-                AttachResult.Failed
+                OverlayAttachResult.Failed
             }
     }
 
@@ -294,22 +283,7 @@ internal class LocalVideoOverlay(
     private fun resolveCameraTrack(room: Room): VideoTrack? =
         room.localParticipant.getTrackPublication(Track.Source.CAMERA)?.track as? VideoTrack
 
-    /** Runs a mutation on the main thread; bridge callers block briefly. */
-    private fun <T> onMainThread(block: () -> T): T {
-        if (Looper.myLooper() == Looper.getMainLooper()) return block()
-        val latch = CountDownLatch(1)
-        val box = arrayOfNulls<Result<T>>(1)
-        mainHandler.post {
-            box[0] = runCatching(block)
-            latch.countDown()
-        }
-        if (!latch.await(MAIN_THREAD_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
-            throw TimeoutException("main thread did not run the overlay mutation")
-        }
-        return box[0]!!.getOrThrow()
-    }
+    private fun <T> onMainThread(block: () -> T): T =
+        onOverlayMainThread(mainHandler, block)
 
-    private companion object {
-        const val MAIN_THREAD_TIMEOUT_MS = 3_000L
-    }
 }
