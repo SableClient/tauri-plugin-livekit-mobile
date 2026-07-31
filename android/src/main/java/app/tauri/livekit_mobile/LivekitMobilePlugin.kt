@@ -159,12 +159,15 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
 
     private val videoOverlay = RemoteVideoOverlay(webViewProvider = { hostWebView })
 
+    private val localVideoOverlay = LocalVideoOverlay(webViewProvider = { hostWebView })
+
     private val controller =
         NativeCallController(
             appContext = activity.applicationContext,
             hasMicrophonePermission = { hasRecordAudioPermission() },
             hasCameraPermission = { hasCameraPermission() },
             videoOverlay = videoOverlay,
+            localVideoOverlay = localVideoOverlay,
         )
 
     private val callController = AndroidCallController(

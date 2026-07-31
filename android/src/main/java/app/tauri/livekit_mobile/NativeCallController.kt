@@ -44,6 +44,7 @@ internal class NativeCallController(
     private val hasMicrophonePermission: () -> Boolean,
     private val hasCameraPermission: () -> Boolean = { false },
     private val videoOverlay: RemoteVideoOverlay = RemoteVideoOverlay { null },
+    private val localVideoOverlay: LocalVideoOverlay = LocalVideoOverlay { null },
 ) {
     private val dispatcher =
         Executors.newSingleThreadExecutor { runnable ->
@@ -418,6 +419,54 @@ internal class NativeCallController(
         }
     }
 
+    fun setLocalVideoOverlay(
+        callId: String,
+        x: Double,
+        y: Double,
+        width: Double,
+        height: Double,
+        devicePixelRatio: Double,
+        invoke: Invoke,
+    ) {
+        scope.launch {
+            if (snapshot.callId != callId) {
+                invoke.resolve(snapshotJson())
+                return@launch
+            }
+            val currentRoom = room
+            if (currentRoom == null) {
+                reject(invoke, NativeCallWire.ERR_UNAVAILABLE)
+                return@launch
+            }
+            when (
+                localVideoOverlay.attach(currentRoom, x, y, width, height, devicePixelRatio)
+            ) {
+                is LocalVideoOverlay.AttachResult.Attached -> invoke.resolve(snapshotJson())
+                // The app reports geometry optimistically, possibly before the
+                // camera publishes; the publish event rebinds the tile.
+                is LocalVideoOverlay.AttachResult.TrackUnavailable ->
+                    invoke.resolve(snapshotJson())
+                is LocalVideoOverlay.AttachResult.InvalidGeometry ->
+                    reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
+                is LocalVideoOverlay.AttachResult.HostUnavailable ->
+                    reject(invoke, NativeCallWire.ERR_UNAVAILABLE)
+                is LocalVideoOverlay.AttachResult.Failed ->
+                    reject(invoke, NativeCallWire.ERR_UNEXPECTED)
+            }
+        }
+    }
+
+    fun clearLocalVideoOverlay(callId: String, invoke: Invoke) {
+        scope.launch {
+            if (snapshot.callId != callId) {
+                invoke.resolve(snapshotJson())
+                return@launch
+            }
+            localVideoOverlay.clear()
+            invoke.resolve(snapshotJson())
+        }
+    }
+
     /**
      * Installs a rotated encryption key into the current call's provider.
      * Works while connecting or connected; installs are serialized on the
@@ -557,10 +606,12 @@ internal class NativeCallController(
             is RoomEvent.TrackPublished -> {
                 applyRemoteProjectionIfChanged(event.participant)
                 videoOverlay.reconcile(room)
+                localVideoOverlay.reconcile(room)
             }
             is RoomEvent.TrackUnpublished -> {
                 applyRemoteProjectionIfChanged(event.participant)
                 videoOverlay.reconcile(room)
+                localVideoOverlay.reconcile(room)
             }
             is RoomEvent.TrackMuted ->
                 applyRemoteProjectionIfChanged(event.participant)
@@ -628,6 +679,7 @@ internal class NativeCallController(
     private fun teardownRoom() {
         // The renderer's EGL context belongs to the room: drop it first.
         videoOverlay.clear()
+        localVideoOverlay.clear()
         eventJob?.cancel()
         eventJob = null
         val endingRoom = room
