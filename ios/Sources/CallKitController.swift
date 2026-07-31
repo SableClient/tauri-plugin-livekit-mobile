@@ -413,13 +413,18 @@ final class CallKitController: NSObject {
     case .pending:
       DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
         guard let self else { return }
-        if self.systemState[uuid] == .pending {
-          log("Retrying endCall for \(uuid) — still pending")
-          // Force-end by reporting directly.
-          self.provider.reportCall(with: uuid, endedAt: nil, reason: reason ?? .remoteEnded)
-          self.callByUUID.removeValue(forKey: uuid)
-          self.uuidByCallId.removeValue(forKey: callId)
+        guard self.systemState[uuid] == .pending else {
+          // The system reported the call while we waited. Re-enter so it goes
+          // down the normal end path; returning here would leave it live.
+          self.endCall(callId: callId, remoteEnded: remoteEnded, reason: reason)
+          return
         }
+        log("Retrying endCall for \(uuid): still pending")
+        // Force-end by reporting directly.
+        self.provider.reportCall(with: uuid, endedAt: nil, reason: reason ?? .remoteEnded)
+        self.callByUUID.removeValue(forKey: uuid)
+        self.uuidByCallId.removeValue(forKey: callId)
+        self.systemState[uuid] = .removed
       }
       return
     case .notReported:
@@ -479,7 +484,6 @@ final class CallKitController: NSObject {
     update.localizedCallerName = callerName
     if let hasVideo { update.hasVideo = hasVideo }
     provider.reportCall(with: uuid, updated: update)
-    triggerToJS("callkit_event", data: .answer(uuid: uuid.uuidString))
   }
 
   /// Reports that the call was answered on another device.
@@ -551,29 +555,29 @@ final class CallKitController: NSObject {
   }
 
   /// Returns current audio route + available inputs as a JSON array.
-  func getAudioRoutes(callId: String) -> [[String: Any]] {
+  func getAudioRoutes(callId: String) -> [AudioRoute] {
     guard !chinaRegion else { return [] }
     let session = AVAudioSession.sharedInstance()
-    var routes: [[String: Any]] = []
+    var routes: [AudioRoute] = []
 
     // Current route first.
     if let currentOutput = session.currentRoute.outputs.first {
-      routes.append([
-        "name": currentOutput.portName,
-        "type": currentOutput.portType.rawValue,
-        "id": currentOutput.uid,
-        "label": "current"
-      ])
+      routes.append(
+        AudioRoute(
+          name: currentOutput.portName,
+          type: currentOutput.portType.rawValue,
+          id: currentOutput.uid,
+          label: "current"))
     }
 
     if let inputs = session.availableInputs {
       for input in inputs {
-        routes.append([
-          "name": input.portName,
-          "type": input.portType.rawValue,
-          "id": input.uid,
-          "label": "input"
-        ])
+        routes.append(
+          AudioRoute(
+            name: input.portName,
+            type: input.portType.rawValue,
+            id: input.uid,
+            label: "input"))
       }
     }
 

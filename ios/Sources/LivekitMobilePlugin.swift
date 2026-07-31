@@ -249,6 +249,32 @@ struct BridgeRemoteParticipant: Encodable, Equatable {
   let connectionQuality: BridgeConnectionQuality?
 }
 
+/// One selectable audio output/input route.
+struct AudioRoute: Encodable {
+  let name: String
+  let type: String
+  let id: String
+  let label: String
+}
+
+/// Wire shape for `getAudioRoutes`.
+///
+/// These responses must be `Encodable` structs, not `[String: Any?]`
+/// dictionaries: `Invoke.resolve(_ data: JsonObject)` runs the value through
+/// `JSONSerialization.isValidJSONObject`, which rejects a Swift struct, and
+/// `Invoke.serialize` then *resolves* with the error description instead of
+/// failing. Passing an `Encodable` selects the `resolve<T: Encodable>`
+/// overload, which uses `JSONEncoder`.
+struct AudioRoutesResponse: Encodable {
+  let routes: [AudioRoute]
+  let receiver: BridgeStateResponse
+}
+
+/// Wire shape for the commands that wrap a snapshot in a `receiver` key.
+struct SnapshotReceiverResponse: Encodable {
+  let receiver: BridgeStateResponse
+}
+
 struct BridgeStateResponse: Encodable {
   let revision: UInt64
   let callId: String?
@@ -747,7 +773,7 @@ final class LivekitMobilePlugin: Plugin {
       }
       let routes = callKitController.getAudioRoutes(callId: args.callId)
       let snapshot = controller.snapshot()
-      invoke.resolve(["routes": routes, "receiver": snapshot])
+      invoke.resolve(AudioRoutesResponse(routes: routes, receiver: snapshot))
     }
   }
 
@@ -762,7 +788,7 @@ final class LivekitMobilePlugin: Plugin {
         return
       }
       callKitController.setAudioRoute(callId: args.callId, routeId: args.routeId)
-      invoke.resolve(["receiver": controller.snapshot()])
+      invoke.resolve(SnapshotReceiverResponse(receiver: controller.snapshot()))
     }
   }
 
@@ -777,7 +803,7 @@ final class LivekitMobilePlugin: Plugin {
         return
       }
       callKitController.sendDTMF(callId: args.callId, digits: args.digits)
-      invoke.resolve(["receiver": controller.snapshot()])
+      invoke.resolve(SnapshotReceiverResponse(receiver: controller.snapshot()))
     }
   }
 
@@ -793,7 +819,7 @@ final class LivekitMobilePlugin: Plugin {
       }
       callKitController.updateCallDisplay(
         callId: args.callId, callerName: args.callerName, hasVideo: args.hasVideo)
-      invoke.resolve(["receiver": controller.snapshot()])
+      invoke.resolve(SnapshotReceiverResponse(receiver: controller.snapshot()))
     }
   }
 
