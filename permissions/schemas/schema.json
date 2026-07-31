@@ -583,6 +583,18 @@
           "markdownDescription": "Denies the setNativeCallMicrophoneEnabled command without any pre-configured scope."
         },
         {
+          "description": "Enables the setNativeCallPiPEnabled command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-setNativeCallPiPEnabled",
+          "markdownDescription": "Enables the setNativeCallPiPEnabled command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the setNativeCallPiPEnabled command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-setNativeCallPiPEnabled",
+          "markdownDescription": "Denies the setNativeCallPiPEnabled command without any pre-configured scope."
+        },
+        {
           "description": "Enables the setNativeCallRemoteVideoOverlay command without any pre-configured scope.",
           "type": "string",
           "const": "allow-setNativeCallRemoteVideoOverlay",
@@ -655,10 +667,10 @@
           "markdownDescription": "Denies the updateCallDisplay command without any pre-configured scope."
         },
         {
-          "description": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-getNativeCallCapabilities`\n- `allow-connectNativeCall`\n- `allow-disconnectNativeCall`\n- `allow-setNativeCallMicrophoneEnabled`\n- `allow-setNativeCallCameraEnabled`\n- `allow-setNativeCallScreenShareEnabled`\n- `allow-switchNativeCallCamera`\n- `allow-setNativeCallRemoteVideoOverlay`\n- `allow-clearNativeCallRemoteVideoOverlay`\n- `allow-setNativeCallLocalVideoOverlay`\n- `allow-clearNativeCallLocalVideoOverlay`\n- `allow-reportSystemIncomingCall`\n- `allow-startSystemCall`\n- `allow-answerSystemCall`\n- `allow-endSystemCall`\n- `allow-setSystemCallMuted`\n- `allow-drainPendingSystemCallActions`\n- `allow-fulfillAnswerCall`\n- `allow-fulfillEndCall`\n- `allow-reportSystemCallConnected`\n- `allow-setNativeCallEncryptionKey`\n- `allow-getNativeCallState`\n- `allow-getAudioRoutes`\n- `allow-setAudioRoute`\n- `allow-sendDTMF`\n- `allow-updateCallDisplay`\n- `allow-reportSystemCallAnsweredElsewhere`\n- `allow-reportSystemCallDeclinedElsewhere`\n- `allow-reportSystemCallUnanswered`\n- `allow-declineSystemCall`",
+          "description": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-getNativeCallCapabilities`\n- `allow-connectNativeCall`\n- `allow-disconnectNativeCall`\n- `allow-setNativeCallMicrophoneEnabled`\n- `allow-setNativeCallCameraEnabled`\n- `allow-setNativeCallScreenShareEnabled`\n- `allow-setNativeCallPiPEnabled`\n- `allow-switchNativeCallCamera`\n- `allow-setNativeCallRemoteVideoOverlay`\n- `allow-clearNativeCallRemoteVideoOverlay`\n- `allow-setNativeCallLocalVideoOverlay`\n- `allow-clearNativeCallLocalVideoOverlay`\n- `allow-reportSystemIncomingCall`\n- `allow-startSystemCall`\n- `allow-answerSystemCall`\n- `allow-endSystemCall`\n- `allow-setSystemCallMuted`\n- `allow-drainPendingSystemCallActions`\n- `allow-fulfillAnswerCall`\n- `allow-fulfillEndCall`\n- `allow-reportSystemCallConnected`\n- `allow-setNativeCallEncryptionKey`\n- `allow-getNativeCallState`\n- `allow-getAudioRoutes`\n- `allow-setAudioRoute`\n- `allow-sendDTMF`\n- `allow-updateCallDisplay`\n- `allow-reportSystemCallAnsweredElsewhere`\n- `allow-reportSystemCallDeclinedElsewhere`\n- `allow-reportSystemCallUnanswered`\n- `allow-declineSystemCall`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-getNativeCallCapabilities`\n- `allow-connectNativeCall`\n- `allow-disconnectNativeCall`\n- `allow-setNativeCallMicrophoneEnabled`\n- `allow-setNativeCallCameraEnabled`\n- `allow-setNativeCallScreenShareEnabled`\n- `allow-switchNativeCallCamera`\n- `allow-setNativeCallRemoteVideoOverlay`\n- `allow-clearNativeCallRemoteVideoOverlay`\n- `allow-setNativeCallLocalVideoOverlay`\n- `allow-clearNativeCallLocalVideoOverlay`\n- `allow-reportSystemIncomingCall`\n- `allow-startSystemCall`\n- `allow-answerSystemCall`\n- `allow-endSystemCall`\n- `allow-setSystemCallMuted`\n- `allow-drainPendingSystemCallActions`\n- `allow-fulfillAnswerCall`\n- `allow-fulfillEndCall`\n- `allow-reportSystemCallConnected`\n- `allow-setNativeCallEncryptionKey`\n- `allow-getNativeCallState`\n- `allow-getAudioRoutes`\n- `allow-setAudioRoute`\n- `allow-sendDTMF`\n- `allow-updateCallDisplay`\n- `allow-reportSystemCallAnsweredElsewhere`\n- `allow-reportSystemCallDeclinedElsewhere`\n- `allow-reportSystemCallUnanswered`\n- `allow-declineSystemCall`"
+          "markdownDescription": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-getNativeCallCapabilities`\n- `allow-connectNativeCall`\n- `allow-disconnectNativeCall`\n- `allow-setNativeCallMicrophoneEnabled`\n- `allow-setNativeCallCameraEnabled`\n- `allow-setNativeCallScreenShareEnabled`\n- `allow-setNativeCallPiPEnabled`\n- `allow-switchNativeCallCamera`\n- `allow-setNativeCallRemoteVideoOverlay`\n- `allow-clearNativeCallRemoteVideoOverlay`\n- `allow-setNativeCallLocalVideoOverlay`\n- `allow-clearNativeCallLocalVideoOverlay`\n- `allow-reportSystemIncomingCall`\n- `allow-startSystemCall`\n- `allow-answerSystemCall`\n- `allow-endSystemCall`\n- `allow-setSystemCallMuted`\n- `allow-drainPendingSystemCallActions`\n- `allow-fulfillAnswerCall`\n- `allow-fulfillEndCall`\n- `allow-reportSystemCallConnected`\n- `allow-setNativeCallEncryptionKey`\n- `allow-getNativeCallState`\n- `allow-getAudioRoutes`\n- `allow-setAudioRoute`\n- `allow-sendDTMF`\n- `allow-updateCallDisplay`\n- `allow-reportSystemCallAnsweredElsewhere`\n- `allow-reportSystemCallDeclinedElsewhere`\n- `allow-reportSystemCallUnanswered`\n- `allow-declineSystemCall`"
         }
       ]
     }

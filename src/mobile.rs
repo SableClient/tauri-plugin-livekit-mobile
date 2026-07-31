@@ -15,7 +15,7 @@ use crate::{
         NativeCallFailureCode, NativeCallSnapshot, NativeConnectCallFields,
         NativeDisconnectCallFields, NativeSetCameraFields, NativeSetEncryptionKeyFields,
         NativeSetLocalVideoOverlayFields, NativeSetMicrophoneFields,
-        NativeSetRemoteVideoOverlayFields, NativeSetScreenShareFields, NativeReportIncomingCallFields,
+        NativeSetRemoteVideoOverlayFields, NativeSetScreenShareFields, NativeSetPiPEnabledFields, NativeReportIncomingCallFields,
         NativeStartSystemCallFields, NativeAnswerSystemCallFields, NativeEndSystemCallFields,
         NativeSetSystemCallMutedFields, NativeFulfillAnswerCallFields,
         NativeFulfillEndCallFields, NativeReportConnectedFields, SystemCallAction,
@@ -40,6 +40,7 @@ mod platform_commands {
     pub(super) const SET_MICROPHONE_ENABLED: &str = "setNativeCallMicrophoneEnabled";
     pub(super) const SET_CAMERA_ENABLED: &str = "setNativeCallCameraEnabled";
     pub(super) const SET_SCREEN_SHARE_ENABLED: &str = "setNativeCallScreenShareEnabled";
+    pub(super) const SET_PIP_ENABLED: &str = "setNativeCallPiPEnabled";
     pub(super) const SWITCH_CAMERA: &str = "switchNativeCallCamera";
     pub(super) const CANCEL_CONNECT: &str = "cancelNativeCallConnect";
     pub(super) const GET_STATE: &str = "getNativeCallState";
@@ -74,6 +75,7 @@ mod platform_commands {
     pub(super) const SET_MICROPHONE_ENABLED: &str = "setMicrophoneEnabled";
     pub(super) const SET_CAMERA_ENABLED: &str = "setCameraEnabled";
     pub(super) const SET_SCREEN_SHARE_ENABLED: &str = "setScreenShareEnabled";
+    pub(super) const SET_PIP_ENABLED: &str = "setNativeCallPiPEnabled";
     pub(super) const SWITCH_CAMERA: &str = "switchCamera";
     pub(super) const CANCEL_CONNECT: &str = "cancelConnect";
     pub(super) const GET_STATE: &str = "getState";
@@ -249,6 +251,14 @@ impl<R: Runtime> MobileBackend<R> {
         request: NativeSetScreenShareRequest<'_>,
     ) -> crate::Result<NativeCallSnapshot> {
         self.invoke(platform_commands::SET_SCREEN_SHARE_ENABLED, request)
+            .await
+    }
+
+    pub(crate) async fn set_native_call_pip_enabled(
+        &self,
+        request: NativeSetPiPEnabledRequest<'_>,
+    ) -> crate::Result<NativeCallSnapshot> {
+        self.invoke(platform_commands::SET_PIP_ENABLED, request)
             .await
     }
 
@@ -486,6 +496,13 @@ pub(crate) struct NativeSetCameraRequest<'a> {
 pub(crate) struct NativeSetScreenShareRequest<'a> {
     #[serde(flatten)]
     pub fields: NativeSetScreenShareFields<'a>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NativeSetPiPEnabledRequest<'a> {
+    #[serde(flatten)]
+    pub fields: NativeSetPiPEnabledFields<'a>,
 }
 
 #[derive(Debug, Serialize)]

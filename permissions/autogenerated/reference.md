@@ -10,6 +10,7 @@ Default permissions for the plugin
 - `allow-setNativeCallMicrophoneEnabled`
 - `allow-setNativeCallCameraEnabled`
 - `allow-setNativeCallScreenShareEnabled`
+- `allow-setNativeCallPiPEnabled`
 - `allow-switchNativeCallCamera`
 - `allow-setNativeCallRemoteVideoOverlay`
 - `allow-clearNativeCallRemoteVideoOverlay`
@@ -664,6 +665,32 @@ Enables the setNativeCallMicrophoneEnabled command without any pre-configured sc
 <td>
 
 Denies the setNativeCallMicrophoneEnabled command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:allow-setNativeCallPiPEnabled`
+
+</td>
+<td>
+
+Enables the setNativeCallPiPEnabled command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:deny-setNativeCallPiPEnabled`
+
+</td>
+<td>
+
+Denies the setNativeCallPiPEnabled command without any pre-configured scope.
 
 </td>
 </tr>

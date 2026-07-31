@@ -115,6 +115,11 @@ export interface SetNativeCallScreenShareEnabledRequest {
   enabled: boolean;
 }
 
+export interface SetNativeCallPiPEnabledRequest {
+  callId: string;
+  enabled: boolean;
+}
+
 export interface SwitchNativeCallCameraRequest {
   callId: string;
 }
@@ -349,6 +354,14 @@ export async function setNativeCallScreenShareEnabled(
     'plugin:livekit-mobile|setNativeCallScreenShareEnabled',
     { payload: request }
   );
+}
+
+export async function setNativeCallPiPEnabled(
+  request: SetNativeCallPiPEnabledRequest
+): Promise<NativeCallSnapshot> {
+  return await invoke<NativeCallSnapshot>('plugin:livekit-mobile|setNativeCallPiPEnabled', {
+    payload: request,
+  });
 }
 
 export async function switchNativeCallCamera(

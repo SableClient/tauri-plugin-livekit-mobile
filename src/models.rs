@@ -338,6 +338,13 @@ pub struct SetNativeCallScreenShareEnabledRequest {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SetNativeCallPiPEnabledRequest {
+    pub call_id: String,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SwitchNativeCallCameraRequest {
     pub call_id: String,
 }
@@ -586,6 +593,13 @@ pub struct NativeSetCameraFields<'a> {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NativeSetScreenShareFields<'a> {
+    pub call_id: &'a str,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeSetPiPEnabledFields<'a> {
     pub call_id: &'a str,
     pub enabled: bool,
 }
