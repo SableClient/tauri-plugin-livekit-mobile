@@ -7,16 +7,21 @@ import android.telecom.DisconnectCause
 import android.telecom.PhoneAccount
 import androidx.annotation.RequiresApi
 import androidx.core.telecom.CallAttributesCompat
+import androidx.core.telecom.CallControlResult
 import androidx.core.telecom.CallControlScope
+import androidx.core.telecom.CallEndpointCompat
 import androidx.core.telecom.CallsManager
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Android system-call integration on androidx.core.telecom.
@@ -39,6 +44,8 @@ import kotlinx.coroutines.launch
 internal class AndroidCallController(
     private val appContext: Context,
     private val plugin: Plugin,
+    private val onSystemDisconnect: () -> Unit = {},
+    private val onSystemSetInactive: () -> Unit = {},
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -48,6 +55,10 @@ internal class AndroidCallController(
 
         @Volatile
         var control: CallControlScope? = null
+
+        /** Completes once addCall either handed back a control scope or gave up,
+         * so callers can wait instead of racing the scope into existence. */
+        val settled = CompletableDeferred<Unit>()
     }
 
     /** callId → the coroutine and control scope owning that Telecom call. */
@@ -73,7 +84,8 @@ internal class AndroidCallController(
             callsManager = manager
             triggerEvent("provider_ready", JSObject())
         } catch (_: Exception) {
-            // Telecom may be unavailable on this device; stay a no-op.
+            // Telecom may be unavailable on this device; callsManager stays null
+            // so every surface reports the failure to its caller.
         }
     }
 
@@ -88,21 +100,69 @@ internal class AndroidCallController(
      * Shows an incoming call on the system UI (lock screen, notification).
      * The caller MUST post a foreground notification within 5s.
      */
-    fun reportIncomingCall(callId: String, callerName: String) {
-        val manager = telecomManager() ?: return
-        addCall(manager, callId, callerName, CallAttributesCompat.DIRECTION_INCOMING)
+    fun reportIncomingCall(callId: String, callerName: String, onResult: (Boolean) -> Unit = {}) {
+        val manager = telecomManager()
+        if (manager == null) {
+            onResult(false)
+            return
+        }
+        addCall(manager, callId, callerName, CallAttributesCompat.DIRECTION_INCOMING, onResult)
     }
 
     /** Starts an outgoing call in the system UI. */
-    fun startOutgoingCall(callId: String, callerName: String) {
-        val manager = telecomManager() ?: return
-        addCall(manager, callId, callerName, CallAttributesCompat.DIRECTION_OUTGOING)
+    fun startOutgoingCall(callId: String, callerName: String, onResult: (Boolean) -> Unit = {}) {
+        val manager = telecomManager()
+        if (manager == null) {
+            onResult(false)
+            return
+        }
+        addCall(manager, callId, callerName, CallAttributesCompat.DIRECTION_OUTGOING, onResult)
     }
 
     /** Answers a pending incoming call from the app side (JS initiated). */
-    fun answerCall(callId: String) {
-        val control = activeCalls[callId]?.control ?: return
-        control.launch { control.answer(CallAttributesCompat.CALL_TYPE_AUDIO_CALL) }
+    fun answerCall(callId: String, onResult: (Boolean) -> Unit) {
+        scope.launch {
+            val control = awaitControl(callId)
+            if (control == null) {
+                onResult(false)
+                return@launch
+            }
+            onResult(
+                transact { control.answer(CallAttributesCompat.CALL_TYPE_AUDIO_CALL) },
+            )
+        }
+    }
+
+    /** The endpoints Telecom currently offers for a call, bounded to the wire
+     * vocabulary. Empty when the call has no control scope, which keeps the
+     * app's route picker hidden instead of showing a stale list. */
+    fun audioRoutes(callId: String, onResult: (List<SystemAudioRoute>) -> Unit) {
+        scope.launch {
+            val control = awaitControl(callId)
+            if (control == null) {
+                onResult(emptyList())
+                return@launch
+            }
+            onResult(availableEndpoints(control).mapNotNull(::routeProjection))
+        }
+    }
+
+    /** Moves call audio to a route previously reported by [audioRoutes]. */
+    fun setAudioRoute(callId: String, routeId: String, onResult: (Boolean) -> Unit) {
+        scope.launch {
+            val control = awaitControl(callId)
+            if (control == null) {
+                onResult(false)
+                return@launch
+            }
+            val endpoint =
+                availableEndpoints(control).firstOrNull { it.identifier.toString() == routeId }
+            if (endpoint == null) {
+                onResult(false)
+                return@launch
+            }
+            onResult(transact { control.requestEndpointChange(endpoint) })
+        }
     }
 
     /** Ends every registered call and queues an end action for each. Telecom
@@ -116,16 +176,24 @@ internal class AndroidCallController(
     }
 
     /** Ends a call: both local hangup and remote-end path. */
-    fun endCall(callId: String) {
-        val active = activeCalls.remove(callId) ?: return
+    fun endCall(callId: String, onResult: (Boolean) -> Unit = {}) {
+        val active = activeCalls.remove(callId)
+        if (active == null) {
+            // Nothing registered under this id; ending it is already true.
+            onResult(true)
+            return
+        }
         val control = active.control
         if (control == null) {
             // Still waiting on Telecom to hand us a control scope: cancelling
             // the addCall coroutine is the only way to withdraw the call.
             active.job?.cancel()
+            onResult(true)
             return
         }
-        control.launch { control.disconnect(DisconnectCause(DisconnectCause.LOCAL)) }
+        scope.launch {
+            onResult(transact { control.disconnect(DisconnectCause(DisconnectCause.LOCAL)) })
+        }
     }
 
     @RequiresApi(Build.VERSION_CODES.O)
@@ -134,8 +202,12 @@ internal class AndroidCallController(
         callId: String,
         callerName: String,
         direction: Int,
+        onResult: (Boolean) -> Unit,
     ) {
-        if (activeCalls.containsKey(callId)) return
+        if (activeCalls.containsKey(callId)) {
+            onResult(true)
+            return
+        }
         val active = ActiveCall()
         activeCalls[callId] = active
         val attributes = CallAttributesCompat(
@@ -148,16 +220,32 @@ internal class AndroidCallController(
             // No hold/stream/transfer, matching the iOS call configuration.
             callCapabilities = 0,
         )
+        // Reports the outcome outside active.job: cancelling that job is how an
+        // app-side hangup withdraws a call that Telecom has not answered yet,
+        // and the caller still has to be told.
+        scope.launch {
+            awaitSettled(active)
+            onResult(active.control != null)
+        }
         active.job = scope.launch {
             try {
                 manager.addCall(
                     attributes,
                     onAnswer = { enqueue(SystemCallAction.answer(callId)) },
-                    onDisconnect = { enqueue(SystemCallAction.end(callId)) },
+                    onDisconnect = {
+                        // Telecom gives the app 5s to act on this, and JS may be
+                        // suspended, so tear the call down here and queue the
+                        // action for whenever JS wakes up.
+                        enqueue(SystemCallAction.end(callId))
+                        onSystemDisconnect()
+                    },
+                    // Nothing to restore: onSetInactive mutes into the snapshot,
+                    // so the unmute is the user's, not Telecom's.
                     onSetActive = {},
-                    onSetInactive = {},
+                    onSetInactive = { onSystemSetInactive() },
                 ) {
                     active.control = this
+                    active.settled.complete(Unit)
                     launch {
                         // The only mute signal core-telecom offers. Calls start
                         // unmuted, so the flow's initial value is not an event.
@@ -172,11 +260,62 @@ internal class AndroidCallController(
                 }
             } catch (_: Exception) {
                 // Telecom refused or dropped the call (permission, call limit,
-                // registration timeout). Nothing to surface beyond cleanup.
+                // registration timeout); the null control scope reports it.
             } finally {
+                active.settled.complete(Unit)
                 activeCalls.remove(callId, active)
             }
         }
+    }
+
+    /** Waits for the control scope addCall hands back; Telecom may take up to
+     * its own add timeout to get there, and answering/routing before then
+     * would silently do nothing. */
+    private suspend fun awaitControl(callId: String): CallControlScope? {
+        val active = activeCalls[callId] ?: return null
+        awaitSettled(active)
+        return active.control
+    }
+
+    private suspend fun awaitSettled(active: ActiveCall) {
+        withTimeoutOrNull(ADD_CALL_TIMEOUT_MS) { active.settled.await() }
+    }
+
+    /** Runs a Telecom transaction, reporting whether it was accepted. */
+    private suspend fun transact(block: suspend () -> CallControlResult): Boolean =
+        try {
+            block() is CallControlResult.Success
+        } catch (_: Exception) {
+            false
+        }
+
+    private suspend fun availableEndpoints(
+        control: CallControlScope,
+    ): List<CallEndpointCompat> =
+        try {
+            withTimeoutOrNull(ENDPOINT_TIMEOUT_MS) { control.availableEndpoints.first() }
+                ?: emptyList()
+        } catch (_: Exception) {
+            emptyList()
+        }
+
+    /** Device names never cross the bridge, so the bounded type doubles as the
+     * label. Streaming and unknown endpoints have no wire value and are
+     * dropped. */
+    private fun routeProjection(endpoint: CallEndpointCompat): SystemAudioRoute? {
+        val (type, label) =
+            when (endpoint.type) {
+                CallEndpointCompat.TYPE_EARPIECE ->
+                    NativeCallWire.ROUTE_EARPIECE to "Earpiece"
+                CallEndpointCompat.TYPE_SPEAKER ->
+                    NativeCallWire.ROUTE_SPEAKER to "Speaker"
+                CallEndpointCompat.TYPE_WIRED_HEADSET ->
+                    NativeCallWire.ROUTE_WIRED_HEADSET to "Wired headset"
+                CallEndpointCompat.TYPE_BLUETOOTH ->
+                    NativeCallWire.ROUTE_BLUETOOTH to "Bluetooth"
+                else -> return null
+            }
+        return SystemAudioRoute(endpoint.identifier.toString(), type, label)
     }
 
     // ── Pending action queue (JS-suspended path) ──────────────────────────
@@ -208,6 +347,28 @@ internal class AndroidCallController(
     private fun triggerEvent(event: String, data: JSObject) {
         plugin.trigger(event, data)
     }
+
+    private companion object {
+        /** CallsManager.ADD_CALL_TIMEOUT is internal to core-telecom; 5s is the
+         * documented bound addCall waits for Telecom to hand back a scope. */
+        const val ADD_CALL_TIMEOUT_MS = 5_000L
+        const val ENDPOINT_TIMEOUT_MS = 1_000L
+    }
+}
+
+// ── SystemAudioRoute (getAudioRoutes payload, mirrors Swift side) ─────────
+
+internal data class SystemAudioRoute(
+    val id: String,
+    val type: String,
+    val label: String,
+) {
+    fun toJSObject(): JSObject =
+        JSObject()
+            .put("id", id)
+            .put("name", label)
+            .put("type", type)
+            .put("label", label)
 }
 
 // ── SystemCallAction (trigger payload, mirrors Swift side) ────────────────

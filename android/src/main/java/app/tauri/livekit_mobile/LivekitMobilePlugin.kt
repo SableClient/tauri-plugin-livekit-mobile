@@ -16,6 +16,7 @@ import app.tauri.annotation.PermissionCallback
 import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Channel
 import app.tauri.plugin.Invoke
+import app.tauri.plugin.JSArray
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 
@@ -139,6 +140,12 @@ internal class DeclineSystemCallArgs {
     var reason: String = ""
 }
 
+@InvokeArg
+internal class SetAudioRouteArgs {
+    var callId: String = ""
+    var routeId: String = ""
+}
+
 @TauriPlugin(
     permissions = [
         Permission(
@@ -148,6 +155,14 @@ internal class DeclineSystemCallArgs {
         Permission(
             strings = ["android.permission.CAMERA"],
             alias = "camera",
+        ),
+        Permission(
+            strings = ["android.permission.BLUETOOTH_CONNECT"],
+            alias = "bluetooth",
+        ),
+        Permission(
+            strings = ["android.permission.POST_NOTIFICATIONS"],
+            alias = "notifications",
         ),
     ],
 )
@@ -173,6 +188,11 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
     private val callController = AndroidCallController(
         appContext = activity.applicationContext,
         plugin = this,
+        // Telecom allows 5s for a system-initiated hangup (lock screen, headset
+        // button, watch, Android Auto) and JS may be suspended, so the room and
+        // the foreground service have to go down here, not when JS drains.
+        onSystemDisconnect = { controller.disconnectActiveCall() },
+        onSystemSetInactive = { controller.muteForSystemInactive() },
     )
 
     private val callActionReceiver: BroadcastReceiver = object : BroadcastReceiver() {
@@ -184,6 +204,8 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
                     callController.endCallsFromNotification()
                     controller.disconnectActiveCall()
                 }
+                LivekitMobileForegroundService.ACTION_SERVICE_FAILED ->
+                    controller.reportForegroundServiceFailed()
             }
         }
     }
@@ -202,6 +224,10 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
     private var pendingConnect: PendingConnect? = null
     private var pendingMicrophone: PendingMicrophone? = null
     private var pendingCamera: PendingCamera? = null
+
+    /** Bluetooth and notifications are asked for once per process: a denial
+     * must not put a permission round-trip in front of every call. */
+    private var ancillaryPermissionsPrompted = false
 
     private data class PendingConnect(
         val invoke: Invoke,
@@ -262,19 +288,19 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
             invoke.resolve(controller.snapshotJson())
             return
         }
-        if (args.microphoneEnabled && !hasRecordAudioPermission()) {
+        val missing = missingCallPermissionAliases(args.microphoneEnabled)
+        if (missing.isNotEmpty()) {
+            ancillaryPermissionsPrompted = true
             val pending = PendingConnect(invoke, args)
             pendingConnect = pending
             try {
-                requestPermissionForAliases(arrayOf("microphone"), invoke, "permissionResult")
+                requestPermissionForAliases(missing, invoke, "permissionResult")
             } catch (_: Exception) {
                 pendingConnect = null
                 reject(pending.invoke, NativeCallWire.ERR_PERMISSION_DENIED)
             }
             return
         }
-        // Also register this as an outgoing system call.
-        callController.startOutgoingCall(args.callId, args.callId)
         controller.connect(
             args.callId,
             args.url,
@@ -369,6 +395,20 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
             return
         }
         controller.switchCamera(args.callId, invoke)
+    }
+
+    /** Neither surface exists on Android: the plugin renders video into overlay
+     * views over the WebView, not into a system PiP window, and it publishes no
+     * screen-share track. Declared so the failure is the bounded code the app
+     * already maps instead of Tauri's generic "method not implemented". */
+    @Command
+    fun setNativeCallScreenShareEnabled(invoke: Invoke) {
+        rejectUnavailable(invoke)
+    }
+
+    @Command
+    fun setNativeCallPiPEnabled(invoke: Invoke) {
+        rejectUnavailable(invoke)
     }
 
     @Command
@@ -472,10 +512,20 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
             return
         }
         val callId = args.uuid.ifBlank { java.util.UUID.randomUUID().toString() }
-        callController.reportIncomingCall(callId, args.callerName)
-        invoke.resolve(JSObject())
+        callController.reportIncomingCall(callId, args.callerName) { added ->
+            settle(invoke, added)
+        }
     }
 
+    /**
+     * Registers the call with Telecom and names the ongoing-call notification.
+     *
+     * Telecom fixes a call's attributes at addCall time and offers nothing like
+     * `CXProvider.reportCall(with:updated:)`, so this is the only point where a
+     * human-readable name can reach the system call: connectNativeCall
+     * deliberately does not add the call, since the only name it has is the
+     * call id.
+     */
     @Command
     fun startSystemCall(invoke: Invoke) {
         val args = runCatching { invoke.parseArgs(StartSystemCallArgs::class.java) }.getOrNull()
@@ -483,8 +533,13 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
             reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
             return
         }
-        callController.startOutgoingCall(args.callId, args.callerName.ifBlank { args.callId })
-        invoke.resolve(JSObject())
+        controller.setCallDisplayName(args.callId, args.callerName)
+        callController.startOutgoingCall(
+            args.callId,
+            args.callerName.ifBlank { args.callId },
+        ) { added ->
+            settle(invoke, added)
+        }
     }
 
     @Command
@@ -494,8 +549,9 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
             reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
             return
         }
-        callController.answerCall(args.callId)
-        invoke.resolve(JSObject())
+        callController.answerCall(args.callId) { answered ->
+            settle(invoke, answered)
+        }
     }
 
     @Command
@@ -505,8 +561,9 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
             reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
             return
         }
-        callController.endCall(args.callId)
-        invoke.resolve(JSObject())
+        callController.endCall(args.callId) { ended ->
+            settle(invoke, ended)
+        }
     }
 
     @Command
@@ -519,6 +576,41 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
         // androidx.core.telecom exposes mute as a read-only flow: there is no
         // app to system push equivalent to CXSetMutedCallAction.
         reject(invoke, NativeCallWire.ERR_UNAVAILABLE)
+    }
+
+    @Command
+    fun getAudioRoutes(invoke: Invoke) {
+        val args = runCatching { invoke.parseArgs(CallIdArgs::class.java) }.getOrNull()
+        if (args == null || args.callId.isBlank()) {
+            reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
+            return
+        }
+        callController.audioRoutes(args.callId) { routes ->
+            invoke.resolve(
+                JSObject()
+                    .put(
+                        "routes",
+                        JSArray().apply { routes.forEach { put(it.toJSObject()) } },
+                    )
+                    .put("receiver", controller.snapshotJson()),
+            )
+        }
+    }
+
+    @Command
+    fun setAudioRoute(invoke: Invoke) {
+        val args = runCatching { invoke.parseArgs(SetAudioRouteArgs::class.java) }.getOrNull()
+        if (args == null || args.callId.isBlank() || args.routeId.isBlank()) {
+            reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
+            return
+        }
+        callController.setAudioRoute(args.callId, args.routeId) { changed ->
+            if (changed) {
+                invoke.resolve(JSObject().put("receiver", controller.snapshotJson()))
+            } else {
+                rejectUnavailable(invoke)
+            }
+        }
     }
 
     @Command
@@ -632,8 +724,9 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
                 reject(connect.invoke, NativeCallWire.ERR_INVALID_REQUEST)
                 return
             }
-            if (hasRecordAudioPermission()) {
-                callController.startOutgoingCall(connect.args.callId, connect.args.callId)
+            // Bluetooth routing and the notification are requested alongside the
+            // microphone but never required: only RECORD_AUDIO can fail a call.
+            if (!connect.args.microphoneEnabled || hasRecordAudioPermission()) {
                 controller.connect(
                     connect.args.callId,
                     connect.args.url,
@@ -704,6 +797,16 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
         invoke.reject(NativeCallWire.messageFor(safeCode), safeCode)
     }
 
+    private fun rejectUnavailable(invoke: Invoke) {
+        reject(invoke, NativeCallWire.ERR_UNAVAILABLE)
+    }
+
+    /** A refused Telecom transaction (unregistered app, call limit, add
+     * timeout) must not read as success on the JS side. */
+    private fun settle(invoke: Invoke, accepted: Boolean) {
+        if (accepted) invoke.resolve(JSObject()) else rejectUnavailable(invoke)
+    }
+
     /**
      * Validates and decodes the optional initial key list: null means at least
      * one entry was malformed; an absent or empty list means a generic
@@ -719,13 +822,40 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
 
-    private fun hasRecordAudioPermission(): Boolean =
-        ContextCompat.checkSelfPermission(activity, android.Manifest.permission.RECORD_AUDIO) ==
+    private fun hasPermission(permission: String): Boolean =
+        ContextCompat.checkSelfPermission(activity, permission) ==
             PackageManager.PERMISSION_GRANTED
 
+    private fun hasRecordAudioPermission(): Boolean =
+        hasPermission(android.Manifest.permission.RECORD_AUDIO)
+
     private fun hasCameraPermission(): Boolean =
-        ContextCompat.checkSelfPermission(activity, android.Manifest.permission.CAMERA) ==
-            PackageManager.PERMISSION_GRANTED
+        hasPermission(android.Manifest.permission.CAMERA)
+
+    /**
+     * Aliases worth prompting for before a call starts: RECORD_AUDIO when the
+     * call wants the microphone, plus the two grants that degrade a call
+     * silently when missing. Without BLUETOOTH_CONNECT audioswitch disables
+     * Bluetooth outright on API 31+; without POST_NOTIFICATIONS the ongoing-call
+     * notification and its hangup action never appear on API 33+.
+     */
+    private fun missingCallPermissionAliases(microphoneEnabled: Boolean): Array<String> {
+        val aliases = mutableListOf<String>()
+        if (microphoneEnabled && !hasRecordAudioPermission()) aliases.add("microphone")
+        if (!ancillaryPermissionsPrompted) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                !hasPermission(android.Manifest.permission.BLUETOOTH_CONNECT)
+            ) {
+                aliases.add("bluetooth")
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                !hasPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+            ) {
+                aliases.add("notifications")
+            }
+        }
+        return aliases.toTypedArray()
+    }
 
     private fun hasChannel(args: ConnectNativeCallArgs): Boolean =
         runCatching { args.channel }.isSuccess

@@ -32,6 +32,7 @@ class LivekitMobileForegroundService : Service() {
         val callDirection = intent?.getStringExtra(EXTRA_CALL_DIRECTION) ?: DIRECTION_ONGOING
         val callerName = intent?.getStringExtra(EXTRA_CALLER_NAME) ?: ""
         val wantsMicrophone = intent?.getBooleanExtra(EXTRA_MICROPHONE, false) ?: false
+        val wantsCamera = intent?.getBooleanExtra(EXTRA_CAMERA, false) ?: false
         val wantsPlayback = intent?.getBooleanExtra(EXTRA_PLAYBACK, true) ?: true
 
         val notification = when (callDirection) {
@@ -44,6 +45,10 @@ class LivekitMobileForegroundService : Service() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 var types = 0
                 if (wantsMicrophone) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                // Without this a backgrounded video call loses its capture; the
+                // caller only sets the extra once CAMERA has been granted,
+                // since an unmet precondition throws instead.
+                if (wantsCamera) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
                 if (wantsPlayback) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
                 // FOREGROUND_SERVICE_TYPE_PHONE_CALL for targetSdk 34+ system-call usage.
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -62,6 +67,10 @@ class LivekitMobileForegroundService : Service() {
             false
         }
         if (!started) {
+            // A while-in-use type cannot start from the background and an
+            // ongoing self-managed Telecom call is not an exemption, so this
+            // has to reach the plugin rather than die here.
+            sendBroadcast(buildActionIntent(ACTION_SERVICE_FAILED))
             stopSelfResult(startId)
         }
         return START_NOT_STICKY
@@ -213,6 +222,10 @@ class LivekitMobileForegroundService : Service() {
     private fun buildOngoingCallNotification(callerName: String): Notification {
         val appInfo = applicationInfo
         val appLabel = appInfo.loadLabel(packageManager).toString()
+        // CallStyle renders an empty Person as a blank row, and "Call with "
+        // reads as a truncated string, so an unnamed call says so instead.
+        val displayName = callerName.ifBlank { appLabel }
+        val contentText = if (callerName.isBlank()) "Call in progress" else "Call with $callerName"
 
         val hangupIntent = buildActionIntent(ACTION_HANGUP)
         val hangupPending = PendingIntent.getBroadcast(
@@ -222,12 +235,12 @@ class LivekitMobileForegroundService : Service() {
 
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val person = Person.Builder()
-                .setName(callerName)
+                .setName(displayName)
                 .build()
             NotificationCompat.Builder(this, CHANNEL_ID_ONGOING)
                 .setSmallIcon(appInfo.icon)
                 .setContentTitle(appLabel)
-                .setContentText("Call with $callerName")
+                .setContentText(contentText)
                 .setCategory(Notification.CATEGORY_CALL)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
@@ -248,7 +261,7 @@ class LivekitMobileForegroundService : Service() {
             NotificationCompat.Builder(this, CHANNEL_ID_ONGOING)
                 .setSmallIcon(appInfo.icon)
                 .setContentTitle(appLabel)
-                .setContentText("Call with $callerName")
+                .setContentText(contentText)
                 .setCategory(Notification.CATEGORY_CALL)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
@@ -276,6 +289,7 @@ class LivekitMobileForegroundService : Service() {
     companion object {
         // Extras from the plugin to the service.
         const val EXTRA_MICROPHONE = "app.tauri.livekit_mobile.extra.MICROPHONE"
+        const val EXTRA_CAMERA = "app.tauri.livekit_mobile.extra.CAMERA"
         const val EXTRA_PLAYBACK = "app.tauri.livekit_mobile.extra.PLAYBACK"
         const val EXTRA_CALL_DIRECTION = "app.tauri.livekit_mobile.extra.CALL_DIRECTION"
         const val EXTRA_CALLER_NAME = "app.tauri.livekit_mobile.extra.CALLER_NAME"
@@ -288,6 +302,7 @@ class LivekitMobileForegroundService : Service() {
         const val ACTION_ANSWER = "answer"
         const val ACTION_DECLINE = "decline"
         const val ACTION_HANGUP = "hangup"
+        const val ACTION_SERVICE_FAILED = "service_failed"
 
         // Call direction values for EXTRA_CALL_DIRECTION.
         const val DIRECTION_INCOMING = "incoming"

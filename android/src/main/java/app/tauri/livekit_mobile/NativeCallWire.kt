@@ -20,6 +20,13 @@ internal object NativeCallWire {
     const val QUALITY_GOOD = "good"
     const val QUALITY_EXCELLENT = "excellent"
 
+    /** Bounded audio-route vocabulary mirrored from Telecom's endpoint types;
+     * streaming and unknown endpoints have no wire value. */
+    const val ROUTE_EARPIECE = "earpiece"
+    const val ROUTE_SPEAKER = "speaker"
+    const val ROUTE_WIRED_HEADSET = "wired_headset"
+    const val ROUTE_BLUETOOTH = "bluetooth"
+
     /** Single channel event protocol: full authoritative snapshot per emit. */
     const val EVENT_SNAPSHOT_CHANGED = "snapshot_changed"
 

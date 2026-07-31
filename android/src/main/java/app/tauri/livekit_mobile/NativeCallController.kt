@@ -9,6 +9,7 @@ import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSArray
 import app.tauri.plugin.JSObject
 import io.livekit.android.LiveKit
+import io.livekit.android.RoomOptions
 import io.livekit.android.e2ee.E2EEOptions
 import io.livekit.android.events.RoomEvent
 import io.livekit.android.events.collect
@@ -66,6 +67,9 @@ internal class NativeCallController(
     private var connectJob: Job? = null
     private var attempt = 0L
     private var intentionalDisconnect = false
+
+    /** Ongoing-call notification name; blank until the app supplies one. */
+    private var displayName = ""
 
     fun snapshotJson(): JSObject {
         val current = snapshot
@@ -148,7 +152,13 @@ internal class NativeCallController(
 
                 val newRoom =
                     try {
-                        LiveKit.create(appContext)
+                        // Both default to false in the SDK; iOS enables both, and
+                        // Android is the platform that can least afford to send
+                        // and decode layers nobody is displaying.
+                        LiveKit.create(
+                            appContext,
+                            RoomOptions(adaptiveStream = true, dynacast = true),
+                        )
                     } catch (_: Exception) {
                         failConnect(currentAttempt, null, invoke, NativeCallWire.ERR_CONNECT_FAILED)
                         return@launch
@@ -272,23 +282,59 @@ internal class NativeCallController(
         }
     }
 
-    fun setMicrophoneEnabled(callId: String, enabled: Boolean, invoke: Invoke) {
+    fun setMicrophoneEnabled(callId: String, enabled: Boolean, invoke: Invoke) =
+        applyMicrophone(callId, enabled, invoke)
+
+    /** Telecom deactivated the call (another call took priority): stop
+     * publishing audio. There is no hold capability to restore from, so the
+     * mute lands in the snapshot and the user decides when to undo it. */
+    fun muteForSystemInactive() {
+        val callId = snapshot.callId ?: return
+        applyMicrophone(callId, false, null)
+    }
+
+    /** Records the name the ongoing-call notification shows and refreshes the
+     * running service with it. Telecom fixes its own display name at addCall
+     * time, so this only reaches the notification. */
+    fun setCallDisplayName(callId: String, callerName: String) {
+        scope.launch {
+            if (snapshot.callId != callId || callerName.isBlank()) return@launch
+            displayName = callerName
+            startCallForegroundService(
+                preferMicrophone = snapshot.microphoneEnabled,
+                preferCamera = snapshot.cameraEnabled,
+            )
+        }
+    }
+
+    /** The service could not enter the foreground (a while-in-use type cannot
+     * start from the background): record it so JS sees a call running without
+     * one instead of nothing at all. */
+    fun reportForegroundServiceFailed() {
+        scope.launch {
+            if (!snapshot.isActive) return@launch
+            transition { copy(lastErrorCode = NativeCallWire.ERR_UNAVAILABLE) }
+            emitSnapshotChanged()
+        }
+    }
+
+    private fun applyMicrophone(callId: String, enabled: Boolean, invoke: Invoke?) {
         scope.launch {
             if (snapshot.callId != callId) {
-                invoke.resolve(snapshotJson())
+                invoke?.resolve(snapshotJson())
                 return@launch
             }
             val currentRoom = room
             if (currentRoom == null) {
-                reject(invoke, NativeCallWire.ERR_UNAVAILABLE)
+                invoke?.let { reject(it, NativeCallWire.ERR_UNAVAILABLE) }
                 return@launch
             }
             if (snapshot.microphoneEnabled == enabled) {
-                invoke.resolve(snapshotJson())
+                invoke?.resolve(snapshotJson())
                 return@launch
             }
             if (enabled && !hasMicrophonePermission()) {
-                reject(invoke, NativeCallWire.ERR_PERMISSION_DENIED)
+                invoke?.let { reject(it, NativeCallWire.ERR_PERMISSION_DENIED) }
                 return@launch
             }
             try {
@@ -296,13 +342,18 @@ internal class NativeCallController(
             } catch (_: Exception) {
                 transition { copy(lastErrorCode = NativeCallWire.ERR_MEDIA_FAILED) }
                 emitSnapshotChanged()
-                reject(invoke, NativeCallWire.ERR_MEDIA_FAILED)
+                invoke?.let { reject(it, NativeCallWire.ERR_MEDIA_FAILED) }
                 return@launch
             }
             transition { copy(microphoneEnabled = enabled) }
-            if (enabled) startCallForegroundService(preferMicrophone = true)
+            if (enabled) {
+                startCallForegroundService(
+                    preferMicrophone = true,
+                    preferCamera = snapshot.cameraEnabled,
+                )
+            }
             emitSnapshotChanged()
-            invoke.resolve(snapshotJson())
+            invoke?.resolve(snapshotJson())
         }
     }
 
@@ -334,6 +385,12 @@ internal class NativeCallController(
                 return@launch
             }
             transition { copy(cameraEnabled = enabled) }
+            // The camera service type has to follow the publication: without it
+            // the capture stops as soon as the app leaves the foreground.
+            startCallForegroundService(
+                preferMicrophone = snapshot.microphoneEnabled,
+                preferCamera = enabled,
+            )
             emitSnapshotChanged()
             invoke.resolve(snapshotJson())
         }
@@ -709,6 +766,7 @@ internal class NativeCallController(
         localVideoOverlay.clear()
         eventJob?.cancel()
         eventJob = null
+        displayName = ""
         val endingRoom = room
         room = null
         if (endingRoom != null) {
@@ -737,15 +795,24 @@ internal class NativeCallController(
         invoke.reject(NativeCallWire.messageFor(safeCode), safeCode)
     }
 
-    /** The microphone service type is only requested once RECORD_AUDIO has
-     * already been granted, or startForeground throws on Android 14+. */
-    private fun startCallForegroundService(preferMicrophone: Boolean) {
+    /** The microphone and camera service types are only requested once their
+     * runtime permission has already been granted, or startForeground throws on
+     * Android 14+. */
+    private fun startCallForegroundService(
+        preferMicrophone: Boolean,
+        preferCamera: Boolean = false,
+    ) {
         val intent =
             Intent(appContext, LivekitMobileForegroundService::class.java)
                 .putExtra(
                     LivekitMobileForegroundService.EXTRA_MICROPHONE,
                     preferMicrophone && hasMicrophonePermission(),
                 )
+                .putExtra(
+                    LivekitMobileForegroundService.EXTRA_CAMERA,
+                    preferCamera && hasCameraPermission(),
+                )
+                .putExtra(LivekitMobileForegroundService.EXTRA_CALLER_NAME, displayName)
                 .putExtra(LivekitMobileForegroundService.EXTRA_PLAYBACK, true)
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
