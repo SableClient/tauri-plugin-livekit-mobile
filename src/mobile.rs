@@ -11,18 +11,19 @@ use tokio::sync::mpsc;
 use crate::{
     error::Error,
     models::{
-        failure_code_from_raw, NativeCallCapabilities, NativeCallChannelEvent,
+        failure_code_from_raw, AnswerSystemCallRequest, ClearNativeCallLocalVideoOverlayRequest,
+        ClearNativeCallRemoteVideoOverlayRequest, CommandWithSnapshotResponse,
+        DeclineSystemCallRequest, DisconnectNativeCallRequest, EndSystemCallRequest,
+        FulfillAnswerCallRequest, FulfillEndCallRequest, GetAudioRoutesRequest,
+        GetAudioRoutesResponse, NativeCallCapabilities, NativeCallChannelEvent,
         NativeCallFailureCode, NativeCallSnapshot, NativeConnectCallFields,
-        NativeDisconnectCallFields, NativeSetCameraFields, NativeSetEncryptionKeyFields,
-        NativeSetLocalVideoOverlayFields, NativeSetMicrophoneFields,
-        NativeSetRemoteVideoOverlayFields, NativeSetScreenShareFields, NativeSetPiPEnabledFields, NativeReportIncomingCallFields,
-        NativeStartSystemCallFields, NativeAnswerSystemCallFields, NativeEndSystemCallFields,
-        NativeSetSystemCallMutedFields, NativeFulfillAnswerCallFields,
-        NativeFulfillEndCallFields, NativeReportConnectedFields, SystemCallAction,
-        NativeGetAudioRoutesFields, NativeSetAudioRouteFields, NativeSendDTMFFields,
-        NativeUpdateCallDisplayFields, NativeReportAnsweredElsewhereFields,
-        NativeReportDeclinedElsewhereFields, NativeReportUnansweredFields,
-        NativeDeclineSystemCallFields, CommandWithSnapshotResponse, GetAudioRoutesResponse,
+        ReportAnsweredElsewhereRequest, ReportConnectedRequest, ReportDeclinedElsewhereRequest,
+        ReportSystemIncomingCallRequest, ReportUnansweredRequest, SetAudioRouteRequest,
+        SetNativeCallCameraEnabledRequest, SetNativeCallEncryptionKeyRequest,
+        SetNativeCallLocalVideoOverlayRequest, SetNativeCallMicrophoneEnabledRequest,
+        SetNativeCallPiPEnabledRequest, SetNativeCallRemoteVideoOverlayRequest,
+        SetNativeCallScreenShareEnabledRequest, SetSystemCallMutedRequest, StartSystemCallRequest,
+        SwitchNativeCallCameraRequest, SystemCallAction, UpdateCallDisplayRequest,
     },
 };
 
@@ -56,11 +57,10 @@ mod platform_commands {
     pub(super) const DRAIN_PENDING_ACTIONS: &str = "drainPendingSystemCallActions";
     pub(super) const FULFILL_ANSWER_CALL: &str = "fulfillAnswerCall";
     pub(super) const FULFILL_END_CALL: &str = "fulfillEndCall";
-    pub(super) const REPORT_CONNECTED: &str = "reportConnected";
+    pub(super) const REPORT_CONNECTED: &str = "reportSystemCallConnected";
     pub(super) const SET_ENCRYPTION_KEY: &str = "setNativeCallEncryptionKey";
     pub(super) const GET_AUDIO_ROUTES: &str = "getAudioRoutes";
     pub(super) const SET_AUDIO_ROUTE: &str = "setAudioRoute";
-    pub(super) const SEND_DTMF: &str = "sendDTMF";
     pub(super) const UPDATE_CALL_DISPLAY: &str = "updateCallDisplay";
     pub(super) const REPORT_ANSWERED_ELSEWHERE: &str = "reportSystemCallAnsweredElsewhere";
     pub(super) const REPORT_DECLINED_ELSEWHERE: &str = "reportSystemCallDeclinedElsewhere";
@@ -95,7 +95,6 @@ mod platform_commands {
     pub(super) const SET_ENCRYPTION_KEY: &str = "setEncryptionKey";
     pub(super) const GET_AUDIO_ROUTES: &str = "getAudioRoutes";
     pub(super) const SET_AUDIO_ROUTE: &str = "setAudioRoute";
-    pub(super) const SEND_DTMF: &str = "sendDTMF";
     pub(super) const UPDATE_CALL_DISPLAY: &str = "updateCallDisplay";
     pub(super) const REPORT_ANSWERED_ELSEWHERE: &str = "reportSystemCallAnsweredElsewhere";
     pub(super) const REPORT_DECLINED_ELSEWHERE: &str = "reportSystemCallDeclinedElsewhere";
@@ -199,6 +198,16 @@ impl<R: Runtime> MobileBackend<R> {
             .await
     }
 
+    /// Unwraps the `receiver` key the CallKit commands wrap their snapshot in.
+    async fn invoke_for_snapshot(
+        &self,
+        command: &str,
+        payload: impl Serialize,
+    ) -> crate::Result<NativeCallSnapshot> {
+        let response: CommandWithSnapshotResponse = self.invoke(command, payload).await?;
+        Ok(response.receiver)
+    }
+
     pub(crate) async fn get_native_call_capabilities(
         &self,
     ) -> crate::Result<NativeCallCapabilities> {
@@ -217,14 +226,14 @@ impl<R: Runtime> MobileBackend<R> {
 
     pub(crate) async fn disconnect_native_call(
         &self,
-        request: NativeDisconnectCallRequest<'_>,
+        request: DisconnectNativeCallRequest,
     ) -> crate::Result<NativeCallSnapshot> {
         self.invoke(platform_commands::DISCONNECT, request).await
     }
 
     pub(crate) async fn cancel_native_call_connect(
         &self,
-        request: NativeDisconnectCallRequest<'_>,
+        request: DisconnectNativeCallRequest,
     ) -> crate::Result<NativeCallSnapshot> {
         self.invoke(platform_commands::CANCEL_CONNECT, request)
             .await
@@ -232,7 +241,7 @@ impl<R: Runtime> MobileBackend<R> {
 
     pub(crate) async fn set_native_call_microphone_enabled(
         &self,
-        request: NativeSetMicrophoneRequest<'_>,
+        request: SetNativeCallMicrophoneEnabledRequest,
     ) -> crate::Result<NativeCallSnapshot> {
         self.invoke(platform_commands::SET_MICROPHONE_ENABLED, request)
             .await
@@ -240,7 +249,7 @@ impl<R: Runtime> MobileBackend<R> {
 
     pub(crate) async fn set_native_call_camera_enabled(
         &self,
-        request: NativeSetCameraRequest<'_>,
+        request: SetNativeCallCameraEnabledRequest,
     ) -> crate::Result<NativeCallSnapshot> {
         self.invoke(platform_commands::SET_CAMERA_ENABLED, request)
             .await
@@ -248,7 +257,7 @@ impl<R: Runtime> MobileBackend<R> {
 
     pub(crate) async fn set_native_call_screen_share_enabled(
         &self,
-        request: NativeSetScreenShareRequest<'_>,
+        request: SetNativeCallScreenShareEnabledRequest,
     ) -> crate::Result<NativeCallSnapshot> {
         self.invoke(platform_commands::SET_SCREEN_SHARE_ENABLED, request)
             .await
@@ -256,7 +265,7 @@ impl<R: Runtime> MobileBackend<R> {
 
     pub(crate) async fn set_native_call_pip_enabled(
         &self,
-        request: NativeSetPiPEnabledRequest<'_>,
+        request: SetNativeCallPiPEnabledRequest,
     ) -> crate::Result<NativeCallSnapshot> {
         self.invoke(platform_commands::SET_PIP_ENABLED, request)
             .await
@@ -264,14 +273,14 @@ impl<R: Runtime> MobileBackend<R> {
 
     pub(crate) async fn switch_native_call_camera(
         &self,
-        request: NativeSwitchCameraRequest<'_>,
+        request: SwitchNativeCallCameraRequest,
     ) -> crate::Result<NativeCallSnapshot> {
         self.invoke(platform_commands::SWITCH_CAMERA, request).await
     }
 
     pub(crate) async fn set_native_call_remote_video_overlay(
         &self,
-        request: NativeSetRemoteVideoOverlayRequest<'_>,
+        request: SetNativeCallRemoteVideoOverlayRequest,
     ) -> crate::Result<NativeCallSnapshot> {
         self.invoke(platform_commands::SET_REMOTE_VIDEO_OVERLAY, request)
             .await
@@ -279,7 +288,7 @@ impl<R: Runtime> MobileBackend<R> {
 
     pub(crate) async fn clear_native_call_remote_video_overlay(
         &self,
-        request: NativeDisconnectCallRequest<'_>,
+        request: ClearNativeCallRemoteVideoOverlayRequest,
     ) -> crate::Result<NativeCallSnapshot> {
         self.invoke(platform_commands::CLEAR_REMOTE_VIDEO_OVERLAY, request)
             .await
@@ -287,7 +296,7 @@ impl<R: Runtime> MobileBackend<R> {
 
     pub(crate) async fn set_native_call_local_video_overlay(
         &self,
-        request: NativeSetLocalVideoOverlayRequest<'_>,
+        request: SetNativeCallLocalVideoOverlayRequest,
     ) -> crate::Result<NativeCallSnapshot> {
         self.invoke(platform_commands::SET_LOCAL_VIDEO_OVERLAY, request)
             .await
@@ -295,7 +304,7 @@ impl<R: Runtime> MobileBackend<R> {
 
     pub(crate) async fn clear_native_call_local_video_overlay(
         &self,
-        request: NativeDisconnectCallRequest<'_>,
+        request: ClearNativeCallLocalVideoOverlayRequest,
     ) -> crate::Result<NativeCallSnapshot> {
         self.invoke(platform_commands::CLEAR_LOCAL_VIDEO_OVERLAY, request)
             .await
@@ -303,7 +312,7 @@ impl<R: Runtime> MobileBackend<R> {
 
     pub(crate) async fn report_system_incoming_call(
         &self,
-        request: NativeReportIncomingCallRequest<'_>,
+        request: ReportSystemIncomingCallRequest,
     ) -> crate::Result<()> {
         self.invoke(platform_commands::REPORT_INCOMING_CALL, request)
             .await
@@ -311,7 +320,7 @@ impl<R: Runtime> MobileBackend<R> {
 
     pub(crate) async fn start_system_call(
         &self,
-        request: NativeStartSystemCallRequest<'_>,
+        request: StartSystemCallRequest,
     ) -> crate::Result<()> {
         self.invoke(platform_commands::START_SYSTEM_CALL, request)
             .await
@@ -319,23 +328,20 @@ impl<R: Runtime> MobileBackend<R> {
 
     pub(crate) async fn answer_system_call(
         &self,
-        request: NativeAnswerSystemCallRequest<'_>,
+        request: AnswerSystemCallRequest,
     ) -> crate::Result<()> {
         self.invoke(platform_commands::ANSWER_SYSTEM_CALL, request)
             .await
     }
 
-    pub(crate) async fn end_system_call(
-        &self,
-        request: NativeEndSystemCallRequest<'_>,
-    ) -> crate::Result<()> {
+    pub(crate) async fn end_system_call(&self, request: EndSystemCallRequest) -> crate::Result<()> {
         self.invoke(platform_commands::END_SYSTEM_CALL, request)
             .await
     }
 
     pub(crate) async fn set_system_call_muted(
         &self,
-        request: NativeSetSystemCallMutedRequest<'_>,
+        request: SetSystemCallMutedRequest,
     ) -> crate::Result<()> {
         self.invoke(platform_commands::SET_SYSTEM_CALL_MUTED, request)
             .await
@@ -350,7 +356,7 @@ impl<R: Runtime> MobileBackend<R> {
 
     pub(crate) async fn fulfill_answer_call(
         &self,
-        request: NativeFulfillAnswerCallRequest<'_>,
+        request: FulfillAnswerCallRequest,
     ) -> crate::Result<()> {
         self.invoke(platform_commands::FULFILL_ANSWER_CALL, request)
             .await
@@ -358,15 +364,15 @@ impl<R: Runtime> MobileBackend<R> {
 
     pub(crate) async fn fulfill_end_call(
         &self,
-        request: NativeFulfillEndCallRequest<'_>,
+        request: FulfillEndCallRequest,
     ) -> crate::Result<()> {
         self.invoke(platform_commands::FULFILL_END_CALL, request)
             .await
     }
 
-    pub(crate) async fn report_connected(
+    pub(crate) async fn report_system_call_connected(
         &self,
-        request: NativeReportConnectedRequest<'_>,
+        request: ReportConnectedRequest,
     ) -> crate::Result<()> {
         self.invoke(platform_commands::REPORT_CONNECTED, request)
             .await
@@ -374,7 +380,7 @@ impl<R: Runtime> MobileBackend<R> {
 
     pub(crate) async fn set_native_call_encryption_key(
         &self,
-        request: NativeSetEncryptionKeyRequest<'_>,
+        request: SetNativeCallEncryptionKeyRequest,
     ) -> crate::Result<NativeCallSnapshot> {
         self.invoke(platform_commands::SET_ENCRYPTION_KEY, request)
             .await
@@ -382,7 +388,7 @@ impl<R: Runtime> MobileBackend<R> {
 
     pub(crate) async fn get_audio_routes(
         &self,
-        request: NativeGetAudioRoutesRequest<'_>,
+        request: GetAudioRoutesRequest,
     ) -> crate::Result<GetAudioRoutesResponse> {
         self.invoke(platform_commands::GET_AUDIO_ROUTES, request)
             .await
@@ -390,30 +396,23 @@ impl<R: Runtime> MobileBackend<R> {
 
     pub(crate) async fn set_audio_route(
         &self,
-        request: NativeSetAudioRouteRequest<'_>,
-    ) -> crate::Result<CommandWithSnapshotResponse> {
-        self.invoke(platform_commands::SET_AUDIO_ROUTE, request)
+        request: SetAudioRouteRequest,
+    ) -> crate::Result<NativeCallSnapshot> {
+        self.invoke_for_snapshot(platform_commands::SET_AUDIO_ROUTE, request)
             .await
-    }
-
-    pub(crate) async fn send_dtmf(
-        &self,
-        request: NativeSendDTMFRequest<'_>,
-    ) -> crate::Result<CommandWithSnapshotResponse> {
-        self.invoke(platform_commands::SEND_DTMF, request).await
     }
 
     pub(crate) async fn update_call_display(
         &self,
-        request: NativeUpdateCallDisplayRequest<'_>,
-    ) -> crate::Result<CommandWithSnapshotResponse> {
-        self.invoke(platform_commands::UPDATE_CALL_DISPLAY, request)
+        request: UpdateCallDisplayRequest,
+    ) -> crate::Result<NativeCallSnapshot> {
+        self.invoke_for_snapshot(platform_commands::UPDATE_CALL_DISPLAY, request)
             .await
     }
 
     pub(crate) async fn report_system_call_answered_elsewhere(
         &self,
-        request: NativeReportAnsweredElsewhereRequest<'_>,
+        request: ReportAnsweredElsewhereRequest,
     ) -> crate::Result<()> {
         self.invoke(platform_commands::REPORT_ANSWERED_ELSEWHERE, request)
             .await
@@ -421,7 +420,7 @@ impl<R: Runtime> MobileBackend<R> {
 
     pub(crate) async fn report_system_call_declined_elsewhere(
         &self,
-        request: NativeReportDeclinedElsewhereRequest<'_>,
+        request: ReportDeclinedElsewhereRequest,
     ) -> crate::Result<()> {
         self.invoke(platform_commands::REPORT_DECLINED_ELSEWHERE, request)
             .await
@@ -429,7 +428,7 @@ impl<R: Runtime> MobileBackend<R> {
 
     pub(crate) async fn report_system_call_unanswered(
         &self,
-        request: NativeReportUnansweredRequest<'_>,
+        request: ReportUnansweredRequest,
     ) -> crate::Result<()> {
         self.invoke(platform_commands::REPORT_UNANSWERED, request)
             .await
@@ -437,7 +436,7 @@ impl<R: Runtime> MobileBackend<R> {
 
     pub(crate) async fn decline_system_call(
         &self,
-        request: NativeDeclineSystemCallRequest<'_>,
+        request: DeclineSystemCallRequest,
     ) -> crate::Result<()> {
         self.invoke(platform_commands::DECLINE_SYSTEM_CALL, request)
             .await
@@ -466,185 +465,6 @@ impl std::fmt::Debug for NativeConnectCallRequest<'_> {
             .field("fields", &self.fields)
             .finish_non_exhaustive()
     }
-}
-
-/// Native payload for the commands that take only a call id: disconnect,
-/// cancelConnect and switchCamera.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct NativeDisconnectCallRequest<'a> {
-    #[serde(flatten)]
-    pub fields: NativeDisconnectCallFields<'a>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct NativeSetMicrophoneRequest<'a> {
-    #[serde(flatten)]
-    pub fields: NativeSetMicrophoneFields<'a>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct NativeSetCameraRequest<'a> {
-    #[serde(flatten)]
-    pub fields: NativeSetCameraFields<'a>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct NativeSetScreenShareRequest<'a> {
-    #[serde(flatten)]
-    pub fields: NativeSetScreenShareFields<'a>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct NativeSetPiPEnabledRequest<'a> {
-    #[serde(flatten)]
-    pub fields: NativeSetPiPEnabledFields<'a>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct NativeSwitchCameraRequest<'a> {
-    #[serde(flatten)]
-    pub fields: NativeDisconnectCallFields<'a>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct NativeSetRemoteVideoOverlayRequest<'a> {
-    #[serde(flatten)]
-    pub fields: NativeSetRemoteVideoOverlayFields<'a>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct NativeSetLocalVideoOverlayRequest<'a> {
-    #[serde(flatten)]
-    pub fields: NativeSetLocalVideoOverlayFields<'a>,
-}
-
-/// Native payload for `setNativeCallEncryptionKey` (Android) /
-/// `setEncryptionKey` (iOS). `Debug` redacts the key via the contained fields.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct NativeSetEncryptionKeyRequest<'a> {
-    #[serde(flatten)]
-    pub fields: NativeSetEncryptionKeyFields<'a>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct NativeReportIncomingCallRequest<'a> {
-    #[serde(flatten)]
-    pub fields: NativeReportIncomingCallFields<'a>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct NativeStartSystemCallRequest<'a> {
-    #[serde(flatten)]
-    pub fields: NativeStartSystemCallFields<'a>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct NativeAnswerSystemCallRequest<'a> {
-    #[serde(flatten)]
-    pub fields: NativeAnswerSystemCallFields<'a>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct NativeEndSystemCallRequest<'a> {
-    #[serde(flatten)]
-    pub fields: NativeEndSystemCallFields<'a>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct NativeSetSystemCallMutedRequest<'a> {
-    #[serde(flatten)]
-    pub fields: NativeSetSystemCallMutedFields<'a>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct NativeFulfillAnswerCallRequest<'a> {
-    #[serde(flatten)]
-    pub fields: NativeFulfillAnswerCallFields<'a>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct NativeFulfillEndCallRequest<'a> {
-    #[serde(flatten)]
-    pub fields: NativeFulfillEndCallFields<'a>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct NativeReportConnectedRequest<'a> {
-    #[serde(flatten)]
-    pub fields: NativeReportConnectedFields<'a>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct NativeGetAudioRoutesRequest<'a> {
-    #[serde(flatten)]
-    pub fields: NativeGetAudioRoutesFields<'a>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct NativeSetAudioRouteRequest<'a> {
-    #[serde(flatten)]
-    pub fields: NativeSetAudioRouteFields<'a>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct NativeSendDTMFRequest<'a> {
-    #[serde(flatten)]
-    pub fields: NativeSendDTMFFields<'a>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct NativeUpdateCallDisplayRequest<'a> {
-    #[serde(flatten)]
-    pub fields: NativeUpdateCallDisplayFields<'a>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct NativeReportAnsweredElsewhereRequest<'a> {
-    #[serde(flatten)]
-    pub fields: NativeReportAnsweredElsewhereFields<'a>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct NativeReportDeclinedElsewhereRequest<'a> {
-    #[serde(flatten)]
-    pub fields: NativeReportDeclinedElsewhereFields<'a>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct NativeReportUnansweredRequest<'a> {
-    #[serde(flatten)]
-    pub fields: NativeReportUnansweredFields<'a>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct NativeDeclineSystemCallRequest<'a> {
-    #[serde(flatten)]
-    pub fields: NativeDeclineSystemCallFields<'a>,
 }
 
 pub fn init<R: Runtime, C: DeserializeOwned>(

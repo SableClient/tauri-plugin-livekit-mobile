@@ -8,9 +8,8 @@ use crate::models::*;
 use crate::NativeCallExt;
 use crate::Result;
 
-#[allow(non_snake_case)]
 #[tauri_command]
-pub(crate) async fn getNativeCallCapabilities<R: Runtime>(
+pub(crate) async fn get_native_call_capabilities<R: Runtime>(
     app: AppHandle<R>,
 ) -> Result<NativeCallCapabilities> {
     app.native_call_bridge()
@@ -18,9 +17,8 @@ pub(crate) async fn getNativeCallCapabilities<R: Runtime>(
         .await
 }
 
-#[allow(non_snake_case)]
 #[tauri_command]
-pub(crate) async fn connectNativeCall<R: Runtime>(
+pub(crate) async fn connect_native_call<R: Runtime>(
     app: AppHandle<R>,
     webview: Webview<R>,
     payload: ConnectNativeCallRequest,
@@ -30,9 +28,8 @@ pub(crate) async fn connectNativeCall<R: Runtime>(
         .await
 }
 
-#[allow(non_snake_case)]
 #[tauri_command]
-pub(crate) async fn disconnectNativeCall<R: Runtime>(
+pub(crate) async fn disconnect_native_call<R: Runtime>(
     app: AppHandle<R>,
     payload: DisconnectNativeCallRequest,
 ) -> Result<NativeCallSnapshot> {
@@ -41,9 +38,8 @@ pub(crate) async fn disconnectNativeCall<R: Runtime>(
         .await
 }
 
-#[allow(non_snake_case)]
 #[tauri_command]
-pub(crate) async fn setNativeCallMicrophoneEnabled<R: Runtime>(
+pub(crate) async fn set_native_call_microphone_enabled<R: Runtime>(
     app: AppHandle<R>,
     payload: SetNativeCallMicrophoneEnabledRequest,
 ) -> Result<NativeCallSnapshot> {
@@ -52,9 +48,8 @@ pub(crate) async fn setNativeCallMicrophoneEnabled<R: Runtime>(
         .await
 }
 
-#[allow(non_snake_case)]
 #[tauri_command]
-pub(crate) async fn setNativeCallCameraEnabled<R: Runtime>(
+pub(crate) async fn set_native_call_camera_enabled<R: Runtime>(
     app: AppHandle<R>,
     payload: SetNativeCallCameraEnabledRequest,
 ) -> Result<NativeCallSnapshot> {
@@ -63,9 +58,8 @@ pub(crate) async fn setNativeCallCameraEnabled<R: Runtime>(
         .await
 }
 
-#[allow(non_snake_case)]
 #[tauri_command]
-pub(crate) async fn setNativeCallScreenShareEnabled<R: Runtime>(
+pub(crate) async fn set_native_call_screen_share_enabled<R: Runtime>(
     app: AppHandle<R>,
     payload: SetNativeCallScreenShareEnabledRequest,
 ) -> Result<NativeCallSnapshot> {
@@ -74,9 +68,8 @@ pub(crate) async fn setNativeCallScreenShareEnabled<R: Runtime>(
         .await
 }
 
-#[allow(non_snake_case)]
 #[tauri_command]
-pub(crate) async fn setNativeCallPiPEnabled<R: Runtime>(
+pub(crate) async fn set_native_call_pip_enabled<R: Runtime>(
     app: AppHandle<R>,
     payload: SetNativeCallPiPEnabledRequest,
 ) -> Result<NativeCallSnapshot> {
@@ -85,9 +78,8 @@ pub(crate) async fn setNativeCallPiPEnabled<R: Runtime>(
         .await
 }
 
-#[allow(non_snake_case)]
 #[tauri_command]
-pub(crate) async fn switchNativeCallCamera<R: Runtime>(
+pub(crate) async fn switch_native_call_camera<R: Runtime>(
     app: AppHandle<R>,
     payload: SwitchNativeCallCameraRequest,
 ) -> Result<NativeCallSnapshot> {
@@ -96,9 +88,8 @@ pub(crate) async fn switchNativeCallCamera<R: Runtime>(
         .await
 }
 
-#[allow(non_snake_case)]
 #[tauri_command]
-pub(crate) async fn setNativeCallRemoteVideoOverlay<R: Runtime>(
+pub(crate) async fn set_native_call_remote_video_overlay<R: Runtime>(
     app: AppHandle<R>,
     payload: SetNativeCallRemoteVideoOverlayRequest,
 ) -> Result<NativeCallSnapshot> {
@@ -107,9 +98,8 @@ pub(crate) async fn setNativeCallRemoteVideoOverlay<R: Runtime>(
         .await
 }
 
-#[allow(non_snake_case)]
 #[tauri_command]
-pub(crate) async fn clearNativeCallRemoteVideoOverlay<R: Runtime>(
+pub(crate) async fn clear_native_call_remote_video_overlay<R: Runtime>(
     app: AppHandle<R>,
     payload: ClearNativeCallRemoteVideoOverlayRequest,
 ) -> Result<NativeCallSnapshot> {
@@ -118,9 +108,8 @@ pub(crate) async fn clearNativeCallRemoteVideoOverlay<R: Runtime>(
         .await
 }
 
-#[allow(non_snake_case)]
 #[tauri_command]
-pub(crate) async fn setNativeCallLocalVideoOverlay<R: Runtime>(
+pub(crate) async fn set_native_call_local_video_overlay<R: Runtime>(
     app: AppHandle<R>,
     payload: SetNativeCallLocalVideoOverlayRequest,
 ) -> Result<NativeCallSnapshot> {
@@ -129,9 +118,8 @@ pub(crate) async fn setNativeCallLocalVideoOverlay<R: Runtime>(
         .await
 }
 
-#[allow(non_snake_case)]
 #[tauri_command]
-pub(crate) async fn clearNativeCallLocalVideoOverlay<R: Runtime>(
+pub(crate) async fn clear_native_call_local_video_overlay<R: Runtime>(
     app: AppHandle<R>,
     payload: ClearNativeCallLocalVideoOverlayRequest,
 ) -> Result<NativeCallSnapshot> {
@@ -140,9 +128,8 @@ pub(crate) async fn clearNativeCallLocalVideoOverlay<R: Runtime>(
         .await
 }
 
-#[allow(non_snake_case)]
 #[tauri_command]
-pub(crate) async fn setNativeCallEncryptionKey<R: Runtime>(
+pub(crate) async fn set_native_call_encryption_key<R: Runtime>(
     app: AppHandle<R>,
     payload: SetNativeCallEncryptionKeyRequest,
 ) -> Result<NativeCallSnapshot> {
@@ -151,9 +138,8 @@ pub(crate) async fn setNativeCallEncryptionKey<R: Runtime>(
         .await
 }
 
-#[allow(non_snake_case)]
 #[tauri_command]
-pub(crate) async fn reportSystemIncomingCall<R: Runtime>(
+pub(crate) async fn report_system_incoming_call<R: Runtime>(
     app: AppHandle<R>,
     payload: ReportSystemIncomingCallRequest,
 ) -> Result<()> {
@@ -162,42 +148,32 @@ pub(crate) async fn reportSystemIncomingCall<R: Runtime>(
         .await
 }
 
-#[allow(non_snake_case)]
 #[tauri_command]
-pub(crate) async fn startSystemCall<R: Runtime>(
+pub(crate) async fn start_system_call<R: Runtime>(
     app: AppHandle<R>,
     payload: StartSystemCallRequest,
 ) -> Result<()> {
-    app.native_call_bridge()
-        .start_system_call(payload)
-        .await
+    app.native_call_bridge().start_system_call(payload).await
 }
 
-#[allow(non_snake_case)]
 #[tauri_command]
-pub(crate) async fn answerSystemCall<R: Runtime>(
+pub(crate) async fn answer_system_call<R: Runtime>(
     app: AppHandle<R>,
     payload: AnswerSystemCallRequest,
 ) -> Result<()> {
-    app.native_call_bridge()
-        .answer_system_call(payload)
-        .await
+    app.native_call_bridge().answer_system_call(payload).await
 }
 
-#[allow(non_snake_case)]
 #[tauri_command]
-pub(crate) async fn endSystemCall<R: Runtime>(
+pub(crate) async fn end_system_call<R: Runtime>(
     app: AppHandle<R>,
     payload: EndSystemCallRequest,
 ) -> Result<()> {
-    app.native_call_bridge()
-        .end_system_call(payload)
-        .await
+    app.native_call_bridge().end_system_call(payload).await
 }
 
-#[allow(non_snake_case)]
 #[tauri_command]
-pub(crate) async fn setSystemCallMuted<R: Runtime>(
+pub(crate) async fn set_system_call_muted<R: Runtime>(
     app: AppHandle<R>,
     payload: SetSystemCallMutedRequest,
 ) -> Result<()> {
@@ -206,9 +182,8 @@ pub(crate) async fn setSystemCallMuted<R: Runtime>(
         .await
 }
 
-#[allow(non_snake_case)]
 #[tauri_command]
-pub(crate) async fn drainPendingSystemCallActions<R: Runtime>(
+pub(crate) async fn drain_pending_system_call_actions<R: Runtime>(
     app: AppHandle<R>,
 ) -> Result<Vec<SystemCallAction>> {
     app.native_call_bridge()
@@ -216,31 +191,24 @@ pub(crate) async fn drainPendingSystemCallActions<R: Runtime>(
         .await
 }
 
-#[allow(non_snake_case)]
 #[tauri_command]
-pub(crate) async fn fulfillAnswerCall<R: Runtime>(
+pub(crate) async fn fulfill_answer_call<R: Runtime>(
     app: AppHandle<R>,
     payload: FulfillAnswerCallRequest,
 ) -> Result<()> {
-    app.native_call_bridge()
-        .fulfill_answer_call(payload)
-        .await
+    app.native_call_bridge().fulfill_answer_call(payload).await
 }
 
-#[allow(non_snake_case)]
 #[tauri_command]
-pub(crate) async fn fulfillEndCall<R: Runtime>(
+pub(crate) async fn fulfill_end_call<R: Runtime>(
     app: AppHandle<R>,
     payload: FulfillEndCallRequest,
 ) -> Result<()> {
-    app.native_call_bridge()
-        .fulfill_end_call(payload)
-        .await
+    app.native_call_bridge().fulfill_end_call(payload).await
 }
 
-#[allow(non_snake_case)]
 #[tauri_command]
-pub(crate) async fn reportSystemCallConnected<R: Runtime>(
+pub(crate) async fn report_system_call_connected<R: Runtime>(
     app: AppHandle<R>,
     payload: ReportConnectedRequest,
 ) -> Result<()> {
@@ -249,9 +217,8 @@ pub(crate) async fn reportSystemCallConnected<R: Runtime>(
         .await
 }
 
-#[allow(non_snake_case)]
 #[tauri_command]
-pub(crate) async fn getNativeCallState<R: Runtime>(
+pub(crate) async fn get_native_call_state<R: Runtime>(
     app: AppHandle<R>,
     webview: Webview<R>,
 ) -> Result<NativeCallSnapshot> {
@@ -260,53 +227,32 @@ pub(crate) async fn getNativeCallState<R: Runtime>(
         .await
 }
 
-#[allow(non_snake_case)]
 #[tauri_command]
-pub(crate) async fn getAudioRoutes<R: Runtime>(
+pub(crate) async fn get_audio_routes<R: Runtime>(
     app: AppHandle<R>,
     payload: GetAudioRoutesRequest,
 ) -> Result<GetAudioRoutesResponse> {
-    app.native_call_bridge()
-        .get_audio_routes(payload)
-        .await
+    app.native_call_bridge().get_audio_routes(payload).await
 }
 
-#[allow(non_snake_case)]
 #[tauri_command]
-pub(crate) async fn setAudioRoute<R: Runtime>(
+pub(crate) async fn set_audio_route<R: Runtime>(
     app: AppHandle<R>,
     payload: SetAudioRouteRequest,
 ) -> Result<NativeCallSnapshot> {
-    app.native_call_bridge()
-        .set_audio_route(payload)
-        .await
+    app.native_call_bridge().set_audio_route(payload).await
 }
 
-#[allow(non_snake_case)]
 #[tauri_command]
-pub(crate) async fn sendDTMF<R: Runtime>(
-    app: AppHandle<R>,
-    payload: SendDTMFRequest,
-) -> Result<NativeCallSnapshot> {
-    app.native_call_bridge()
-        .send_dtmf(payload)
-        .await
-}
-
-#[allow(non_snake_case)]
-#[tauri_command]
-pub(crate) async fn updateCallDisplay<R: Runtime>(
+pub(crate) async fn update_call_display<R: Runtime>(
     app: AppHandle<R>,
     payload: UpdateCallDisplayRequest,
 ) -> Result<NativeCallSnapshot> {
-    app.native_call_bridge()
-        .update_call_display(payload)
-        .await
+    app.native_call_bridge().update_call_display(payload).await
 }
 
-#[allow(non_snake_case)]
 #[tauri_command]
-pub(crate) async fn reportSystemCallAnsweredElsewhere<R: Runtime>(
+pub(crate) async fn report_system_call_answered_elsewhere<R: Runtime>(
     app: AppHandle<R>,
     payload: ReportAnsweredElsewhereRequest,
 ) -> Result<()> {
@@ -315,9 +261,8 @@ pub(crate) async fn reportSystemCallAnsweredElsewhere<R: Runtime>(
         .await
 }
 
-#[allow(non_snake_case)]
 #[tauri_command]
-pub(crate) async fn reportSystemCallDeclinedElsewhere<R: Runtime>(
+pub(crate) async fn report_system_call_declined_elsewhere<R: Runtime>(
     app: AppHandle<R>,
     payload: ReportDeclinedElsewhereRequest,
 ) -> Result<()> {
@@ -326,9 +271,8 @@ pub(crate) async fn reportSystemCallDeclinedElsewhere<R: Runtime>(
         .await
 }
 
-#[allow(non_snake_case)]
 #[tauri_command]
-pub(crate) async fn reportSystemCallUnanswered<R: Runtime>(
+pub(crate) async fn report_system_call_unanswered<R: Runtime>(
     app: AppHandle<R>,
     payload: ReportUnansweredRequest,
 ) -> Result<()> {
@@ -337,13 +281,10 @@ pub(crate) async fn reportSystemCallUnanswered<R: Runtime>(
         .await
 }
 
-#[allow(non_snake_case)]
 #[tauri_command]
-pub(crate) async fn declineSystemCall<R: Runtime>(
+pub(crate) async fn decline_system_call<R: Runtime>(
     app: AppHandle<R>,
     payload: DeclineSystemCallRequest,
 ) -> Result<()> {
-    app.native_call_bridge()
-        .decline_system_call(payload)
-        .await
+    app.native_call_bridge().decline_system_call(payload).await
 }

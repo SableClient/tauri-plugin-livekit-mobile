@@ -309,47 +309,47 @@ impl std::fmt::Debug for ConnectNativeCallRequest {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DisconnectNativeCallRequest {
     pub call_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetNativeCallMicrophoneEnabledRequest {
     pub call_id: String,
     pub enabled: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetNativeCallCameraEnabledRequest {
     pub call_id: String,
     pub enabled: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetNativeCallScreenShareEnabledRequest {
     pub call_id: String,
     pub enabled: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetNativeCallPiPEnabledRequest {
     pub call_id: String,
     pub enabled: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SwitchNativeCallCameraRequest {
     pub call_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetNativeCallRemoteVideoOverlayRequest {
     pub call_id: String,
@@ -362,13 +362,13 @@ pub struct SetNativeCallRemoteVideoOverlayRequest {
     pub device_pixel_ratio: f64,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClearNativeCallRemoteVideoOverlayRequest {
     pub call_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetNativeCallLocalVideoOverlayRequest {
     pub call_id: String,
@@ -379,20 +379,20 @@ pub struct SetNativeCallLocalVideoOverlayRequest {
     pub device_pixel_ratio: f64,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClearNativeCallLocalVideoOverlayRequest {
     pub call_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReportSystemIncomingCallRequest {
     pub uuid: String,
     pub caller_name: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartSystemCallRequest {
     pub call_id: String,
@@ -400,95 +400,92 @@ pub struct StartSystemCallRequest {
     pub caller_name: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AnswerSystemCallRequest {
     pub call_id: String,
     pub uuid: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EndSystemCallRequest {
     pub call_id: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_false")]
     pub remote_ended: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+fn is_false(v: &bool) -> bool {
+    !*v
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetSystemCallMutedRequest {
     pub call_id: String,
     pub muted: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetAudioRoutesRequest {
     pub call_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetAudioRouteRequest {
     pub call_id: String,
     pub route_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SendDTMFRequest {
-    pub call_id: String,
-    pub digits: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateCallDisplayRequest {
     pub call_id: String,
     pub caller_name: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub has_video: Option<bool>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReportAnsweredElsewhereRequest {
     pub call_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReportDeclinedElsewhereRequest {
     pub call_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReportUnansweredRequest {
     pub call_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeclineSystemCallRequest {
     pub call_id: String,
     pub reason: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FulfillAnswerCallRequest {
     pub uuid: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FulfillEndCallRequest {
     pub uuid: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReportConnectedRequest {
     pub uuid: String,
@@ -514,7 +511,7 @@ pub enum SystemCallActionKind {
 }
 
 /// Mid-call shared-E2EE key rotation/update for one participant identity.
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetNativeCallEncryptionKeyRequest {
     pub call_id: String,
@@ -570,203 +567,6 @@ impl std::fmt::Debug for NativeConnectCallFields<'_> {
     }
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeDisconnectCallFields<'a> {
-    pub call_id: &'a str,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeSetMicrophoneFields<'a> {
-    pub call_id: &'a str,
-    pub enabled: bool,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeSetCameraFields<'a> {
-    pub call_id: &'a str,
-    pub enabled: bool,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeSetScreenShareFields<'a> {
-    pub call_id: &'a str,
-    pub enabled: bool,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeSetPiPEnabledFields<'a> {
-    pub call_id: &'a str,
-    pub enabled: bool,
-}
-
-/// Native payload for `setNativeCallEncryptionKey` (Android) /
-/// `setEncryptionKey` (iOS): one shared-E2EE key for one identity.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeSetEncryptionKeyFields<'a> {
-    pub call_id: &'a str,
-    pub identity: &'a str,
-    pub key_index: u32,
-    pub key: &'a str,
-}
-
-// Key material must never land in logs: redact it in `Debug`.
-impl std::fmt::Debug for NativeSetEncryptionKeyFields<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("NativeSetEncryptionKeyFields")
-            .field("call_id", &self.call_id)
-            .field("identity", &self.identity)
-            .field("key_index", &self.key_index)
-            .field("key", &"[redacted]")
-            .finish()
-    }
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeSetRemoteVideoOverlayFields<'a> {
-    pub call_id: &'a str,
-    pub participant_identity: &'a str,
-    pub track_id: &'a str,
-    pub x: f64,
-    pub y: f64,
-    pub width: f64,
-    pub height: f64,
-    pub device_pixel_ratio: f64,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeSetLocalVideoOverlayFields<'a> {
-    pub call_id: &'a str,
-    pub x: f64,
-    pub y: f64,
-    pub width: f64,
-    pub height: f64,
-    pub device_pixel_ratio: f64,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeReportIncomingCallFields<'a> {
-    pub uuid: &'a str,
-    pub caller_name: &'a str,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeStartSystemCallFields<'a> {
-    pub call_id: &'a str,
-    pub uuid: &'a str,
-    pub caller_name: &'a str,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeAnswerSystemCallFields<'a> {
-    pub call_id: &'a str,
-    pub uuid: &'a str,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeEndSystemCallFields<'a> {
-    pub call_id: &'a str,
-    #[serde(skip_serializing_if = "is_false")]
-    pub remote_ended: bool,
-}
-
-fn is_false(v: &bool) -> bool {
-    !*v
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeSetSystemCallMutedFields<'a> {
-    pub call_id: &'a str,
-    pub muted: bool,
-}
-
-/// Native payload for `fulfillAnswerCall`.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeFulfillAnswerCallFields<'a> {
-    pub uuid: &'a str,
-}
-
-/// Native payload for `fulfillEndCall`.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeFulfillEndCallFields<'a> {
-    pub uuid: &'a str,
-}
-
-/// Native payload for `reportConnected`.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeReportConnectedFields<'a> {
-    pub uuid: &'a str,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeGetAudioRoutesFields<'a> {
-    pub call_id: &'a str,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeSetAudioRouteFields<'a> {
-    pub call_id: &'a str,
-    pub route_id: &'a str,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeSendDTMFFields<'a> {
-    pub call_id: &'a str,
-    pub digits: &'a str,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeUpdateCallDisplayFields<'a> {
-    pub call_id: &'a str,
-    pub caller_name: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub has_video: Option<bool>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeReportAnsweredElsewhereFields<'a> {
-    pub call_id: &'a str,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeReportDeclinedElsewhereFields<'a> {
-    pub call_id: &'a str,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeReportUnansweredFields<'a> {
-    pub call_id: &'a str,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeDeclineSystemCallFields<'a> {
-    pub call_id: &'a str,
-    pub reason: &'a str,
-}
-
 /// Wire shape for `getAudioRoutes` response: an array of audio routes plus
 /// the native room snapshot.
 #[derive(Debug, Serialize, Deserialize)]
@@ -777,7 +577,7 @@ pub struct GetAudioRoutesResponse {
 }
 
 /// Wire shape for commands that wrap a snapshot in a `receiver` key
-/// (`setAudioRoute`, `sendDTMF`, `updateCallDisplay`).
+/// (`setAudioRoute`, `updateCallDisplay`).
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandWithSnapshotResponse {
@@ -1167,11 +967,11 @@ mod tests {
         assert!(!debug.contains("c2VjcmV0LWtleQ=="));
 
         // Native key-rotation payload: camelCase wire, redacted Debug.
-        let rotation = NativeSetEncryptionKeyFields {
-            call_id: "call-1",
-            identity: "@alice:example.org",
+        let rotation = SetNativeCallEncryptionKeyRequest {
+            call_id: "call-1".into(),
+            identity: "@alice:example.org".into(),
             key_index: 2,
-            key: "c2VjcmV0LWtleQ==",
+            key: "c2VjcmV0LWtleQ==".into(),
         };
         assert_eq!(
             serde_json::to_value(&rotation).unwrap(),
@@ -1187,30 +987,33 @@ mod tests {
         assert!(!debug.contains("c2VjcmV0LWtleQ=="));
 
         assert_eq!(
-            serde_json::to_value(NativeDisconnectCallFields { call_id: "call-1" }).unwrap(),
+            serde_json::to_value(DisconnectNativeCallRequest {
+                call_id: "call-1".into()
+            })
+            .unwrap(),
             serde_json::json!({ "callId": "call-1" })
         );
         assert_eq!(
-            serde_json::to_value(NativeSetMicrophoneFields {
-                call_id: "call-1",
+            serde_json::to_value(SetNativeCallMicrophoneEnabledRequest {
+                call_id: "call-1".into(),
                 enabled: true
             })
             .unwrap(),
             serde_json::json!({ "callId": "call-1", "enabled": true })
         );
         assert_eq!(
-            serde_json::to_value(NativeSetCameraFields {
-                call_id: "call-1",
+            serde_json::to_value(SetNativeCallCameraEnabledRequest {
+                call_id: "call-1".into(),
                 enabled: false
             })
             .unwrap(),
             serde_json::json!({ "callId": "call-1", "enabled": false })
         );
         assert_eq!(
-            serde_json::to_value(NativeSetRemoteVideoOverlayFields {
-                call_id: "call-1",
-                participant_identity: "@alice:example.org",
-                track_id: "TR_abcdef",
+            serde_json::to_value(SetNativeCallRemoteVideoOverlayRequest {
+                call_id: "call-1".into(),
+                participant_identity: "@alice:example.org".into(),
+                track_id: "TR_abcdef".into(),
                 x: 10.0,
                 y: 20.0,
                 width: 320.0,
@@ -1230,8 +1033,8 @@ mod tests {
             })
         );
         assert_eq!(
-            serde_json::to_value(NativeSetLocalVideoOverlayFields {
-                call_id: "call-1",
+            serde_json::to_value(SetNativeCallLocalVideoOverlayRequest {
+                call_id: "call-1".into(),
                 x: 10.0,
                 y: 20.0,
                 width: 320.0,
@@ -1246,6 +1049,287 @@ mod tests {
                 "width": 320.0,
                 "height": 180.0,
                 "devicePixelRatio": 2.0
+            })
+        );
+    }
+
+    /// Serialized payload for one outbound native command.
+    fn wire(payload: impl Serialize) -> serde_json::Value {
+        serde_json::to_value(payload).unwrap()
+    }
+
+    /// `NativeConnectCallRequest` also carries the Tauri `Channel`, which has
+    /// no unit-testable serialization; the connect field set is pinned alone.
+    #[test]
+    fn native_connect_payload_pins_every_forwarded_field() {
+        let keys = [EncryptionKey {
+            identity: "@alice:example.org".into(),
+            key_index: 4,
+            key: "c2VjcmV0LWtleQ==".into(),
+        }];
+        let ice_servers = [IceServerConfig {
+            urls: vec!["turn:turn.example:3478".into()],
+            username: Some("turn-user".into()),
+            credential: Some("turn-pass".into()),
+        }];
+        assert_eq!(
+            wire(NativeConnectCallFields {
+                call_id: "call-1",
+                url: "wss://livekit.example",
+                token: "secret-jwt",
+                microphone_enabled: true,
+                encryption_keys: &keys,
+                ice_servers: Some(&ice_servers),
+                reconnect_attempts: Some(3),
+            }),
+            serde_json::json!({
+                "callId": "call-1",
+                "url": "wss://livekit.example",
+                "token": "secret-jwt",
+                "microphoneEnabled": true,
+                "encryptionKeys": [
+                    { "identity": "@alice:example.org", "keyIndex": 4, "key": "c2VjcmV0LWtleQ==" }
+                ],
+                "iceServers": [
+                    {
+                        "urls": ["turn:turn.example:3478"],
+                        "username": "turn-user",
+                        "credential": "turn-pass"
+                    }
+                ],
+                "reconnectAttempts": 3
+            })
+        );
+    }
+
+    #[test]
+    fn native_call_id_only_payloads_serialize_one_camel_case_field() {
+        for payload in [
+            wire(DisconnectNativeCallRequest {
+                call_id: "call-1".into(),
+            }),
+            wire(GetAudioRoutesRequest {
+                call_id: "call-1".into(),
+            }),
+            wire(ReportAnsweredElsewhereRequest {
+                call_id: "call-1".into(),
+            }),
+            wire(ReportDeclinedElsewhereRequest {
+                call_id: "call-1".into(),
+            }),
+            wire(ReportUnansweredRequest {
+                call_id: "call-1".into(),
+            }),
+        ] {
+            assert_eq!(payload, serde_json::json!({ "callId": "call-1" }));
+        }
+    }
+
+    #[test]
+    fn native_media_toggle_payloads_serialize_call_id_and_enabled() {
+        for payload in [
+            wire(SetNativeCallMicrophoneEnabledRequest {
+                call_id: "call-1".into(),
+                enabled: true,
+            }),
+            wire(SetNativeCallCameraEnabledRequest {
+                call_id: "call-1".into(),
+                enabled: true,
+            }),
+            wire(SetNativeCallScreenShareEnabledRequest {
+                call_id: "call-1".into(),
+                enabled: true,
+            }),
+            wire(SetNativeCallPiPEnabledRequest {
+                call_id: "call-1".into(),
+                enabled: true,
+            }),
+        ] {
+            assert_eq!(
+                payload,
+                serde_json::json!({ "callId": "call-1", "enabled": true })
+            );
+        }
+    }
+
+    #[test]
+    fn native_uuid_only_payloads_serialize_one_uuid_field() {
+        for payload in [
+            wire(FulfillAnswerCallRequest {
+                uuid: "3F2504E0-4F89-11D3-9A0C-0305E82C3301".into(),
+            }),
+            wire(FulfillEndCallRequest {
+                uuid: "3F2504E0-4F89-11D3-9A0C-0305E82C3301".into(),
+            }),
+            wire(ReportConnectedRequest {
+                uuid: "3F2504E0-4F89-11D3-9A0C-0305E82C3301".into(),
+            }),
+        ] {
+            assert_eq!(
+                payload,
+                serde_json::json!({ "uuid": "3F2504E0-4F89-11D3-9A0C-0305E82C3301" })
+            );
+        }
+    }
+
+    #[test]
+    fn native_system_call_payloads_pin_their_field_sets() {
+        assert_eq!(
+            wire(ReportSystemIncomingCallRequest {
+                uuid: "3F2504E0-4F89-11D3-9A0C-0305E82C3301".into(),
+                caller_name: "Alice".into(),
+            }),
+            serde_json::json!({
+                "uuid": "3F2504E0-4F89-11D3-9A0C-0305E82C3301",
+                "callerName": "Alice"
+            })
+        );
+        assert_eq!(
+            wire(StartSystemCallRequest {
+                call_id: "call-1".into(),
+                uuid: "3F2504E0-4F89-11D3-9A0C-0305E82C3301".into(),
+                caller_name: "Alice".into(),
+            }),
+            serde_json::json!({
+                "callId": "call-1",
+                "uuid": "3F2504E0-4F89-11D3-9A0C-0305E82C3301",
+                "callerName": "Alice"
+            })
+        );
+        assert_eq!(
+            wire(AnswerSystemCallRequest {
+                call_id: "call-1".into(),
+                uuid: "3F2504E0-4F89-11D3-9A0C-0305E82C3301".into(),
+            }),
+            serde_json::json!({
+                "callId": "call-1",
+                "uuid": "3F2504E0-4F89-11D3-9A0C-0305E82C3301"
+            })
+        );
+        // A local hangup omits `remoteEnded` entirely.
+        assert_eq!(
+            wire(EndSystemCallRequest {
+                call_id: "call-1".into(),
+                remote_ended: false,
+            }),
+            serde_json::json!({ "callId": "call-1" })
+        );
+        assert_eq!(
+            wire(EndSystemCallRequest {
+                call_id: "call-1".into(),
+                remote_ended: true,
+            }),
+            serde_json::json!({ "callId": "call-1", "remoteEnded": true })
+        );
+        assert_eq!(
+            wire(SetSystemCallMutedRequest {
+                call_id: "call-1".into(),
+                muted: true,
+            }),
+            serde_json::json!({ "callId": "call-1", "muted": true })
+        );
+        assert_eq!(
+            wire(DeclineSystemCallRequest {
+                call_id: "call-1".into(),
+                reason: "user_busy".into(),
+            }),
+            serde_json::json!({ "callId": "call-1", "reason": "user_busy" })
+        );
+    }
+
+    #[test]
+    fn native_audio_route_payload_pins_route_id() {
+        assert_eq!(
+            wire(SetAudioRouteRequest {
+                call_id: "call-1".into(),
+                route_id: "speaker".into(),
+            }),
+            serde_json::json!({ "callId": "call-1", "routeId": "speaker" })
+        );
+    }
+
+    #[test]
+    fn native_call_display_payload_omits_absent_has_video() {
+        assert_eq!(
+            wire(UpdateCallDisplayRequest {
+                call_id: "call-1".into(),
+                caller_name: "Alice".into(),
+                has_video: Some(true),
+            }),
+            serde_json::json!({
+                "callId": "call-1",
+                "callerName": "Alice",
+                "hasVideo": true
+            })
+        );
+        assert_eq!(
+            wire(UpdateCallDisplayRequest {
+                call_id: "call-1".into(),
+                caller_name: "Alice".into(),
+                has_video: None,
+            }),
+            serde_json::json!({ "callId": "call-1", "callerName": "Alice" })
+        );
+    }
+
+    #[test]
+    fn native_encryption_key_payload_pins_identity_index_and_material() {
+        assert_eq!(
+            wire(SetNativeCallEncryptionKeyRequest {
+                call_id: "call-1".into(),
+                identity: "@alice:example.org".into(),
+                key_index: 4,
+                key: "c2VjcmV0LWtleQ==".into(),
+            }),
+            serde_json::json!({
+                "callId": "call-1",
+                "identity": "@alice:example.org",
+                "keyIndex": 4,
+                "key": "c2VjcmV0LWtleQ=="
+            })
+        );
+    }
+
+    #[test]
+    fn native_video_overlay_payloads_pin_geometry() {
+        assert_eq!(
+            wire(SetNativeCallRemoteVideoOverlayRequest {
+                call_id: "call-1".into(),
+                participant_identity: "@alice:example.org".into(),
+                track_id: "TR_abcdef".into(),
+                x: -12.5,
+                y: 20.0,
+                width: 320.0,
+                height: 180.5,
+                device_pixel_ratio: 3.0,
+            }),
+            serde_json::json!({
+                "callId": "call-1",
+                "participantIdentity": "@alice:example.org",
+                "trackId": "TR_abcdef",
+                "x": -12.5,
+                "y": 20.0,
+                "width": 320.0,
+                "height": 180.5,
+                "devicePixelRatio": 3.0
+            })
+        );
+        assert_eq!(
+            wire(SetNativeCallLocalVideoOverlayRequest {
+                call_id: "call-1".into(),
+                x: -12.5,
+                y: 20.0,
+                width: 320.0,
+                height: 180.5,
+                device_pixel_ratio: 3.0,
+            }),
+            serde_json::json!({
+                "callId": "call-1",
+                "x": -12.5,
+                "y": 20.0,
+                "width": 320.0,
+                "height": 180.5,
+                "devicePixelRatio": 3.0
             })
         );
     }
