@@ -145,6 +145,11 @@ struct ReportConnectedArgs: Decodable {
   let uuid: String
 }
 
+struct SetNativeCallPiPEnabledArgs: Decodable {
+  let callId: String
+  let enabled: Bool
+}
+
 struct SetRemoteVideoOverlayArgs: Decodable {
   let callId: String
   let participantIdentity: String
@@ -288,6 +293,7 @@ struct BridgeCapabilities: Encodable {
   let camera: Bool
   let nativeVideoOverlay: Bool
   let callKit: Bool
+  let nativePiP: Bool
 }
 
 /// Tauri-facing surface; all work is serialized through ``RoomController`` on
@@ -326,10 +332,16 @@ final class LivekitMobilePlugin: Plugin {
   }
 
   @objc public func capabilities(_ invoke: Invoke) throws {
+    let piPAvailable: Bool
+    if #available(iOS 15.0, *) {
+      piPAvailable = true
+    } else {
+      piPAvailable = false
+    }
     invoke.resolve(
       BridgeCapabilities(
         microphone: true, backgroundAudio: true, camera: true, nativeVideoOverlay: true,
-        callKit: true))
+        callKit: true, nativePiP: piPAvailable))
   }
 
   @objc public func connect(_ invoke: Invoke) throws {
@@ -515,6 +527,21 @@ final class LivekitMobilePlugin: Plugin {
         return
       }
       controller.clearLocalVideoOverlay(callId: args.callId, invoke: invoke)
+    }
+  }
+
+  @objc public func setNativeCallPiPEnabled(_ invoke: Invoke) throws {
+    guard let args = try? invoke.parseArgs(SetNativeCallPiPEnabledArgs.self) else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+    Task { @MainActor [weak controller] in
+      guard let controller else {
+        reject(invoke, .unavailable)
+        return
+      }
+      controller.setNativeCallPiPEnabled(
+        callId: args.callId, enabled: args.enabled, invoke: invoke)
     }
   }
 

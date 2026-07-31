@@ -1,4 +1,5 @@
 import AVFoundation
+import AVKit
 import LiveKit
 import Tauri
 import UIKit
@@ -66,6 +67,18 @@ final class RoomController: NSObject {
   /// and track lifecycle delegate events can re-resolve and rebind (or
   /// clear) the attachment as publications come and go.
   private var overlaySelection: OverlaySelection?
+
+  // MARK: Native Picture-in-Picture (iOS 15+)
+
+  /// Whether native PiP is enabled for the current call. The JS lane
+  /// controls this via `setNativeCallPiPEnabled`. PiP uses the overlay
+  /// view's AVSampleBufferDisplayLayer as a content source.
+  private var pipEnabled: Bool = false
+  /// The active PiP view controller, non-nil only while PiP is visible.
+  private var pipViewController: Any?
+  /// Tracks whether we registered lifecycle observers
+  /// (`willResignActive` / `didBecomeActive`).
+  private var pipObserversRegistered: Bool = false
 
   private struct OverlaySelection {
     let participantIdentity: String
@@ -913,9 +926,189 @@ final class RoomController: NSObject {
     localConnectionQuality = nil
     removeOverlayView()
     removeLocalOverlayView()
+    if #available(iOS 15.0, *) { stopPiP() }
+    removePiPObservers()
     if let roomToClose {
       await roomToClose.disconnect()
     }
+  }
+
+  // MARK: - Native Picture-in-Picture (iOS 15+)
+
+  /// Enables or disables native PiP for the current call. When enabled, the
+  /// overlay renderer is switched to sample-buffer mode so that
+  /// `AVSampleBufferDisplayLayer` is accessible as the PiP content source.
+  /// `willResignActive` auto-starts PiP; `didBecomeActive` auto-stops it.
+  func setNativeCallPiPEnabled(callId requestedCallId: String, enabled: Bool, invoke: Invoke) {
+    guard callId == requestedCallId, let room else {
+      invoke.resolve(snapshot())
+      return
+    }
+    guard connectionState == .connected else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+
+    pipEnabled = enabled
+
+    if enabled {
+      registerPiPObservers()
+      // Switch overlay to sample-buffer mode so the display layer is available.
+      if let view = overlayView {
+        view.renderMode = .sampleBuffer
+        if let track = view.track {
+          // Re-attach to force renderer recreation with new mode.
+          view.track = nil
+          view.track = track
+        }
+      }
+      // If already in background, start PiP now.
+      if UIApplication.shared.applicationState == .background, let view = overlayView, view.track != nil {
+        doStartPiP()
+      }
+    } else {
+      if #available(iOS 15.0, *) { stopPiP() }
+      fallbackOverlayToMetal()
+    }
+
+    invoke.resolve(snapshot())
+  }
+
+  // MARK: PiP lifecycle (private)
+
+  private func registerPiPObservers() {
+    guard !pipObserversRegistered else { return }
+    pipObserversRegistered = true
+    NotificationCenter.default.addObserver(
+      self, selector: #selector(_willResignActive),
+      name: UIApplication.willResignActiveNotification, object: nil)
+    NotificationCenter.default.addObserver(
+      self, selector: #selector(_didBecomeActive),
+      name: UIApplication.didBecomeActiveNotification, object: nil)
+  }
+
+  private func removePiPObservers() {
+    guard pipObserversRegistered else { return }
+    pipObserversRegistered = false
+    NotificationCenter.default.removeObserver(
+      self, name: UIApplication.willResignActiveNotification, object: nil)
+    NotificationCenter.default.removeObserver(
+      self, name: UIApplication.didBecomeActiveNotification, object: nil)
+  }
+
+  /// Returns the sample buffer display layer from the overlay, forcing
+  /// sample-buffer mode if needed. Nil when there is no overlay or no track.
+  private func pipDisplayLayer() -> AVSampleBufferDisplayLayer? {
+    guard let view = overlayView, view.track != nil else { return nil }
+    // Ensure sample-buffer mode so the display layer exists.
+    if view.renderMode != .sampleBuffer {
+      view.renderMode = .sampleBuffer
+      if let t = view.track {
+        view.track = nil
+        view.track = t
+      }
+    }
+    return view.avSampleBufferDisplayLayer
+  }
+
+  /// Starts PiP using the overlay's sample buffer display layer.
+  private func doStartPiP() {
+    guard #available(iOS 15.0, *) else { return }
+    guard pipEnabled, pipViewController == nil else { return }
+    guard let displayLayer = pipDisplayLayer() else { return }
+    guard callId != nil else { return }
+
+    // The display layer must be moved FROM the in-app overlay TO the PiP
+    // controller's view hierarchy so the system mirrors its content into
+    // the PiP floating window. During PiP, the in-app overlay will be
+    // blank — this is acceptable because PiP only activates when the app
+    // backgrounds, where the in-app UI is not visible.
+
+    let vc = AVPictureInPictureVideoCallViewController()
+    vc.preferredContentSize = displayLayer.bounds.size
+
+    // Remove from the overlay's renderer view hierarchy.
+    displayLayer.removeFromSuperlayer()
+
+    // Place in the PiP controller's view.
+    displayLayer.frame = vc.view.bounds
+    vc.view.layer.addSublayer(displayLayer)
+
+    // The PiP VC must be in a window's view-controller hierarchy for
+    // AVPictureInPictureController to present it.
+    let sourceWindow = hostWebView?.window ?? overlayView?.window
+    if let window = sourceWindow {
+      window.rootViewController?.addChild(vc)
+      vc.didMove(toParent: window.rootViewController)
+    } else {
+      // No window available — return the layer to the overlay.
+      returnDisplayLayerToOverlay(displayLayer)
+      logRoom("PiP: no source window, cannot attach view controller")
+      return
+    }
+
+    pipViewController = vc
+    logRoom("PiP started via AVPictureInPictureVideoCallViewController")
+  }
+
+  /// Stops active PiP and releases the view controller.
+  @available(iOS 15.0, *)
+  private func stopPiP() {
+    guard let vc = pipViewController as? AVPictureInPictureVideoCallViewController else { return }
+
+    // Return the display layer back to the overlay view.
+    if let layer = vc.view.layer.sublayers?.first {
+      layer.removeFromSuperlayer()
+      returnDisplayLayerToOverlay(layer)
+    }
+
+    vc.willMove(toParent: nil)
+    vc.removeFromParent()
+    pipViewController = nil
+    fallbackOverlayToMetal()
+    logRoom("PiP stopped")
+  }
+
+  /// Places a display layer back into the overlay VideoView's renderer
+  /// subview (the SampleBufferVideoRenderer).
+  private func returnDisplayLayerToOverlay(_ layer: CALayer) {
+    guard let view = overlayView else { return }
+    // The SampleBufferVideoRenderer is the _primaryRenderer subview.
+    // Find it and insert the layer at index 0 (matching its original init).
+    for subview in view.subviews {
+      if subview.layer.sublayers?.isEmpty == true || subview.layer.sublayers == nil {
+        subview.layer.insertSublayer(layer, at: 0)
+        layer.frame = subview.bounds
+        return
+      }
+    }
+    // Fallback: the renderer may have been recreated; just add to view itself.
+    view.layer.insertSublayer(layer, at: 0)
+    layer.frame = view.bounds
+  }
+
+  /// Reverts the overlay renderer to Metal mode (default) when PiP is
+  /// disabled, so rendering uses the GPU path for best performance.
+  private func fallbackOverlayToMetal() {
+    guard let view = overlayView, view.renderMode != .auto else { return }
+    view.renderMode = .auto
+    if let t = view.track {
+      view.track = nil
+      view.track = t
+    }
+  }
+
+  // MARK: PiP notification handlers
+
+  @objc private func _willResignActive() {
+    guard pipEnabled, pipViewController == nil else { return }
+    guard connectionState == .connected || connectionState == .reconnecting else { return }
+    doStartPiP()
+  }
+
+  @objc private func _didBecomeActive() {
+    guard pipViewController != nil else { return }
+    if #available(iOS 15.0, *) { stopPiP() }
   }
 
   // MARK: - Shared helpers (main actor)
@@ -949,6 +1142,8 @@ final class RoomController: NSObject {
     callId = nil
     removeOverlayView()
     removeLocalOverlayView()
+    if #available(iOS 15.0, *) { stopPiP() }
+    removePiPObservers()
     emitSnapshotChanged()
     channel = nil
 
@@ -1250,6 +1445,7 @@ extension RoomController: RoomDelegate {
     connectionState = .failed
     removeOverlayView()
     removeLocalOverlayView()
+    if #available(iOS 15.0, *) { stopPiP() }
     emitSnapshotChanged()
   }
 
