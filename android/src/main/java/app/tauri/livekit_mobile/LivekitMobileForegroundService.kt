@@ -143,20 +143,6 @@ class LivekitMobileForegroundService : Service() {
                     ),
                 )
                 .setFullScreenIntent(buildFullScreenIntent(), true)
-                .addAction(
-                    NotificationCompat.Action.Builder(
-                        android.R.drawable.ic_menu_call,
-                        "Answer",
-                        answerPending,
-                    ).build(),
-                )
-                .addAction(
-                    NotificationCompat.Action.Builder(
-                        android.R.drawable.ic_menu_close_clear_cancel,
-                        "Decline",
-                        declinePending,
-                    ).build(),
-                )
         } else {
             // Pre-Android 12: simple ongoing notification.
             NotificationCompat.Builder(this, CHANNEL_ID_INCOMING)
@@ -198,13 +184,6 @@ class LivekitMobileForegroundService : Service() {
                         person,
                         hangupPending,
                     ),
-                )
-                .addAction(
-                    NotificationCompat.Action.Builder(
-                        android.R.drawable.ic_menu_call,
-                        "Hang up",
-                        hangupPending,
-                    ).build(),
                 )
         } else {
             NotificationCompat.Builder(this, CHANNEL_ID_ONGOING)
@@ -249,13 +228,6 @@ class LivekitMobileForegroundService : Service() {
                         person,
                         hangupPending,
                     ),
-                )
-                .addAction(
-                    NotificationCompat.Action.Builder(
-                        android.R.drawable.ic_menu_call,
-                        "Hang up",
-                        hangupPending,
-                    ).build(),
                 )
         } else {
             NotificationCompat.Builder(this, CHANNEL_ID_ONGOING)
