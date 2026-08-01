@@ -1,7 +1,6 @@
 import AVKit
 import Foundation
 import LiveKit
-import PushKit
 import Tauri
 import WebKit
 
@@ -368,6 +367,10 @@ final class LivekitMobilePlugin: Plugin {
       controller?.attachHostWebView(webview)
       controller?.callKitController = callKitController
       callKitController?.plugin = self
+      callKitController?.roomController = controller
+      // PushKit has to be registered every launch, foreground or background, or
+      // the VoIP token is never delivered and incoming calls never arrive.
+      callKitController?.setupPushKit()
     }
   }
 
@@ -381,7 +384,7 @@ final class LivekitMobilePlugin: Plugin {
     invoke.resolve(
       BridgeCapabilities(
         microphone: true, backgroundAudio: true, camera: true, nativeVideoOverlay: true,
-        callKit: true, nativePiP: piPAvailable))
+        callKit: callKitController.isCallKitAvailable, nativePiP: piPAvailable))
   }
 
   @objc public func connect(_ invoke: Invoke) throws {
@@ -616,8 +619,9 @@ final class LivekitMobilePlugin: Plugin {
         reject(invoke, .invalidRequest)
         return
       }
-      callKitController.reportIncomingCall(uuid: uuid, callerName: args.callerName)
-      invoke.resolve()
+      callKitController.reportIncomingCall(uuid: uuid, callerName: args.callerName) { code in
+        Self.settle(invoke, code)
+      }
     }
   }
 
@@ -636,8 +640,10 @@ final class LivekitMobilePlugin: Plugin {
         return
       }
       callKitController.startOutgoingCall(
-        uuid: uuid, callId: args.callId, callerName: args.callerName)
-      invoke.resolve()
+        uuid: uuid, callId: args.callId, callerName: args.callerName
+      ) { code in
+        Self.settle(invoke, code)
+      }
     }
   }
 
@@ -655,8 +661,9 @@ final class LivekitMobilePlugin: Plugin {
         reject(invoke, .invalidRequest)
         return
       }
-      callKitController.answerCall(uuid: uuid, callId: args.callId)
-      invoke.resolve()
+      callKitController.answerCall(uuid: uuid, callId: args.callId) { code in
+        Self.settle(invoke, code)
+      }
     }
   }
 
@@ -670,8 +677,11 @@ final class LivekitMobilePlugin: Plugin {
         reject(invoke, .unavailable)
         return
       }
-      callKitController.endCall(callId: args.callId, remoteEnded: args.remoteEnded ?? false)
-      invoke.resolve()
+      callKitController.endCall(
+        callId: args.callId, remoteEnded: args.remoteEnded ?? false
+      ) { code in
+        Self.settle(invoke, code)
+      }
     }
   }
 
@@ -685,8 +695,9 @@ final class LivekitMobilePlugin: Plugin {
         reject(invoke, .unavailable)
         return
       }
-      callKitController.setMuted(args.muted, for: args.callId)
-      invoke.resolve()
+      callKitController.setMuted(args.muted, for: args.callId) { code in
+        Self.settle(invoke, code)
+      }
     }
   }
 
@@ -866,23 +877,19 @@ final class LivekitMobilePlugin: Plugin {
     }
   }
 
-  // MARK: - PushKit VoIP forwarding
-
-  @objc public func pushRegistry(
-    _ registry: PKPushRegistry,
-    didReceiveIncomingPushWith payload: PKPushPayload,
-    for type: PKPushType,
-    completion: @escaping () -> Void
-  ) {
-    Task { @MainActor [weak callKitController] in
-      callKitController?.pushRegistry(
-        registry, didReceiveIncomingPushWith: payload,
-        for: type, completion: completion)
-    }
-  }
-
   private func reject(_ invoke: Invoke, _ code: BridgeFailureCode) {
     invoke.reject(code.message, code: code.rawValue)
+  }
+
+  /// Settles a CallKit command once the system has actually accepted or
+  /// rejected the underlying transaction or report. `nil` means it went
+  /// through; anything else is a bounded code from `CallKitController`.
+  private static func settle(_ invoke: Invoke, _ code: BridgeFailureCode?) {
+    if let code {
+      invoke.reject(code.message, code: code.rawValue)
+    } else {
+      invoke.resolve()
+    }
   }
 }
 

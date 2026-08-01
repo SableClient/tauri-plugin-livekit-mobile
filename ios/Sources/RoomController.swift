@@ -1101,7 +1101,22 @@ final class RoomController: NSObject {
       invoke.resolve(snapshot())
       return
     }
+    await clearCurrentCall(endSystemCall: true)
+    invoke.resolve(snapshot())
+  }
 
+  /// Native teardown for a CallKit end action the system raised itself (a
+  /// lock-screen decline, the system call UI's end button). The CX call is
+  /// already ending, so `endSystemCall` is false: re-entering `endCall` would
+  /// race the action's own fulfillment.
+  func tearDownForSystemEnd(callId requestedCallId: String) async {
+    guard callId == requestedCallId else { return }
+    await clearCurrentCall(endSystemCall: false)
+  }
+
+  /// Tears the current attempt down, emits the final idle snapshot on its
+  /// outgoing channel, and closes the room.
+  private func clearCurrentCall(endSystemCall: Bool) async {
     attempt &+= 1
     pipEnabled = false
 
@@ -1118,7 +1133,9 @@ final class RoomController: NSObject {
     keyProvider = nil
     lastError = nil
     localConnectionQuality = nil
-    if let callId { callKitController?.endCall(callId: callId, remoteEnded: false) }
+    if endSystemCall, let callId {
+      callKitController?.endCall(callId: callId, remoteEnded: false)
+    }
     callId = nil
     removeOverlayView()
     removeLocalOverlayView()
@@ -1129,7 +1146,6 @@ final class RoomController: NSObject {
     if let roomToClose {
       await roomToClose.disconnect()
     }
-    invoke.resolve(snapshot())
   }
 
   private func applyConnectionState(
@@ -1579,6 +1595,10 @@ extension RoomController: RoomDelegate {
 
   private func failCall(from room: Room) {
     guard room === self.room, connectionState != .idle, connectionState != .failed else { return }
+    // The call is over as far as LiveKit is concerned, so the system call UI
+    // must go with it; leaving it up strands a CX call the user can only end
+    // from the lock screen.
+    if let callId { callKitController?.endCall(callId: callId, remoteEnded: true, reason: .failed) }
     self.room = nil
     pipEnabled = false
     keyProvider = nil
