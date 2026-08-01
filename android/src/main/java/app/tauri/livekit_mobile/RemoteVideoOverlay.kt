@@ -14,6 +14,25 @@ import java.util.concurrent.TimeoutException
 import kotlin.math.ceil
 import kotlin.math.floor
 
+/**
+ * Resizes an overlay view without discarding the LayoutParams type its parent
+ * installed. `addView` converts a bare [ViewGroup.LayoutParams] into the
+ * parent's own subclass, so handing an already added child a fresh bare
+ * instance downgrades it and the next measure pass fails: FrameLayout's
+ * `measureChildWithMargins` casts to `MarginLayoutParams`.
+ */
+internal fun applyOverlaySize(view: View, width: Int, height: Int) {
+    val params = view.layoutParams
+    if (params == null) {
+        view.layoutParams = ViewGroup.LayoutParams(width, height)
+        return
+    }
+    if (params.width == width && params.height == height) return
+    params.width = width
+    params.height = height
+    view.layoutParams = params
+}
+
 /** Physical-pixel rect for the overlay view: CSS rect converted and clipped. */
 internal data class OverlayRect(
     val left: Int,
@@ -221,7 +240,7 @@ internal class RemoteVideoOverlay(
                             track.addRenderer(view)
                         }
 
-                        view.layoutParams = ViewGroup.LayoutParams(rect.width, rect.height)
+                        applyOverlaySize(view, rect.width, rect.height)
                         if (view.parent !== parent) {
                             (view.parent as? ViewGroup)?.removeView(view)
                             val webViewIndex = parent.indexOfChild(webView)
@@ -325,8 +344,7 @@ internal class RemoteVideoOverlay(
                             // A degenerate viewport keeps the tile hidden; the
                             // sink stays bound so video resumes after layout.
                             if (rect != null) {
-                                view.layoutParams =
-                                    ViewGroup.LayoutParams(rect.width, rect.height)
+                                applyOverlaySize(view, rect.width, rect.height)
                                 if (view.parent !== parent) {
                                     (view.parent as? ViewGroup)?.removeView(view)
                                     parent.addView(view)

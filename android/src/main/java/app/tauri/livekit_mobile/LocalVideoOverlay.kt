@@ -221,7 +221,7 @@ internal class LocalVideoOverlay(
         parent: ViewGroup,
         rect: OverlayRect,
     ) {
-        view.layoutParams = ViewGroup.LayoutParams(rect.width, rect.height)
+        applyOverlaySize(view, rect.width, rect.height)
         // Self-view only, matching iOS `.mirror` and the web `scaleX(-1)`.
         view.setMirror(true)
         if (view.parent !== parent) {
