@@ -15,8 +15,8 @@ use crate::{
         ClearNativeCallRemoteVideoOverlayRequest, CommandWithSnapshotResponse,
         DeclineSystemCallRequest, DisconnectNativeCallRequest, EndSystemCallRequest,
         FulfillAnswerCallRequest, FulfillEndCallRequest, GetAudioRoutesRequest,
-        GetAudioRoutesResponse, NativeCallCapabilities, NativeCallChannelEvent,
-        NativeCallFailureCode, NativeCallSnapshot, NativeConnectCallFields,
+        GetAudioRoutesResponse, NativeCallCapabilities, NativeCallCapabilitiesWire,
+        NativeCallChannelEvent, NativeCallFailureCode, NativeCallSnapshot, NativeConnectCallFields,
         ReportAnsweredElsewhereRequest, ReportConnectedRequest, ReportDeclinedElsewhereRequest,
         ReportSystemIncomingCallRequest, ReportUnansweredRequest, SetAudioRouteRequest,
         SetNativeCallCameraEnabledRequest, SetNativeCallEncryptionKeyRequest,
@@ -107,40 +107,6 @@ mod platform_commands {
 /// side may surface a microphone permission prompt before the room joins.
 const NATIVE_CALL_TIMEOUT: Duration = Duration::from_secs(30);
 const NATIVE_CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
-
-/// Mirrors the mobile capabilities responses: iOS reports
-/// `{ microphone, backgroundAudio, camera? }`, Android reports
-/// `{ microphone, audioPlayback, camera, .. }`. Absent fields degrade to
-/// `false`; a resolved invocation is proof the native room bridge exists.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct NativeCallCapabilitiesWire {
-    #[serde(default)]
-    microphone: bool,
-    #[serde(default, alias = "audioPlayback")]
-    background_audio: bool,
-    #[serde(default)]
-    camera: bool,
-    #[serde(default)]
-    native_video_overlay: bool,
-    #[serde(default)]
-    call_kit: bool,
-}
-
-impl From<NativeCallCapabilitiesWire> for NativeCallCapabilities {
-    fn from(native: NativeCallCapabilitiesWire) -> Self {
-        Self {
-            supported: true,
-            microphone: native.microphone,
-            background_audio: native.background_audio,
-            // These commands exist only in the native room bridge.
-            native_room: true,
-            camera: native.camera,
-            native_video_overlay: native.native_video_overlay,
-            call_kit: native.call_kit,
-        }
-    }
-}
 
 #[derive(Clone)]
 pub(crate) struct MobileBackend<R: Runtime> {

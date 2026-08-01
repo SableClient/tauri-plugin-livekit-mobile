@@ -104,6 +104,20 @@ impl std::fmt::Display for NativeCallError {
     }
 }
 
+/// What the native side can actually do on this device, so the guest can
+/// gate a control instead of calling a command that will only ever reject.
+///
+/// Every flag is resolved by the native side at runtime, not derived from
+/// the target platform: `picture_in_picture` in particular depends on the OS
+/// version (iOS asks `AVPictureInPictureController`, Android needs API 31+
+/// and an activity that declares `supportsPictureInPicture`), so a static
+/// per-platform constant would be wrong on both.
+///
+/// `call_kit` is narrower than `system_calls`: it covers the CallKit-only
+/// half of the system-call surface (`fulfillAnswerCall`, `fulfillEndCall`,
+/// `reportSystemCallConnected`, `setSystemCallMuted`, `updateCallDisplay`),
+/// which Android's Telecom backing has no equivalent for. `system_calls`
+/// covers registering a call with the OS at all.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NativeCallCapabilities {
@@ -113,7 +127,12 @@ pub struct NativeCallCapabilities {
     pub native_room: bool,
     pub camera: bool,
     pub native_video_overlay: bool,
+    pub screen_share: bool,
+    pub picture_in_picture: bool,
     pub call_kit: bool,
+    pub system_calls: bool,
+    pub audio_routes: bool,
+    pub push_kit: bool,
 }
 
 impl NativeCallCapabilities {
@@ -127,7 +146,66 @@ impl NativeCallCapabilities {
             native_room: supported,
             camera: supported,
             native_video_overlay: false,
+            screen_share: false,
+            picture_in_picture: false,
             call_kit: false,
+            system_calls: false,
+            audio_routes: false,
+            push_kit: false,
+        }
+    }
+}
+
+/// Mirrors the mobile capabilities responses: iOS reports
+/// `{ microphone, backgroundAudio, camera, nativeVideoOverlay, callKit,
+/// nativePiP }`, Android reports `{ microphone, audioPlayback, camera,
+/// nativeVideoOverlay, screenShare, .. }`. Absent fields degrade to `false`,
+/// so a native that predates a flag reports the feature missing rather than
+/// claiming it; a resolved invocation is proof the native room bridge exists.
+///
+/// Kept in `models.rs` (not `mobile.rs`, which only compiles on mobile
+/// targets) so the decode is regression-tested on the host.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeCallCapabilitiesWire {
+    #[serde(default)]
+    microphone: bool,
+    #[serde(default, alias = "audioPlayback")]
+    background_audio: bool,
+    #[serde(default)]
+    camera: bool,
+    #[serde(default)]
+    native_video_overlay: bool,
+    #[serde(default)]
+    screen_share: bool,
+    #[serde(default, alias = "nativePiP")]
+    picture_in_picture: bool,
+    #[serde(default)]
+    call_kit: bool,
+    #[serde(default)]
+    system_calls: bool,
+    #[serde(default)]
+    audio_routes: bool,
+    #[serde(default)]
+    push_kit: bool,
+}
+
+impl From<NativeCallCapabilitiesWire> for NativeCallCapabilities {
+    fn from(native: NativeCallCapabilitiesWire) -> Self {
+        Self {
+            supported: true,
+            microphone: native.microphone,
+            background_audio: native.background_audio,
+            // These commands exist only in the native room bridge.
+            native_room: true,
+            camera: native.camera,
+            native_video_overlay: native.native_video_overlay,
+            screen_share: native.screen_share,
+            picture_in_picture: native.picture_in_picture,
+            call_kit: native.call_kit,
+            system_calls: native.system_calls,
+            audio_routes: native.audio_routes,
+            push_kit: native.push_kit,
         }
     }
 }
@@ -1335,7 +1413,7 @@ mod tests {
     }
 
     #[test]
-    fn capabilities_serialize_camel_case_with_media_flags() {
+    fn capabilities_serialize_camel_case_with_every_feature_flag() {
         assert_eq!(
             serde_json::to_value(NativeCallCapabilities {
                 supported: true,
@@ -1344,7 +1422,12 @@ mod tests {
                 native_room: true,
                 camera: false,
                 native_video_overlay: true,
+                screen_share: true,
+                picture_in_picture: false,
                 call_kit: true,
+                system_calls: true,
+                audio_routes: true,
+                push_kit: false,
             })
             .unwrap(),
             serde_json::json!({
@@ -1354,8 +1437,192 @@ mod tests {
                 "nativeRoom": true,
                 "camera": false,
                 "nativeVideoOverlay": true,
-                "callKit": true
+                "screenShare": true,
+                "pictureInPicture": false,
+                "callKit": true,
+                "systemCalls": true,
+                "audioRoutes": true,
+                "pushKit": false
             })
         );
+    }
+
+    #[test]
+    fn desktop_capabilities_claim_no_native_feature() {
+        let current = NativeCallCapabilities::current();
+        assert!(!current.native_video_overlay);
+        assert!(!current.screen_share);
+        assert!(!current.picture_in_picture);
+        assert!(!current.call_kit);
+        assert!(!current.system_calls);
+        assert!(!current.audio_routes);
+        assert!(!current.push_kit);
+    }
+
+    /// The iOS capabilities payload as `LivekitMobilePlugin.capabilities`
+    /// resolves it, including the `nativePiP` spelling the Swift side uses.
+    #[test]
+    fn ios_capabilities_payload_decodes_with_the_native_pip_alias() {
+        let wire: NativeCallCapabilitiesWire = serde_json::from_value(serde_json::json!({
+            "microphone": true,
+            "backgroundAudio": true,
+            "camera": true,
+            "nativeVideoOverlay": true,
+            "callKit": true,
+            "nativePiP": true
+        }))
+        .unwrap();
+        let capabilities = NativeCallCapabilities::from(wire);
+        // A resolved invocation is proof the native room bridge exists.
+        assert!(capabilities.supported);
+        assert!(capabilities.native_room);
+        assert!(capabilities.background_audio);
+        assert!(capabilities.native_video_overlay);
+        assert!(capabilities.call_kit);
+        assert!(capabilities.picture_in_picture);
+        // Flags this native build does not report degrade to `false` rather
+        // than claiming a feature the guest would then call into.
+        assert!(!capabilities.screen_share);
+        assert!(!capabilities.system_calls);
+        assert!(!capabilities.audio_routes);
+        assert!(!capabilities.push_kit);
+    }
+
+    /// The Android capabilities payload as `getNativeCallCapabilities`
+    /// resolves it, including the `audioPlayback` spelling and the extra keys
+    /// the bridge has no flag for.
+    #[test]
+    fn android_capabilities_payload_decodes_with_the_audio_playback_alias() {
+        let wire: NativeCallCapabilitiesWire = serde_json::from_value(serde_json::json!({
+            "platform": "android",
+            "microphone": true,
+            "audioPlayback": true,
+            "foregroundService": true,
+            "backgroundJavascript": false,
+            "camera": true,
+            "nativeVideoOverlay": true,
+            "screenShare": false,
+            "devicePicker": false
+        }))
+        .unwrap();
+        let capabilities = NativeCallCapabilities::from(wire);
+        assert!(capabilities.supported);
+        assert!(capabilities.background_audio);
+        assert!(capabilities.camera);
+        assert!(!capabilities.screen_share);
+        assert!(!capabilities.picture_in_picture);
+        assert!(!capabilities.call_kit);
+    }
+
+    #[test]
+    fn capabilities_wire_degrades_an_empty_payload_to_no_feature() {
+        let capabilities = NativeCallCapabilities::from(
+            serde_json::from_value::<NativeCallCapabilitiesWire>(serde_json::json!({})).unwrap(),
+        );
+        assert!(capabilities.supported);
+        assert!(capabilities.native_room);
+        assert!(!capabilities.microphone);
+        assert!(!capabilities.background_audio);
+        assert!(!capabilities.camera);
+        assert!(!capabilities.native_video_overlay);
+        assert!(!capabilities.screen_share);
+        assert!(!capabilities.picture_in_picture);
+        assert!(!capabilities.call_kit);
+        assert!(!capabilities.system_calls);
+        assert!(!capabilities.audio_routes);
+        assert!(!capabilities.push_kit);
+    }
+
+    #[test]
+    fn system_call_actions_decode_the_bounded_kinds_with_optional_muted() {
+        let actions: Vec<SystemCallAction> = serde_json::from_value(serde_json::json!([
+            { "action": "answer", "uuid": "3F2504E0-4F89-11D3-9A0C-0305E82C3301" },
+            { "action": "end", "uuid": "3F2504E0-4F89-11D3-9A0C-0305E82C3302" },
+            { "action": "mute", "uuid": "3F2504E0-4F89-11D3-9A0C-0305E82C3303", "muted": true }
+        ]))
+        .unwrap();
+        assert_eq!(actions.len(), 3);
+        assert_eq!(actions[0].action, SystemCallActionKind::Answer);
+        assert_eq!(actions[0].muted, None);
+        assert_eq!(actions[1].action, SystemCallActionKind::End);
+        assert_eq!(actions[2].action, SystemCallActionKind::Mute);
+        assert_eq!(actions[2].muted, Some(true));
+
+        // `muted` is omitted rather than serialized as null when absent.
+        assert_eq!(
+            wire(SystemCallAction {
+                action: SystemCallActionKind::Answer,
+                uuid: "3F2504E0-4F89-11D3-9A0C-0305E82C3301".into(),
+                muted: None,
+            }),
+            serde_json::json!({
+                "action": "answer",
+                "uuid": "3F2504E0-4F89-11D3-9A0C-0305E82C3301"
+            })
+        );
+
+        // Out-of-vocabulary kinds drop the action instead of crossing over.
+        assert!(
+            serde_json::from_value::<SystemCallAction>(serde_json::json!({
+                "action": "hold",
+                "uuid": "3F2504E0-4F89-11D3-9A0C-0305E82C3301"
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn audio_routes_response_carries_the_routes_and_the_snapshot() {
+        let response: GetAudioRoutesResponse = serde_json::from_value(serde_json::json!({
+            "routes": [
+                { "id": "speaker", "name": "Speaker", "type": "speaker", "current": true },
+                { "id": "earpiece", "name": "Phone", "type": "earpiece", "current": false }
+            ],
+            "receiver": {
+                "revision": 3,
+                "callId": "call-1",
+                "connectionState": "connected",
+                "microphoneEnabled": true,
+                "cameraEnabled": false,
+                "participantCount": 1
+            }
+        }))
+        .unwrap();
+        // Routes are passed through untouched: the vocabulary is the native
+        // side's, and the guest renders it.
+        assert_eq!(response.routes.as_array().map(Vec::len), Some(2));
+        assert_eq!(response.routes[0]["id"], "speaker");
+        assert_eq!(response.receiver.revision, 3);
+        assert_eq!(
+            response.receiver.connection_state,
+            NativeCallConnectionState::Connected
+        );
+    }
+
+    /// `setAudioRoute` and `updateCallDisplay` wrap their snapshot in a
+    /// `receiver` key; the bridge unwraps it so the guest sees a bare
+    /// snapshot like every other command.
+    #[test]
+    fn snapshot_envelope_unwraps_the_receiver_key() {
+        let envelope: CommandWithSnapshotResponse = serde_json::from_value(serde_json::json!({
+            "receiver": {
+                "revision": 12,
+                "callId": "call-1",
+                "connectionState": "reconnecting",
+                "microphoneEnabled": false,
+                "cameraEnabled": true,
+                "participantCount": 2
+            }
+        }))
+        .unwrap();
+        assert_eq!(envelope.receiver.revision, 12);
+        assert!(envelope.receiver.camera_enabled);
+        assert!(envelope.receiver.is_live());
+
+        // A bare snapshot is not a valid envelope: the wrapper is required.
+        assert!(serde_json::from_value::<CommandWithSnapshotResponse>(
+            serde_json::json!({ "connectionState": "connected" })
+        )
+        .is_err());
     }
 }

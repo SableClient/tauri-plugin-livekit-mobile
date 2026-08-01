@@ -823,4 +823,82 @@ Denies the update_call_display command without any pre-configured scope.
 
 </td>
 </tr>
+
+<tr>
+<td>
+
+`livekit-mobile:native-room`
+
+</td>
+<td>
+
+Capability probe plus the native LiveKit room lifecycle: connect, disconnect, state, microphone, camera and shared-E2EE keys. The base set every host needs.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:video-overlays`
+
+</td>
+<td>
+
+Positioning the natively rendered remote and local video views over the webview. Needed only by a host that reports tile geometry.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:screen-share`
+
+</td>
+<td>
+
+Publishing a local screen-share track.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:picture-in-picture`
+
+</td>
+<td>
+
+Arming picture in picture for the call, so the system may enter it when the user leaves the app.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:system-calls`
+
+</td>
+<td>
+
+Registering the call with the operating system's call UI (CallKit on iOS, Telecom on Android) and answering the actions it reports back.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:audio-routes`
+
+</td>
+<td>
+
+Listing and selecting the call's audio output route.
+
+</td>
+</tr>
 </table>
