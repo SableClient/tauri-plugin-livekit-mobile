@@ -578,6 +578,13 @@ pub struct SystemCallAction {
     pub uuid: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub muted: Option<bool>,
+    /// Carried on `Answer` so a lock-screen answer can reach the right call
+    /// without the webview, which may still be suspended. iOS retains these
+    /// from the VoIP push payload; Android does not populate them yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub room_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caller_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1554,12 +1561,41 @@ mod tests {
                 action: SystemCallActionKind::Answer,
                 uuid: "3F2504E0-4F89-11D3-9A0C-0305E82C3301".into(),
                 muted: None,
+                room_id: None,
+                caller_name: None,
             }),
             serde_json::json!({
                 "action": "answer",
                 "uuid": "3F2504E0-4F89-11D3-9A0C-0305E82C3301"
             })
         );
+
+        // An answer drained while the webview slept carries the identity the
+        // guest needs to reach the call, since it cannot look the UUID up.
+        assert_eq!(
+            wire(SystemCallAction {
+                action: SystemCallActionKind::Answer,
+                uuid: "3F2504E0-4F89-11D3-9A0C-0305E82C3301".into(),
+                muted: None,
+                room_id: Some("!room:example.org".into()),
+                caller_name: Some("Ada".into()),
+            }),
+            serde_json::json!({
+                "action": "answer",
+                "uuid": "3F2504E0-4F89-11D3-9A0C-0305E82C3301",
+                "roomId": "!room:example.org",
+                "callerName": "Ada"
+            })
+        );
+
+        // A platform that does not populate them still decodes.
+        let bare = serde_json::from_value::<SystemCallAction>(serde_json::json!({
+            "action": "answer",
+            "uuid": "3F2504E0-4F89-11D3-9A0C-0305E82C3301"
+        }))
+        .unwrap();
+        assert_eq!(bare.room_id, None);
+        assert_eq!(bare.caller_name, None);
 
         // Out-of-vocabulary kinds drop the action instead of crossing over.
         assert!(
