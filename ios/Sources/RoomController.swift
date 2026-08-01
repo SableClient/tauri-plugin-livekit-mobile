@@ -111,11 +111,12 @@ final class RoomController: NSObject {
   /// The AVPictureInPictureVideoCallViewController that hosts the PiP
   /// renderer.
   private var pipViewController: Any? = nil
-  /// The PiP window's own renderer, bound to the same track as `overlayView`.
-  /// Apple's video-call PiP expects a separate content view controller with
-  /// the on-screen view as the distinct `activeVideoCallSourceView`, so the
-  /// in-app tile is never re-parented into the PiP window.
-  private var pipVideoView: VideoView?
+  /// The track the PiP view controller is registered on as a renderer, bound
+  /// to the same track as `overlayView`. Apple's video-call PiP expects a
+  /// separate content view controller with the on-screen view as the distinct
+  /// `activeVideoCallSourceView`, so the in-app tile is never re-parented into
+  /// the PiP window. Kept so a rebind can unregister from the previous track.
+  private var pipTrack: VideoTrack?
 
   private struct OverlaySelection {
     let participantIdentity: String
@@ -1025,13 +1026,14 @@ final class RoomController: NSObject {
       stopPiP()
       return
     }
-    guard let renderer = pipVideoView else {
+    guard let vc = pipViewController as? PiPVideoCallViewController else {
       armPiP(sourceView: sourceView, track: track)
       return
     }
-    if renderer.track !== track {
-      renderer.track = track
-    }
+    guard pipTrack !== track else { return }
+    pipTrack?.remove(videoRenderer: vc)
+    track.add(videoRenderer: vc)
+    pipTrack = track
   }
 
   /// Builds the PiP controller over its own renderer. The on-screen overlay is
@@ -1041,27 +1043,13 @@ final class RoomController: NSObject {
   private func armPiP(sourceView: VideoView, track: VideoTrack) {
     guard AVPictureInPictureController.isPictureInPictureSupported() else { return }
 
-    let vc = AVPictureInPictureVideoCallViewController()
-    // Drives the PiP window's aspect ratio.
+    let vc = PiPVideoCallViewController()
+    // Drives the PiP window's aspect ratio until the first frame refines it.
     if let dimensions = track.dimensions {
       vc.preferredContentSize = CGSize(
         width: CGFloat(dimensions.width), height: CGFloat(dimensions.height))
     }
-
-    // Sample-buffer rendering: the Metal path stops drawing once the app is
-    // backgrounded, which is exactly when the PiP window is on screen.
-    let renderer = VideoView()
-    renderer.isUserInteractionEnabled = false
-    renderer.renderMode = .sampleBuffer
-    renderer.translatesAutoresizingMaskIntoConstraints = false
-    vc.view.addSubview(renderer)
-    NSLayoutConstraint.activate([
-      renderer.leadingAnchor.constraint(equalTo: vc.view.leadingAnchor),
-      renderer.trailingAnchor.constraint(equalTo: vc.view.trailingAnchor),
-      renderer.topAnchor.constraint(equalTo: vc.view.topAnchor),
-      renderer.bottomAnchor.constraint(equalTo: vc.view.bottomAnchor),
-    ])
-    renderer.track = track
+    track.add(videoRenderer: vc)
 
     let source = AVPictureInPictureController.ContentSource(
       activeVideoCallSourceView: sourceView, contentViewController: vc)
@@ -1070,7 +1058,7 @@ final class RoomController: NSObject {
     controller.delegate = self
     pipController = controller
     pipViewController = vc
-    pipVideoView = renderer
+    pipTrack = track
     logRoom("PiP armed (auto-start on background)")
   }
 
@@ -1087,11 +1075,15 @@ final class RoomController: NSObject {
     releasePiP()
   }
 
-  /// Drops the PiP renderer, view controller and controller.
+  /// Unregisters the PiP renderer from its track and drops the view controller
+  /// and controller.
   private func releasePiP() {
-    pipVideoView?.track = nil
-    pipVideoView?.removeFromSuperview()
-    pipVideoView = nil
+    if #available(iOS 15.0, *),
+      let vc = pipViewController as? PiPVideoCallViewController
+    {
+      pipTrack?.remove(videoRenderer: vc)
+    }
+    pipTrack = nil
     pipViewController = nil
     pipController = nil
     logRoom("PiP released")
@@ -1253,15 +1245,45 @@ final class RoomController: NSObject {
     logRoom("Multitasking camera access enabled")
   }
 
-  /// The camera capture session was interrupted: the screen locked, another
-  /// app took the device, or multitasking camera access was refused. The
-  /// notification is posted on an arbitrary thread, so the work hops onto the
-  /// main actor with the rest of the state.
+  /// The interruption reasons that mean the camera is genuinely unusable for
+  /// the duration: the screen locked or the app backgrounded, another session
+  /// took the device, or multitasking camera access was refused.
+  ///
+  /// `audioDeviceInUseByAnotherClient` says nothing about the camera and fires
+  /// on ordinary audio contention, so acting on it muted the local video at
+  /// call start. `videoDeviceNotAvailableDueToSystemPressure` is left out too:
+  /// AVFoundation lifts it once thermal duress eases, and muting restarts the
+  /// capture session on unmute, which is the opposite of what a device under
+  /// pressure needs. Anything else, including reasons added by a future iOS,
+  /// is ignored rather than guessed at.
+  nonisolated static func interruptionStopsCamera(
+    _ reason: AVCaptureSession.InterruptionReason
+  ) -> Bool {
+    switch reason {
+    case .videoDeviceNotAvailableInBackground, .videoDeviceInUseByAnotherClient,
+      .videoDeviceNotAvailableWithMultipleForegroundApps:
+      return true
+    default:
+      return false
+    }
+  }
+
+  /// The camera capture session was interrupted. The notification is posted on
+  /// an arbitrary thread, so the work hops onto the main actor with the rest of
+  /// the state. It is also posted for every `AVCaptureSession` in the process
+  /// and for audio-only outages, so the reason is decoded into its enum and
+  /// filtered before anything is muted.
   @objc private nonisolated func handleCaptureSessionInterruption(
     _ notification: Notification
   ) {
-    let reason =
-      notification.userInfo?[AVCaptureSessionInterruptionReasonKey] as? Int ?? 0
+    guard
+      let raw = notification.userInfo?[AVCaptureSessionInterruptionReasonKey] as? Int,
+      let reason = AVCaptureSession.InterruptionReason(rawValue: raw)
+    else { return }
+    guard Self.interruptionStopsCamera(reason) else {
+      logRoom("Camera capture session interrupted, ignored: reason=\(raw)")
+      return
+    }
     Task { @MainActor [weak self] in
       await self?.muteCameraForInterruption(reason: reason)
     }
@@ -1296,8 +1318,18 @@ final class RoomController: NSObject {
   /// alone: `setCameraActive(false)` re-applies the `.voiceChat` audio mode and
   /// would move a still-video call from the speaker to the earpiece over a
   /// transient camera outage.
-  private func muteCameraForInterruption(reason: Int) async {
-    logRoom("Camera capture session interrupted: reason=\(reason)")
+  private func muteCameraForInterruption(
+    reason: AVCaptureSession.InterruptionReason
+  ) async {
+    logRoom("Camera capture session interrupted: reason=\(reason.rawValue)")
+    // `videoDeviceNotAvailableInBackground` describes a session interrupted
+    // because its app is no longer in the foreground, so the same reason while
+    // the app is active cannot be about the camera this call publishes.
+    if reason == .videoDeviceNotAvailableInBackground,
+      UIApplication.shared.applicationState == .active
+    {
+      return
+    }
     guard cameraEnabled, !cameraMutedByInterruption, let room,
       let publication = Self.cameraPublication(in: room)
     else { return }
@@ -1662,6 +1694,127 @@ extension RoomController: AVPictureInPictureControllerDelegate {
     Task { @MainActor [weak self] in
       guard let self, !pipEnabled else { return }
       releasePiP()
+    }
+  }
+}
+
+// MARK: - PiP content renderer (iOS 15+)
+
+/// The view the PiP window composites. Apple's video-call PiP takes the content
+/// view controller's own `view` and displays that view's backing layer, so the
+/// sample-buffer layer has to be the layer class itself and not a sublayer.
+@available(iOS 15.0, *)
+private final class SampleBufferView: UIView {
+  override class var layerClass: AnyClass { AVSampleBufferDisplayLayer.self }
+
+  /// Safe by construction: `layerClass` above decides the layer's type.
+  var displayLayer: AVSampleBufferDisplayLayer {
+    layer as! AVSampleBufferDisplayLayer
+  }
+}
+
+/// The PiP window's content, fed by registering as a ``VideoRenderer`` directly
+/// on the track.
+///
+/// A `VideoView` cannot back PiP: it tears down and recreates its primary
+/// renderer, and with it a brand new `AVSampleBufferDisplayLayer`, on any track,
+/// render-mode or should-render change, which leaves `AVPictureInPictureController`
+/// bound to a layer nothing enqueues into any more. A renderer registered on the
+/// track owns exactly one layer for the controller's whole lifetime.
+@available(iOS 15.0, *)
+final class PiPVideoCallViewController: AVPictureInPictureVideoCallViewController,
+  VideoRenderer
+{
+  private let renderingView = SampleBufferView()
+  /// Last applied rotation and content size. Frames carry both on every frame,
+  /// but re-applying them would run a layer transform and a PiP window resize
+  /// 30 times a second for nothing.
+  private var appliedRotation: VideoRotation?
+  private var appliedContentSize: CGSize?
+
+  override func loadView() {
+    renderingView.displayLayer.videoGravity = .resizeAspectFill
+    view = renderingView
+  }
+
+  // MARK: VideoRenderer
+
+  /// Declares the PiP window a real consumer of the track, so adaptive stream
+  /// keeps the subscription enabled and sized for it instead of following only
+  /// what the on-screen tile asks for.
+  var isAdaptiveStreamEnabled: Bool { true }
+
+  /// The PiP window's size once the system has laid the view out; zero before
+  /// that, which adaptive stream skips as "not known yet".
+  var adaptiveStreamSize: CGSize { view.bounds.size }
+
+  /// Called on LiveKit's render thread.
+  nonisolated func render(frame: VideoFrame) {
+    guard let sampleBuffer = frame.toCMSampleBuffer() else { return }
+    let rotation = frame.rotation
+    let contentSize = frame.rotatedSize
+    Task { @MainActor [weak self] in
+      self?.display(sampleBuffer, rotation: rotation, contentSize: contentSize)
+    }
+  }
+
+  private func display(
+    _ sampleBuffer: CMSampleBuffer, rotation: VideoRotation, contentSize: CGSize
+  ) {
+    let layer = renderingView.displayLayer
+    // The layer gives up its decoder resources when the app is backgrounded,
+    // which is exactly when the PiP window is on screen. Until it is flushed it
+    // silently drops every enqueue, so the window would stay black for the rest
+    // of the call. A failed status likewise only clears through a flush.
+    if #available(iOS 17.0, *) {
+      let renderer = layer.sampleBufferRenderer
+      if renderer.requiresFlushToResumeDecoding || renderer.status == .failed {
+        renderer.flush()
+      }
+      renderer.enqueue(sampleBuffer)
+    } else {
+      if layer.requiresFlushToResumeDecoding || layer.status == .failed {
+        layer.flush()
+      }
+      layer.enqueue(sampleBuffer)
+    }
+
+    if appliedRotation != rotation {
+      appliedRotation = rotation
+      layer.setAffineTransform(
+        CGAffineTransform(rotationAngle: rotation.rotationAngle))
+    }
+    // Drives the PiP window's aspect ratio.
+    if appliedContentSize != contentSize {
+      appliedContentSize = contentSize
+      preferredContentSize = contentSize
+    }
+  }
+}
+
+extension VideoRotation {
+  /// A frame's pixels are stored unrotated with the rotation carried alongside
+  /// them, and the layer displays the buffer as-is, so the layer has to be
+  /// transformed by that angle.
+  fileprivate var rotationAngle: CGFloat {
+    switch self {
+    case ._0: return 0
+    case ._90: return .pi / 2
+    case ._180: return .pi
+    case ._270: return 3 * .pi / 2
+    }
+  }
+}
+
+extension VideoFrame {
+  /// The frame's dimensions after its rotation is applied, which is what the
+  /// PiP window's aspect ratio has to follow.
+  fileprivate var rotatedSize: CGSize {
+    switch rotation {
+    case ._90, ._270:
+      return CGSize(width: Int(dimensions.height), height: Int(dimensions.width))
+    default:
+      return CGSize(width: Int(dimensions.width), height: Int(dimensions.height))
     }
   }
 }
