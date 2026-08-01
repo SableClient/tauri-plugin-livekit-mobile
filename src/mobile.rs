@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Serialize};
 use tauri::{
     ipc::{Channel, InvokeResponseBody},
     plugin::{mobile::PluginInvokeError, PluginApi, PluginHandle},
