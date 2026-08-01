@@ -20,5 +20,8 @@
             android:name="app.tauri.livekit_mobile.LivekitMobileForegroundService"
             android:exported="false"
             android:foregroundServiceType="microphone|camera|mediaPlayback|phoneCall" />
+        <receiver
+            android:name="app.tauri.livekit_mobile.LivekitMobileCallActionReceiver"
+            android:exported="false" />
     </application>
 </manifest>

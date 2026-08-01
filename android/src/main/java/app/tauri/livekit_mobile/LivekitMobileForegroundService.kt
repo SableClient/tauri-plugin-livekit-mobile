@@ -29,6 +29,7 @@ class LivekitMobileForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val callId = intent?.getStringExtra(EXTRA_CALL_ID) ?: ""
         val callDirection = intent?.getStringExtra(EXTRA_CALL_DIRECTION) ?: DIRECTION_ONGOING
         val callerName = intent?.getStringExtra(EXTRA_CALLER_NAME) ?: ""
         val wantsMicrophone = intent?.getBooleanExtra(EXTRA_MICROPHONE, false) ?: false
@@ -36,9 +37,9 @@ class LivekitMobileForegroundService : Service() {
         val wantsPlayback = intent?.getBooleanExtra(EXTRA_PLAYBACK, true) ?: true
 
         val notification = when (callDirection) {
-            DIRECTION_INCOMING -> buildIncomingCallNotification(callerName)
-            DIRECTION_OUTGOING -> buildOutgoingCallNotification(callerName)
-            else -> buildOngoingCallNotification(callerName)
+            DIRECTION_INCOMING -> buildIncomingCallNotification(callerName, callId)
+            DIRECTION_OUTGOING -> buildOutgoingCallNotification(callerName, callId)
+            else -> buildOngoingCallNotification(callerName, callId)
         }
 
         val started = try {
@@ -69,8 +70,11 @@ class LivekitMobileForegroundService : Service() {
         if (!started) {
             // A while-in-use type cannot start from the background and an
             // ongoing self-managed Telecom call is not an exemption, so this
-            // has to reach the plugin rather than die here.
-            sendBroadcast(buildActionIntent(ACTION_SERVICE_FAILED))
+            // has to reach the plugin rather than die here. The router is
+            // in-process, which this failure always is.
+            NativeCallActionRouter.shared.dispatch(
+                NativeCallAction(NativeCallActionKind.FOREGROUND_SERVICE_FAILED, callId),
+            )
             stopSelfResult(startId)
         }
         return START_NOT_STICKY
@@ -109,12 +113,12 @@ class LivekitMobileForegroundService : Service() {
 
     // ── Incoming call notification (Android 12+ CallStyle) ─────────────────
 
-    private fun buildIncomingCallNotification(callerName: String): Notification {
+    private fun buildIncomingCallNotification(callerName: String, callId: String): Notification {
         val appInfo = applicationInfo
         val appLabel = appInfo.loadLabel(packageManager).toString()
 
-        val declineIntent = buildActionIntent(ACTION_DECLINE)
-        val answerIntent = buildActionIntent(ACTION_ANSWER)
+        val declineIntent = buildActionIntent(ACTION_DECLINE, callId)
+        val answerIntent = buildActionIntent(ACTION_ANSWER, callId)
         val declinePending = PendingIntent.getBroadcast(
             this, 0, declineIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
@@ -160,11 +164,15 @@ class LivekitMobileForegroundService : Service() {
 
     // ── Outgoing call notification ─────────────────────────────────────────
 
-    private fun buildOutgoingCallNotification(callerName: String): Notification {
+    private fun buildOutgoingCallNotification(callerName: String, callId: String): Notification {
         val appInfo = applicationInfo
         val appLabel = appInfo.loadLabel(packageManager).toString()
+        // Same blank handling as the ongoing notification: an empty Person is a
+        // blank row and "Calling …" reads as a truncated string.
+        val displayName = callerName.ifBlank { appLabel }
+        val contentText = if (callerName.isBlank()) "Calling…" else "Calling $callerName…"
 
-        val hangupIntent = buildActionIntent(ACTION_HANGUP)
+        val hangupIntent = buildActionIntent(ACTION_HANGUP, callId)
         val hangupPending = PendingIntent.getBroadcast(
             this, 2, hangupIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
@@ -172,12 +180,12 @@ class LivekitMobileForegroundService : Service() {
 
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val person = Person.Builder()
-                .setName(callerName)
+                .setName(displayName)
                 .build()
             NotificationCompat.Builder(this, CHANNEL_ID_ONGOING)
                 .setSmallIcon(appInfo.icon)
                 .setContentTitle(appLabel)
-                .setContentText("Calling $callerName…")
+                .setContentText(contentText)
                 .setCategory(Notification.CATEGORY_CALL)
                 .setOngoing(true)
                 .setStyle(
@@ -190,7 +198,7 @@ class LivekitMobileForegroundService : Service() {
             NotificationCompat.Builder(this, CHANNEL_ID_ONGOING)
                 .setSmallIcon(appInfo.icon)
                 .setContentTitle(appLabel)
-                .setContentText("Calling $callerName…")
+                .setContentText(contentText)
                 .setCategory(Notification.CATEGORY_CALL)
                 .setOngoing(true)
         }
@@ -200,7 +208,7 @@ class LivekitMobileForegroundService : Service() {
 
     // ── Ongoing call notification ──────────────────────────────────────────
 
-    private fun buildOngoingCallNotification(callerName: String): Notification {
+    private fun buildOngoingCallNotification(callerName: String, callId: String): Notification {
         val appInfo = applicationInfo
         val appLabel = appInfo.loadLabel(packageManager).toString()
         // CallStyle renders an empty Person as a blank row, and "Call with "
@@ -208,7 +216,7 @@ class LivekitMobileForegroundService : Service() {
         val displayName = callerName.ifBlank { appLabel }
         val contentText = if (callerName.isBlank()) "Call in progress" else "Call with $callerName"
 
-        val hangupIntent = buildActionIntent(ACTION_HANGUP)
+        val hangupIntent = buildActionIntent(ACTION_HANGUP, callId)
         val hangupPending = PendingIntent.getBroadcast(
             this, 3, hangupIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
@@ -246,11 +254,17 @@ class LivekitMobileForegroundService : Service() {
 
     // ── Helpers ────────────────────────────────────────────────────────────
 
-    /** Builds a broadcast intent to be handled by the plugin for system call actions. */
-    private fun buildActionIntent(action: String): Intent =
-        Intent(ACTION_BROADCAST)
-            .setPackage(packageName)
+    /**
+     * Builds the broadcast a notification button sends.
+     *
+     * Explicit (it names the receiver class) so it is not an implicit broadcast,
+     * and it carries the call it belongs to: the plugin instance that handles it
+     * may not be the one that started this service.
+     */
+    private fun buildActionIntent(action: String, callId: String): Intent =
+        Intent(this, LivekitMobileCallActionReceiver::class.java)
             .putExtra(EXTRA_ACTION, action)
+            .putExtra(EXTRA_CALL_ID, callId)
 
     private fun buildFullScreenIntent(): PendingIntent {
         val intent = packageManager.getLaunchIntentForPackage(packageName)
@@ -301,11 +315,9 @@ class LivekitMobileForegroundService : Service() {
         const val EXTRA_PLAYBACK = "app.tauri.livekit_mobile.extra.PLAYBACK"
         const val EXTRA_CALL_DIRECTION = "app.tauri.livekit_mobile.extra.CALL_DIRECTION"
         const val EXTRA_CALLER_NAME = "app.tauri.livekit_mobile.extra.CALLER_NAME"
+        const val EXTRA_CALL_ID = "app.tauri.livekit_mobile.extra.CALL_ID"
 
-        // Broadcast action from notification buttons back to the plugin.
-        const val ACTION_BROADCAST = "app.tauri.livekit_mobile.CALL_ACTION"
-
-        // Action values inside ACTION_BROADCAST.
+        // Action values carried by the notification broadcasts.
         const val EXTRA_ACTION = "app.tauri.livekit_mobile.extra.CALL_ACTION"
         const val ACTION_ANSWER = "answer"
         const val ACTION_DECLINE = "decline"

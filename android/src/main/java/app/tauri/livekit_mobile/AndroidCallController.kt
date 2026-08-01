@@ -166,13 +166,35 @@ internal class AndroidCallController(
         }
     }
 
-    /** Ends every registered call and queues an end action for each. Telecom
-     * only calls onDisconnect for system-initiated disconnects, so an app-side
-     * hangup has to queue the action JS drains itself. */
-    fun endCallsFromNotification() {
-        for (callId in activeCalls.keys.toList()) {
-            endCall(callId)
-            enqueue(SystemCallAction.end(callId))
+    /**
+     * Answers from the notification's Answer button and queues the action JS
+     * drains: Telecom only invokes onAnswer for system-initiated answers, so an
+     * app-side answer has to report itself.
+     *
+     * A refused transaction ends the call instead of leaving a notification that
+     * looks answered, and [onResult] tells the caller which happened.
+     */
+    fun answerCallFromNotification(callId: String, onResult: (Boolean) -> Unit) {
+        answerCall(callId) { answered ->
+            if (answered) {
+                enqueue(SystemCallAction.answer(callId))
+            } else {
+                endCall(callId)
+                enqueue(SystemCallAction.end(callId))
+            }
+            onResult(answered)
+        }
+    }
+
+    /** Ends the call a notification button dismissed and queues the end action.
+     * Telecom only calls onDisconnect for system-initiated disconnects, so an
+     * app-side hangup has to queue the action JS drains itself. A blank id ends
+     * every registered call rather than stranding one. */
+    fun endCallFromNotification(callId: String) {
+        val targets = if (callId.isBlank()) activeCalls.keys.toList() else listOf(callId)
+        for (id in targets) {
+            endCall(id)
+            enqueue(SystemCallAction.end(id))
         }
     }
 

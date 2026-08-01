@@ -69,8 +69,8 @@ internal class NativeCallController(
     private var attempt = 0L
     private var intentionalDisconnect = false
 
-    /** Ongoing-call notification name; blank until the app supplies one. */
-    private var displayName = ""
+    /** What the foreground-service notification currently shows. */
+    private var presentation = NativeCallPresentation.NONE
 
     fun snapshotJson(): JSObject {
         val current = snapshot
@@ -137,6 +137,7 @@ internal class NativeCallController(
                 val currentAttempt = ++attempt
                 intentionalDisconnect = false
                 channel = callChannel
+                presentation = presentation.forCall(callId)
                 transition {
                     copy(
                         callId = callId,
@@ -246,6 +247,7 @@ internal class NativeCallController(
                         remoteParticipants = remoteParticipantsProjection(newRoom),
                     )
                 }
+                presentOngoing()
                 emitSnapshotChanged()
                 invoke.resolve(snapshotJson())
             }
@@ -294,26 +296,65 @@ internal class NativeCallController(
         applyMicrophone(callId, false, null)
     }
 
-    /** Records the name the ongoing-call notification shows and refreshes the
-     * running service with it. Telecom fixes its own display name at addCall
-     * time, so this only reaches the notification. */
-    fun setCallDisplayName(callId: String, callerName: String) {
+    /**
+     * Announces a call in the foreground-service notification with its direction
+     * and name, whether or not a room is behind it yet.
+     *
+     * core-telecom gives an app five seconds from addCall to post a CallStyle
+     * notification, after which the call loses the foreground execution priority
+     * Telecom granted it, so an incoming call has to be presented before it is
+     * ever answered. Telecom fixes its own display name at addCall time, so this
+     * only reaches the notification.
+     */
+    fun presentCall(callId: String, direction: String, callerName: String) {
         scope.launch {
-            if (snapshot.callId != callId || callerName.isBlank()) return@launch
-            displayName = callerName
+            // The plugin hosts one room at a time, so a second call must not
+            // relabel the running one's notification or steal its hangup button.
+            if (snapshot.isActive && snapshot.callId != callId) return@launch
+            presentation =
+                NativeCallPresentation.announcing(
+                    callId,
+                    direction,
+                    callerName,
+                    connected =
+                        snapshot.callId == callId &&
+                            snapshot.connectionState == NativeCallWire.STATE_CONNECTED,
+                )
             startCallForegroundService(
-                preferMicrophone = snapshot.microphoneEnabled,
-                preferCamera = snapshot.cameraEnabled,
+                preferMicrophone = snapshot.callId == callId && snapshot.microphoneEnabled,
+                preferCamera = snapshot.callId == callId && snapshot.cameraEnabled,
             )
         }
     }
 
+    /** Drops the notification of a presented call that never became a room
+     * (declined, missed, answered on another device). A live room keeps its own
+     * notification: only its own teardown may take that down. */
+    fun dismissCallPresentation(callId: String) {
+        scope.launch {
+            if (presentation.callId != callId || snapshot.isActive) return@launch
+            stopCallForegroundService()
+        }
+    }
+
+    /** Moves the notification off ringing or dialling once the room is up. */
+    private fun presentOngoing() {
+        val ongoing = presentation.ongoing()
+        if (ongoing == presentation) return
+        presentation = ongoing
+        startCallForegroundService(
+            preferMicrophone = snapshot.microphoneEnabled,
+            preferCamera = snapshot.cameraEnabled,
+        )
+    }
+
     /** The service could not enter the foreground (a while-in-use type cannot
      * start from the background): record it so JS sees a call running without
-     * one instead of nothing at all. */
+     * one instead of nothing at all. A presented call with no room yet still
+     * counts, since that is exactly the incoming-call window. */
     fun reportForegroundServiceFailed() {
         scope.launch {
-            if (!snapshot.isActive) return@launch
+            if (!snapshot.isActive && !presentation.isPresenting) return@launch
             transition { copy(lastErrorCode = NativeCallWire.ERR_UNAVAILABLE) }
             emitSnapshotChanged()
         }
@@ -347,12 +388,12 @@ internal class NativeCallController(
                 return@launch
             }
             transition { copy(microphoneEnabled = enabled) }
-            if (enabled) {
-                startCallForegroundService(
-                    preferMicrophone = true,
-                    preferCamera = snapshot.cameraEnabled,
-                )
-            }
+            // The microphone service type follows the publication both ways: a
+            // muted call must not keep claiming a microphone it is not using.
+            startCallForegroundService(
+                preferMicrophone = enabled,
+                preferCamera = snapshot.cameraEnabled,
+            )
             emitSnapshotChanged()
             invoke?.resolve(snapshotJson())
         }
@@ -618,6 +659,7 @@ internal class NativeCallController(
                         remoteParticipants = remoteParticipantsProjection(room),
                     )
                 }
+                presentOngoing()
                 emitSnapshotChanged()
             }
             is RoomEvent.Reconnecting -> {
@@ -766,7 +808,6 @@ internal class NativeCallController(
         localVideoOverlay.clear()
         eventJob?.cancel()
         eventJob = null
-        displayName = ""
         val endingRoom = room
         room = null
         if (endingRoom != null) {
@@ -798,7 +839,7 @@ internal class NativeCallController(
 
     /** The microphone and camera service types are only requested once their
      * runtime permission has already been granted, or startForeground throws on
-     * Android 14+. */
+     * Android 14+; every other type the call needs is unconditional. */
     private fun startCallForegroundService(
         preferMicrophone: Boolean,
         preferCamera: Boolean = false,
@@ -813,7 +854,15 @@ internal class NativeCallController(
                     LivekitMobileForegroundService.EXTRA_CAMERA,
                     preferCamera && hasCameraPermission(),
                 )
-                .putExtra(LivekitMobileForegroundService.EXTRA_CALLER_NAME, displayName)
+                .putExtra(LivekitMobileForegroundService.EXTRA_CALL_ID, presentation.callId)
+                .putExtra(
+                    LivekitMobileForegroundService.EXTRA_CALL_DIRECTION,
+                    presentation.direction,
+                )
+                .putExtra(
+                    LivekitMobileForegroundService.EXTRA_CALLER_NAME,
+                    presentation.callerName,
+                )
                 .putExtra(LivekitMobileForegroundService.EXTRA_PLAYBACK, true)
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -823,14 +872,18 @@ internal class NativeCallController(
                 appContext.startService(intent)
             }
         } catch (_: RuntimeException) {
-            // startForegroundService throws SecurityException/IllegalStateException
-            // (both RuntimeExceptions) on missing grants or background-start
-            // restrictions.
+            // startForegroundService rejects a background start with
+            // ForegroundServiceStartNotAllowedException (an IllegalStateException)
+            // and a missing grant with SecurityException; both are
+            // RuntimeExceptions. The snapshot has to carry it out: a call running
+            // without a foreground service is not a call JS can trust.
             transition { copy(lastErrorCode = NativeCallWire.ERR_UNAVAILABLE) }
+            emitSnapshotChanged()
         }
     }
 
     private fun stopCallForegroundService() {
+        presentation = NativeCallPresentation.NONE
         runCatching {
             appContext.stopService(Intent(appContext, LivekitMobileForegroundService::class.java))
         }

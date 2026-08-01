@@ -1,10 +1,6 @@
 package app.tauri.livekit_mobile
 
 import android.app.Activity
-import android.content.BroadcastReceiver
-import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import android.view.View
@@ -209,54 +205,60 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
         onSystemSetInactive = { controller.muteForSystemInactive() },
     )
 
-    private val callActionReceiver: BroadcastReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            val action = intent.getStringExtra(LivekitMobileForegroundService.EXTRA_ACTION)
-            when (action) {
-                LivekitMobileForegroundService.ACTION_DECLINE,
-                LivekitMobileForegroundService.ACTION_HANGUP -> {
-                    callController.endCallsFromNotification()
-                    controller.disconnectActiveCall()
+    /**
+     * Notification buttons and foreground-service failures arrive here through
+     * the process-wide router, not through a receiver this plugin registered:
+     * the notification outlives any one plugin instance.
+     */
+    private val callActionHandler: (NativeCallAction) -> Unit = { action ->
+        when (action.kind) {
+            NativeCallActionKind.ANSWER ->
+                callController.answerCallFromNotification(action.callId) { answered ->
+                    // A refused answer already ended the Telecom call; the ring
+                    // notification has to go with it.
+                    if (!answered) controller.dismissCallPresentation(action.callId)
                 }
-                LivekitMobileForegroundService.ACTION_SERVICE_FAILED ->
-                    controller.reportForegroundServiceFailed()
+            NativeCallActionKind.END -> {
+                callController.endCallFromNotification(action.callId)
+                controller.disconnectActiveCall()
+                // Declining a call that never became a room leaves the ring
+                // notification behind; nothing else takes it down.
+                controller.dismissCallPresentation(action.callId)
             }
+            NativeCallActionKind.FOREGROUND_SERVICE_FAILED ->
+                controller.reportForegroundServiceFailed()
         }
     }
 
     override fun load(webView: WebView) {
         hostWebView = webView
-        val filter = IntentFilter(LivekitMobileForegroundService.ACTION_BROADCAST)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            activity.registerReceiver(callActionReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            @Suppress("DEPRECATION")
-            activity.registerReceiver(callActionReceiver, filter)
-        }
+        NativeCallActionRouter.shared.attach(callActionHandler)
     }
 
-    private var pendingConnect: PendingConnect? = null
-    private var pendingMicrophone: PendingMicrophone? = null
-    private var pendingCamera: PendingCamera? = null
+    private val pendingPermission = SinglePermissionRequest<PendingPermission>()
 
     /** Bluetooth and notifications are asked for once per process: a denial
      * must not put a permission round-trip in front of every call. */
     private var ancillaryPermissionsPrompted = false
 
-    private data class PendingConnect(
-        val invoke: Invoke,
-        val args: ConnectNativeCallArgs,
-    )
+    private sealed class PendingPermission {
+        abstract val invoke: Invoke
 
-    private data class PendingMicrophone(
-        val invoke: Invoke,
-        val args: SetNativeCallMicrophoneEnabledArgs,
-    )
+        data class Connect(
+            override val invoke: Invoke,
+            val args: ConnectNativeCallArgs,
+        ) : PendingPermission()
 
-    private data class PendingCamera(
-        val invoke: Invoke,
-        val args: SetNativeCallCameraEnabledArgs,
-    )
+        data class Microphone(
+            override val invoke: Invoke,
+            val args: SetNativeCallMicrophoneEnabledArgs,
+        ) : PendingPermission()
+
+        data class Camera(
+            override val invoke: Invoke,
+            val args: SetNativeCallCameraEnabledArgs,
+        ) : PendingPermission()
+    }
 
     // ── Core call commands ─────────────────────────────────────────────────
 
@@ -304,14 +306,16 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
         }
         val missing = missingCallPermissionAliases(args.microphoneEnabled)
         if (missing.isNotEmpty()) {
+            if (!pendingPermission.begin(invoke.id, PendingPermission.Connect(invoke, args))) {
+                reject(invoke, NativeCallWire.ERR_BUSY)
+                return
+            }
             ancillaryPermissionsPrompted = true
-            val pending = PendingConnect(invoke, args)
-            pendingConnect = pending
             try {
                 requestPermissionForAliases(missing, invoke, "permissionResult")
             } catch (_: Exception) {
-                pendingConnect = null
-                reject(pending.invoke, NativeCallWire.ERR_PERMISSION_DENIED)
+                pendingPermission.complete(invoke.id)
+                reject(invoke, NativeCallWire.ERR_PERMISSION_DENIED)
             }
             return
         }
@@ -362,13 +366,15 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
             controller.isActiveCall(args.callId) &&
             !hasRecordAudioPermission()
         ) {
-            val pending = PendingMicrophone(invoke, args)
-            pendingMicrophone = pending
+            if (!pendingPermission.begin(invoke.id, PendingPermission.Microphone(invoke, args))) {
+                reject(invoke, NativeCallWire.ERR_BUSY)
+                return
+            }
             try {
                 requestPermissionForAliases(arrayOf("microphone"), invoke, "permissionResult")
             } catch (_: Exception) {
-                pendingMicrophone = null
-                reject(pending.invoke, NativeCallWire.ERR_PERMISSION_DENIED)
+                pendingPermission.complete(invoke.id)
+                reject(invoke, NativeCallWire.ERR_PERMISSION_DENIED)
             }
             return
         }
@@ -388,13 +394,15 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
             controller.isActiveCall(args.callId) &&
             !hasCameraPermission()
         ) {
-            val pending = PendingCamera(invoke, args)
-            pendingCamera = pending
+            if (!pendingPermission.begin(invoke.id, PendingPermission.Camera(invoke, args))) {
+                reject(invoke, NativeCallWire.ERR_BUSY)
+                return
+            }
             try {
                 requestPermissionForAliases(arrayOf("camera"), invoke, "permissionResult")
             } catch (_: Exception) {
-                pendingCamera = null
-                reject(pending.invoke, NativeCallWire.ERR_PERMISSION_DENIED)
+                pendingPermission.complete(invoke.id)
+                reject(invoke, NativeCallWire.ERR_PERMISSION_DENIED)
             }
             return
         }
@@ -569,6 +577,18 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
         }
         val callId = args.uuid.ifBlank { java.util.UUID.randomUUID().toString() }
         callController.reportIncomingCall(callId, args.callerName) { added ->
+            if (added) {
+                // core-telecom gives the app five seconds from the moment the
+                // call is added to post its CallStyle notification, and this
+                // callback fires the moment Telecom hands back the control
+                // scope. Posting before the call is added would advertise a ring
+                // Telecom may still refuse.
+                controller.presentCall(
+                    callId,
+                    LivekitMobileForegroundService.DIRECTION_INCOMING,
+                    args.callerName,
+                )
+            }
             settle(invoke, added)
         }
     }
@@ -589,11 +609,19 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
             reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
             return
         }
-        controller.setCallDisplayName(args.callId, args.callerName)
+        // Presented before the call is added: the same five-second window
+        // applies, and core-telecom asks outgoing calls to post their
+        // notification immediately or delay adding the call altogether.
+        controller.presentCall(
+            args.callId,
+            LivekitMobileForegroundService.DIRECTION_OUTGOING,
+            args.callerName,
+        )
         callController.startOutgoingCall(
             args.callId,
             args.callerName.ifBlank { args.callId },
         ) { added ->
+            if (!added) controller.dismissCallPresentation(args.callId)
             settle(invoke, added)
         }
     }
@@ -618,6 +646,7 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
             return
         }
         callController.endCall(args.callId) { ended ->
+            controller.dismissCallPresentation(args.callId)
             settle(invoke, ended)
         }
     }
@@ -730,7 +759,7 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
             reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
             return
         }
-        callController.endCall(args.callId)
+        endSystemCallAndPresentation(args.callId)
         invoke.resolve(JSObject())
     }
 
@@ -741,7 +770,7 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
             reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
             return
         }
-        callController.endCall(args.callId)
+        endSystemCallAndPresentation(args.callId)
         invoke.resolve(JSObject())
     }
 
@@ -752,7 +781,7 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
             reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
             return
         }
-        callController.endCall(args.callId)
+        endSystemCallAndPresentation(args.callId)
         invoke.resolve(JSObject())
     }
 
@@ -763,82 +792,76 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
             reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
             return
         }
-        callController.endCall(args.callId)
+        endSystemCallAndPresentation(args.callId)
         invoke.resolve(JSObject())
+    }
+
+    /** A call that ended before it ever became a room still owns the ringing
+     * notification and its foreground service; nothing else takes them down. */
+    private fun endSystemCallAndPresentation(callId: String) {
+        callController.endCall(callId)
+        controller.dismissCallPresentation(callId)
     }
 
     // ── Permission callback ────────────────────────────────────────────────
 
     @PermissionCallback
     private fun permissionResult(invoke: Invoke) {
-        val connect = pendingConnect
-        if (connect != null && connect.invoke.id == invoke.id) {
-            pendingConnect = null
-            // Already validated in connectNativeCall; re-decoded defensively.
-            val encryptionKeys = decodeEncryptionKeys(connect.args.encryptionKeys)
-            if (encryptionKeys == null) {
-                reject(connect.invoke, NativeCallWire.ERR_INVALID_REQUEST)
-                return
+        when (val pending = pendingPermission.complete(invoke.id)) {
+            // The invoke this callback belongs to was already settled (teardown
+            // cancelled it); settling it twice would be the bug, not the fix.
+            null -> Unit
+            is PendingPermission.Connect -> {
+                // Already validated in connectNativeCall; re-decoded defensively.
+                val encryptionKeys = decodeEncryptionKeys(pending.args.encryptionKeys)
+                if (encryptionKeys == null) {
+                    reject(pending.invoke, NativeCallWire.ERR_INVALID_REQUEST)
+                    return
+                }
+                // Bluetooth routing and the notification are requested alongside
+                // the microphone but never required: only RECORD_AUDIO can fail
+                // a call.
+                if (!pending.args.microphoneEnabled || hasRecordAudioPermission()) {
+                    controller.connect(
+                        pending.args.callId,
+                        pending.args.url,
+                        pending.args.token,
+                        pending.args.microphoneEnabled,
+                        encryptionKeys,
+                        pending.args.channel,
+                        pending.invoke,
+                    )
+                } else {
+                    reject(pending.invoke, NativeCallWire.ERR_PERMISSION_DENIED)
+                }
             }
-            // Bluetooth routing and the notification are requested alongside the
-            // microphone but never required: only RECORD_AUDIO can fail a call.
-            if (!connect.args.microphoneEnabled || hasRecordAudioPermission()) {
-                controller.connect(
-                    connect.args.callId,
-                    connect.args.url,
-                    connect.args.token,
-                    connect.args.microphoneEnabled,
-                    encryptionKeys,
-                    connect.args.channel,
-                    connect.invoke,
-                )
-            } else {
-                reject(connect.invoke, NativeCallWire.ERR_PERMISSION_DENIED)
-            }
-            return
-        }
-        val microphone = pendingMicrophone
-        if (microphone != null && microphone.invoke.id == invoke.id) {
-            pendingMicrophone = null
-            if (hasRecordAudioPermission()) {
-                controller.setMicrophoneEnabled(
-                    microphone.args.callId,
-                    microphone.args.enabled,
-                    microphone.invoke,
-                )
-            } else {
-                reject(microphone.invoke, NativeCallWire.ERR_PERMISSION_DENIED)
-            }
-            return
-        }
-        val camera = pendingCamera
-        if (camera != null && camera.invoke.id == invoke.id) {
-            pendingCamera = null
-            if (hasCameraPermission()) {
-                controller.setCameraEnabled(
-                    camera.args.callId,
-                    camera.args.enabled,
-                    camera.invoke,
-                )
-            } else {
-                reject(camera.invoke, NativeCallWire.ERR_PERMISSION_DENIED)
-            }
+            is PendingPermission.Microphone ->
+                if (hasRecordAudioPermission()) {
+                    controller.setMicrophoneEnabled(
+                        pending.args.callId,
+                        pending.args.enabled,
+                        pending.invoke,
+                    )
+                } else {
+                    reject(pending.invoke, NativeCallWire.ERR_PERMISSION_DENIED)
+                }
+            is PendingPermission.Camera ->
+                if (hasCameraPermission()) {
+                    controller.setCameraEnabled(
+                        pending.args.callId,
+                        pending.args.enabled,
+                        pending.invoke,
+                    )
+                } else {
+                    reject(pending.invoke, NativeCallWire.ERR_PERMISSION_DENIED)
+                }
         }
     }
 
     override fun onDestroy(activity: androidx.appcompat.app.AppCompatActivity) {
-        try {
-            activity.unregisterReceiver(callActionReceiver)
-        } catch (_: IllegalArgumentException) {
-            // Already unregistered.
-        }
-        // Pending permission invokes must settle before the room is torn down.
-        pendingConnect?.let { reject(it.invoke, NativeCallWire.ERR_CANCELLED) }
-        pendingConnect = null
-        pendingMicrophone?.let { reject(it.invoke, NativeCallWire.ERR_CANCELLED) }
-        pendingMicrophone = null
-        pendingCamera?.let { reject(it.invoke, NativeCallWire.ERR_CANCELLED) }
-        pendingCamera = null
+        NativeCallActionRouter.shared.detach(callActionHandler)
+        // A pending permission invoke must settle before the room is torn down.
+        pendingPermission.cancel()?.let { reject(it.invoke, NativeCallWire.ERR_CANCELLED) }
         pictureInPicture.dispose()
         // Release the overlay on the main thread before dispose() parks it:
         // teardown must never wait on a blocked looper to drop EGL resources.
