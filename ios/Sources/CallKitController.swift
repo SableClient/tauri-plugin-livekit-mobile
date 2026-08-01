@@ -79,7 +79,6 @@ final class CallKitController: NSObject {
   /// Whether `setAudioRoute` last forced the output to the speaker; used by
   /// the route picker to tell a receiver-less device from a receiver that is
   /// simply not carrying the route.
-  private var speakerOverridden = false
 
   /// The two audio-session modes are mutually exclusive:
   ///
@@ -625,7 +624,7 @@ final class CallKitController: NSObject {
     if wiredOutput != nil || inputs.contains(where: { Self.wiredInputPorts.contains($0.portType) }) {
       routes.append(
         AudioRoute(id: "wired", name: "Headphones", type: "wired", current: wiredOutput != nil))
-    } else if hasReceiver(outputs: outputs) {
+    } else if hasReceiver {
       routes.append(
         AudioRoute(
           id: "earpiece", name: "iPhone", type: "earpiece",
@@ -659,12 +658,10 @@ final class CallKitController: NSObject {
     case "speaker":
       preferInput(portType: .builtInMic)
       try? session.overrideOutputAudioPort(.speaker)
-      speakerOverridden = true
       log("Audio route set to speaker")
     case "earpiece":
       preferInput(portType: .builtInMic)
       try? session.overrideOutputAudioPort(.none)
-      speakerOverridden = false
       log("Audio route set to earpiece")
     case "wired":
       if let wired = session.availableInputs?.first(where: {
@@ -673,13 +670,11 @@ final class CallKitController: NSObject {
         try? session.setPreferredInput(wired)
       }
       try? session.overrideOutputAudioPort(.none)
-      speakerOverridden = false
       log("Audio route set to wired")
     default:
       if let preferredInput = session.availableInputs?.first(where: { $0.uid == routeId }) {
         try? session.overrideOutputAudioPort(.none)
         try? session.setPreferredInput(preferredInput)
-        speakerOverridden = false
         log("Audio route set to bluetooth")
       } else {
         log("Audio route not available")
@@ -687,12 +682,11 @@ final class CallKitController: NSObject {
     }
   }
 
-  /// The receiver is only observable while it carries the route, so a speaker
-  /// override this controller applied itself also counts as proof it exists.
-  /// Devices without one (iPad) default to the built-in speaker and never
-  /// need the override.
-  private func hasReceiver(outputs: [AVAudioSessionPortDescription]) -> Bool {
-    outputs.contains { $0.portType == .builtInReceiver } || speakerOverridden
+  /// Having a receiver is a device trait, not a route state: deriving it from
+  /// the current outputs makes the earpiece option vanish as soon as audio
+  /// moves to the speaker. iPad has no receiver and always uses the speaker.
+  private var hasReceiver: Bool {
+    UIDevice.current.userInterfaceIdiom == .phone
   }
 
   private func preferInput(portType: AVAudioSession.Port) {
