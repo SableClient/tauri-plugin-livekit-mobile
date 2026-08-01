@@ -43,72 +43,46 @@ class NativeCallEncryptionTest {
     }
 
     @Test
-    fun `key index guard accepts a first key per identity`() {
-        val guard = KeyIndexGuard()
-        assertTrue(guard.accepts("@a:b.c", 0))
-        guard.record("@a:b.c", 0)
-        assertEquals(0, guard.latestFor("@a:b.c"))
+    fun `latest key index starts empty and records the first key per identity`() {
+        val latest = LatestKeyIndexes()
+        assertEquals(null, latest.latestFor("@a:b.c"))
+        latest.record("@a:b.c", 0)
+        assertEquals(0, latest.latestFor("@a:b.c"))
     }
 
     @Test
-    fun `key index guard only accepts strictly increasing indexes`() {
-        val guard = KeyIndexGuard()
-        guard.record("@a:b.c", 4)
-        assertTrue(guard.accepts("@a:b.c", 5))
-        // Replay of the current index is rejected.
-        assertTrue(!guard.accepts("@a:b.c", 4))
-        // Older indexes are rejected.
-        assertTrue(!guard.accepts("@a:b.c", 0))
-        guard.record("@a:b.c", 5)
-        assertEquals(5, guard.latestFor("@a:b.c"))
-        // Recording a rejected index must not move the cursor backwards.
-        guard.record("@a:b.c", 2)
-        assertEquals(5, guard.latestFor("@a:b.c"))
+    fun `latest key index follows the last key installed, including downwards`() {
+        // A peer that rejoins restarts its outbound session at a low index, so
+        // the most recent install wins even when the index decreases. Treating
+        // a lower index as stale strands every frame that peer sends after it.
+        val latest = LatestKeyIndexes()
+        latest.record("@a:b.c", 4)
+        latest.record("@a:b.c", 5)
+        assertEquals(5, latest.latestFor("@a:b.c"))
+        latest.record("@a:b.c", 0)
+        assertEquals(0, latest.latestFor("@a:b.c"))
     }
 
     @Test
-    fun `key index guard tracks identities independently`() {
-        val guard = KeyIndexGuard()
-        guard.record("@a:b.c", 7)
-        assertTrue(guard.accepts("@b:b.c", 0))
-        guard.record("@b:b.c", 0)
-        assertEquals(7, guard.latestFor("@a:b.c"))
-        assertEquals(0, guard.latestFor("@b:b.c"))
+    fun `latest key index tracks identities independently`() {
+        val latest = LatestKeyIndexes()
+        latest.record("@a:b.c", 7)
+        latest.record("@b:b.c", 0)
+        assertEquals(7, latest.latestFor("@a:b.c"))
+        assertEquals(0, latest.latestFor("@b:b.c"))
     }
 
     @Test
-    fun `initial ring entries recorded out of order keep the greatest index as latest`() {
-        // iOS parity: an initial list may install multiple indexes for the same
-        // identity (every ring entry is retained natively); the tracked latest
-        // must be the greatest regardless of arrival order.
-        val guard = KeyIndexGuard()
-        guard.record("@a:b.c", 2)
-        guard.record("@a:b.c", 5)
-        guard.record("@a:b.c", 3)
-        assertEquals(5, guard.latestFor("@a:b.c"))
-        assertTrue(guard.accepts("@a:b.c", 6))
-        assertTrue(!guard.accepts("@a:b.c", 5))
-        assertTrue(!guard.accepts("@a:b.c", 3))
-    }
-
-    @Test
-    fun `key index guard tolerates concurrent reads while recording`() {
-        val guard = KeyIndexGuard()
-        guard.record("@a:b.c", 1)
+    fun `latest key index tolerates concurrent reads while recording`() {
+        val latest = LatestKeyIndexes()
+        latest.record("@a:b.c", 1)
         val readers =
             (1..4).map {
-                Thread {
-                    repeat(500) {
-                        guard.latestFor("@a:b.c")
-                        guard.accepts("@a:b.c", 2)
-                    }
-                }
+                Thread { repeat(500) { latest.latestFor("@a:b.c") } }
             }
         readers.forEach(Thread::start)
-        repeat(500) { guard.record("@a:b.c", it + 2) }
+        repeat(500) { latest.record("@a:b.c", it + 2) }
         readers.forEach(Thread::join)
-        assertEquals(501, guard.latestFor("@a:b.c"))
-        assertTrue(!guard.accepts("@a:b.c", 501))
-        assertTrue(guard.accepts("@a:b.c", 502))
+        assertEquals(501, latest.latestFor("@a:b.c"))
     }
 }

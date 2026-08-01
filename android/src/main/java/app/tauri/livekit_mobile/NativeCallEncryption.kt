@@ -47,31 +47,15 @@ internal object NativeCallEncryption {
 }
 
 /**
- * Per-identity monotonic guard for key indexes: a rotation key is only accepted
- * when its index is strictly greater than the last recorded index for that
- * identity. [record] keeps the greatest index seen, so out-of-order initial
- * ring entries cannot move the cursor backwards. The map is thread-safe
- * because LiveKit/WebRTC may call getLatestKeyIndex off the bridge thread
- * while installs happen on it.
+ * The key index most recently installed for each identity. Thread-safe because
+ * LiveKit reads it via getLatestKeyIndex off the bridge thread while installs
+ * happen on it.
  */
-internal class KeyIndexGuard {
+internal class LatestKeyIndexes {
     private val latest = ConcurrentHashMap<String, Int>()
 
-    fun accepts(identity: String, keyIndex: Int): Boolean =
-        keyIndex > (latest[identity] ?: -1)
-
     fun record(identity: String, keyIndex: Int) {
-        while (true) {
-            val current = latest[identity]
-            if (current != null && current >= keyIndex) return
-            val updated =
-                if (current == null) {
-                    latest.putIfAbsent(identity, keyIndex) == null
-                } else {
-                    latest.replace(identity, current, keyIndex)
-                }
-            if (updated) return
-        }
+        latest[identity] = keyIndex
     }
 
     fun latestFor(identity: String): Int? = latest[identity]
@@ -89,7 +73,7 @@ internal class KeyIndexGuard {
  * every stored JVM copy of key bytes and disposes the native provider.
  */
 internal class NativeCallE2EEKeys : KeyProvider {
-    private val guard = KeyIndexGuard()
+    private val latestIndexes = LatestKeyIndexes()
     private val keyCopies = ArrayList<ByteArray>()
 
     override val rtcKeyProvider: FrameCryptorKeyProvider =
@@ -108,38 +92,27 @@ internal class NativeCallE2EEKeys : KeyProvider {
     override var enableSharedKey: Boolean = false
 
     /**
-     * Installs one entry of the initial key list. Matching the iOS behavior,
-     * multiple indexes for the same identity are all installed so the key ring
-     * retains every supplied entry; the tracked latest index is the greatest
-     * one. May throw when the underlying JNI layer is unavailable.
+     * Installs a key into the sender's ring slot. Every key is installed, never
+     * filtered: an index selects a slot in that identity's key ring and the
+     * sender writes it into each frame, so we must hold whatever the sender
+     * last put there. Indexes are not monotonic - they are reused modulo the
+     * ring size, and a peer that rejoins restarts its outbound session at 0 -
+     * so rejecting a lower index strands every frame that peer sends after it.
+     *
+     * May throw when the underlying JNI layer is unavailable.
      */
-    fun installRingEntry(material: NativeCallKeyMaterial) {
+    fun install(material: NativeCallKeyMaterial) {
         rtcKeyProvider.setKey(material.identity, material.keyIndex, material.key)
-        guard.record(material.identity, material.keyIndex)
+        latestIndexes.record(material.identity, material.keyIndex)
         keyCopies.add(material.key)
     }
 
     /**
-     * Installs a rotation update; only indexes strictly greater than the
-     * recorded latest for that identity are installed. Returns false when the
-     * guard rejects the key as stale or retransmitted. May throw when the
-     * underlying JNI layer is unavailable.
-     */
-    fun installRotation(material: NativeCallKeyMaterial): Boolean {
-        if (!guard.accepts(material.identity, material.keyIndex)) return false
-        rtcKeyProvider.setKey(material.identity, material.keyIndex, material.key)
-        guard.record(material.identity, material.keyIndex)
-        keyCopies.add(material.key)
-        return true
-    }
-
-    /**
-     * Mirrors BaseKeyProvider semantics (0 when nothing was set) so the E2EE
-     * manager stamps frame cryptors with the latest accepted index. Stored
-     * indexes are only written through [install], so they stay monotonic.
+     * The index LiveKit stamps onto outgoing frames for this identity, and 0
+     * when nothing was installed yet, mirroring BaseKeyProvider.
      */
     override fun getLatestKeyIndex(participantId: String): Int =
-        guard.latestFor(participantId) ?: 0
+        latestIndexes.latestFor(participantId) ?: 0
 
     /** Zeroes every JVM copy of decoded key bytes and releases the native provider. */
     fun destroy() {

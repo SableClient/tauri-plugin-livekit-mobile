@@ -181,7 +181,7 @@ internal class NativeCallController(
                     try {
                         val keys = NativeCallE2EEKeys()
                         e2ee = keys
-                        encryptionKeys.forEach(keys::installRingEntry)
+                        encryptionKeys.forEach(keys::install)
                         newRoom.e2eeOptions = E2EEOptions(keyProvider = keys)
                     } catch (_: Exception) {
                         failConnect(
@@ -538,9 +538,8 @@ internal class NativeCallController(
     /**
      * Installs a rotated encryption key into the current call's provider.
      * Works while connecting or connected; installs are serialized on the
-     * bridge thread so racing rotations cannot drop a valid update. Stale
-     * call ids, non-E2EE calls, and guard-rejected indexes resolve the
-     * current snapshot unchanged without emitting snapshot changes.
+     * bridge thread so racing rotations stay ordered. A stale call id or a
+     * non-E2EE call resolves the current snapshot unchanged.
      */
     fun setEncryptionKey(
         callId: String,
@@ -554,7 +553,7 @@ internal class NativeCallController(
                 return@launch
             }
             try {
-                keys.installRotation(material)
+                keys.install(material)
             } catch (_: Exception) {
                 // A failed install must still settle the invoke, bounded.
                 reject(invoke, NativeCallWire.ERR_UNEXPECTED)

@@ -399,29 +399,23 @@ final class WireContractTests: XCTestCase {
       Data("bob-key".utf8))
   }
 
-  func testKeyIndexMonotonicGuard() {
-    XCTAssertTrue(RoomController.keyIndexAdvances(0, after: nil))
-    XCTAssertTrue(RoomController.keyIndexAdvances(7, after: 6))
-    XCTAssertFalse(RoomController.keyIndexAdvances(6, after: 6))
-    XCTAssertFalse(RoomController.keyIndexAdvances(2, after: 6))
-  }
-
-  /// Duplicate identities in the initial payload keep every ring entry and
-  /// seed the monotonic guard with the greatest index, so the
-  /// strictly-increasing rule applies only to post-connect rotation.
-  func testInitialKeyIndexesKeepGreatestPerIdentity() {
-    let data = Data([0x01])
-    let applied = RoomController.initialAppliedKeyIndexes(for: [
+  /// A key index selects a slot in the identity's ring, so the last key
+  /// installed for an index wins and a lower index is a legitimate update
+  /// rather than a stale one: a peer that rejoins restarts back at 0.
+  func testKeyRingKeepsTheLastKeyInstalledPerIndex() {
+    let provider = RoomController.makeKeyProvider(keyMaterial: [
       RoomController.EncryptionKeyMaterial(
-        identity: "@a:b.c", keyIndex: 3, keyData: data),
+        identity: "@a:b.c", keyIndex: 7, keyData: Data("old".utf8)),
       RoomController.EncryptionKeyMaterial(
-        identity: "@a:b.c", keyIndex: 7, keyData: data),
-      RoomController.EncryptionKeyMaterial(
-        identity: "@a:b.c", keyIndex: 5, keyData: data),
-      RoomController.EncryptionKeyMaterial(
-        identity: "@b:c.d", keyIndex: 1, keyData: data),
+        identity: "@a:b.c", keyIndex: 0, keyData: Data("rejoined".utf8)),
     ])
-    XCTAssertEqual(applied, ["@a:b.c": 7, "@b:c.d": 1])
+
+    XCTAssertEqual(
+      provider.exportKey(participantId: "@a:b.c", index: 0),
+      Data("rejoined".utf8))
+    XCTAssertEqual(
+      provider.exportKey(participantId: "@a:b.c", index: 7),
+      Data("old".utf8))
   }
 
   /// Every supplied entry for a repeated identity must land on the

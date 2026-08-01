@@ -44,9 +44,6 @@ final class RoomController: NSObject {
   /// encrypted; created with all initial key material installed before the
   /// Room exists, so rotation is accepted for the whole `connecting` phase.
   private var keyProvider: BaseKeyProvider?
-  /// Highest applied key index per participant identity, for the monotonic
-  /// rotation guard. Never logged or exposed through the bridge.
-  private var appliedKeyIndexes: [String: Int32] = [:]
   private var revision: UInt64 = 0
   private var connectionState: BridgeConnectionState = .idle
   private var microphoneEnabled = false
@@ -176,7 +173,6 @@ final class RoomController: NSObject {
     if let staleRoom = room {
       room = nil
       keyProvider = nil
-      appliedKeyIndexes = [:]
       removeOverlayView()
       removeLocalOverlayView()
       await staleRoom.disconnect()
@@ -203,7 +199,6 @@ final class RoomController: NSObject {
     // rotation commands are accepted for the entire connecting phase.
     if !keyMaterial.isEmpty {
       keyProvider = Self.makeKeyProvider(keyMaterial: keyMaterial)
-      appliedKeyIndexes = Self.initialAppliedKeyIndexes(for: keyMaterial)
     }
 
     if args.microphoneEnabled {
@@ -493,8 +488,12 @@ final class RoomController: NSObject {
   /// a current call without an E2EE provider (unencrypted call, failed
   /// attempt) resolves the unchanged snapshot; the provider exists exactly
   /// while an attempt is connecting, connected, or reconnecting, so those
-  /// all accept updates. Replayed or older key indexes are dropped so key
-  /// material never moves backwards. Deliberately emits no snapshot event
+  /// all accept updates. Every key is installed at the index the sender used:
+  /// an index selects a slot in that identity's key ring and the sender writes
+  /// it into each frame, and indexes are not monotonic because a peer that
+  /// rejoins restarts its outbound session at 0, so filtering by index would
+  /// strand every frame that peer sends afterwards. Deliberately emits no
+  /// snapshot event
   /// and bumps no revision: key state is not part of the bridge contract
   /// and must remain invisible.
   func setEncryptionKey(
@@ -511,16 +510,9 @@ final class RoomController: NSObject {
       invoke.resolve(snapshot())
       return
     }
-    guard Self.keyIndexAdvances(
-      material.keyIndex, after: appliedKeyIndexes[material.identity])
-    else {
-      invoke.resolve(snapshot())
-      return
-    }
     keyProvider.setKey(
       keyData: material.keyData, participantId: material.identity,
       index: material.keyIndex)
-    appliedKeyIndexes[material.identity] = material.keyIndex
     invoke.resolve(snapshot())
   }
 
@@ -565,20 +557,6 @@ final class RoomController: NSObject {
     return material
   }
 
-  /// Seeds the per-identity monotonic guard from the initial keys. Every
-  /// supplied entry is installed on the provider's key ring; for duplicate
-  /// identities the greatest index is tracked as the latest, so only the
-  /// strictly-increasing guard applies to post-connect rotation.
-  nonisolated static func initialAppliedKeyIndexes(
-    for keyMaterial: [EncryptionKeyMaterial]
-  ) -> [String: Int32] {
-    var applied: [String: Int32] = [:]
-    for key in keyMaterial {
-      applied[key.identity] = max(applied[key.identity] ?? .min, key.keyIndex)
-    }
-    return applied
-  }
-
   /// Builds the per-call key provider matching the web lanes: per-participant
   /// keys (no shared key), HKDF derivation, ratchet window 10, key ring 256;
   /// the ratchet salt and uncrypted magic bytes keep the LiveKit defaults.
@@ -596,15 +574,6 @@ final class RoomController: NSObject {
         keyData: key.keyData, participantId: key.identity, index: key.keyIndex)
     }
     return provider
-  }
-
-  /// Monotonic rotation guard: only a strictly newer index may advance an
-  /// identity's key material.
-  nonisolated static func keyIndexAdvances(
-    _ newIndex: Int32, after applied: Int32?
-  ) -> Bool {
-    guard let applied else { return true }
-    return newIndex > applied
   }
 
   /// The room options for every attempt, encrypted or not: the SDK defaults
@@ -979,7 +948,6 @@ final class RoomController: NSObject {
     participantCount = 0
     remoteParticipants = []
     keyProvider = nil
-    appliedKeyIndexes = [:]
     lastError = nil
     localConnectionQuality = nil
     removeOverlayView()
@@ -1130,7 +1098,6 @@ final class RoomController: NSObject {
     participantCount = 0
     remoteParticipants = []
     keyProvider = nil
-    appliedKeyIndexes = [:]
     lastError = nil
     localConnectionQuality = nil
     if let callId { callKitController?.endCall(callId: callId, remoteEnded: false) }
@@ -1170,7 +1137,6 @@ final class RoomController: NSObject {
     participantCount = 0
     remoteParticipants = []
     keyProvider = nil
-    appliedKeyIndexes = [:]
     lastError = error
     localConnectionQuality = nil
     emitSnapshotChanged()
@@ -1474,7 +1440,6 @@ extension RoomController: RoomDelegate {
     self.room = nil
     pipEnabled = false
     keyProvider = nil
-    appliedKeyIndexes = [:]
     microphoneEnabled = false
     cameraEnabled = false
     screenShareEnabled = false
