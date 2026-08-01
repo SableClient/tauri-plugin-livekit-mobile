@@ -29,12 +29,31 @@ final class RoomController: NSObject {
   // actor; all state access stays main-actor serialized.
   nonisolated override init() {
     super.init()
-    NotificationCenter.default.addObserver(
+    let center = NotificationCenter.default
+    center.addObserver(
       self,
       selector: #selector(handleCaptureSessionInterruption(_:)),
       name: AVCaptureSession.wasInterruptedNotification,
       object: nil
     )
+    center.addObserver(
+      self,
+      selector: #selector(handleCaptureSessionInterruptionEnded),
+      name: AVCaptureSession.interruptionEndedNotification,
+      object: nil
+    )
+    center.addObserver(
+      self,
+      selector: #selector(handleApplicationDidBecomeActive),
+      name: UIApplication.didBecomeActiveNotification,
+      object: nil
+    )
+  }
+
+  /// The controller lives as long as the plugin, so the observers are only
+  /// dropped with the instance itself.
+  deinit {
+    NotificationCenter.default.removeObserver(self)
   }
 
   private var room: Room?
@@ -48,6 +67,10 @@ final class RoomController: NSObject {
   private var connectionState: BridgeConnectionState = .idle
   private var microphoneEnabled = false
   private var cameraEnabled = false
+  /// Set while this controller, not the user, muted the camera because its
+  /// capture session was interrupted. It is what tells the restore path that
+  /// the camera was on before the interruption and may be turned back on.
+  private var cameraMutedByInterruption = false
   private var screenShareEnabled = false
   private var participantCount = 0
   private var remoteParticipants: [BridgeRemoteParticipant] = []
@@ -187,6 +210,7 @@ final class RoomController: NSObject {
     lastError = nil
     microphoneEnabled = false
     cameraEnabled = false
+    cameraMutedByInterruption = false
     screenShareEnabled = false
     participantCount = 0
     remoteParticipants = []
@@ -943,6 +967,7 @@ final class RoomController: NSObject {
     connectionState = .idle
     microphoneEnabled = false
     cameraEnabled = false
+    cameraMutedByInterruption = false
     screenShareEnabled = false
     callKitController?.setCameraActive(false)
     participantCount = 0
@@ -1093,6 +1118,7 @@ final class RoomController: NSObject {
     connectionState = .idle
     microphoneEnabled = false
     cameraEnabled = false
+    cameraMutedByInterruption = false
     screenShareEnabled = false
     callKitController?.setCameraActive(false)
     participantCount = 0
@@ -1133,6 +1159,7 @@ final class RoomController: NSObject {
     connectionState = .failed
     microphoneEnabled = false
     cameraEnabled = false
+    cameraMutedByInterruption = false
     screenShareEnabled = false
     participantCount = 0
     remoteParticipants = []
@@ -1226,16 +1253,99 @@ final class RoomController: NSObject {
     logRoom("Multitasking camera access enabled")
   }
 
-  /// The camera capture session was interrupted. While the call runs in PiP the
-  /// expected reason is `videoDeviceNotAvailableWithMultipleForegroundApps`,
-  /// which means multitasking camera access was refused; the video track stays
-  /// published and resumes on its own once the interruption ends.
+  /// The camera capture session was interrupted: the screen locked, another
+  /// app took the device, or multitasking camera access was refused. The
+  /// notification is posted on an arbitrary thread, so the work hops onto the
+  /// main actor with the rest of the state.
   @objc private nonisolated func handleCaptureSessionInterruption(
     _ notification: Notification
   ) {
     let reason =
       notification.userInfo?[AVCaptureSessionInterruptionReasonKey] as? Int ?? 0
+    Task { @MainActor [weak self] in
+      await self?.muteCameraForInterruption(reason: reason)
+    }
+  }
+
+  /// The interruption ended while the session was still the system's to
+  /// resume, which is the case whenever the app kept running in the
+  /// foreground (another app gave the camera back, system pressure eased).
+  @objc private nonisolated func handleCaptureSessionInterruptionEnded() {
+    Task { @MainActor [weak self] in
+      await self?.restoreCameraAfterInterruption()
+    }
+  }
+
+  /// The second restore trigger, and the only one for a locked screen. Muting
+  /// a local video track stops its capture session, and AVFoundation only
+  /// preserves the pending `startRunning` (and therefore only posts
+  /// `interruptionEndedNotification`) for a backgrounded session that was
+  /// never explicitly stopped, per the
+  /// `AVCaptureSessionInterruptionReasonVideoDeviceNotAvailableInBackground`
+  /// documentation. Becoming active again is what tells us the camera is
+  /// usable once more.
+  @objc private nonisolated func handleApplicationDidBecomeActive() {
+    Task { @MainActor [weak self] in
+      await self?.restoreCameraAfterInterruption()
+    }
+  }
+
+  /// Mutes the interrupted camera so remote peers render the participant as
+  /// camera-off instead of the last captured frame, which they would otherwise
+  /// keep showing for the whole interruption. CallKit is deliberately left
+  /// alone: `setCameraActive(false)` re-applies the `.voiceChat` audio mode and
+  /// would move a still-video call from the speaker to the earpiece over a
+  /// transient camera outage.
+  private func muteCameraForInterruption(reason: Int) async {
     logRoom("Camera capture session interrupted: reason=\(reason)")
+    guard cameraEnabled, !cameraMutedByInterruption, let room,
+      let publication = Self.cameraPublication(in: room)
+    else { return }
+
+    let attemptId = attempt
+    do {
+      try await publication.mute()
+    } catch {
+      logRoom("Failed to mute the interrupted camera")
+      return
+    }
+    // Not an attempt of its own: a background event must not cancel the
+    // in-flight command lane, only stand down when one has moved on.
+    guard attemptId == attempt, room === self.room else { return }
+
+    cameraMutedByInterruption = true
+    cameraEnabled = false
+    emitSnapshotChanged()
+  }
+
+  /// Unmutes only a camera this controller muted itself, so a user who had the
+  /// camera off keeps it off. Unmuting restarts the capture session that
+  /// muting stopped. Any other state (no call, the camera unpublished or
+  /// already unmuted meanwhile) means the recorded mute no longer describes
+  /// anything and is forgotten.
+  private func restoreCameraAfterInterruption() async {
+    guard cameraMutedByInterruption, let room,
+      let publication = Self.cameraPublication(in: room), publication.isMuted
+    else {
+      cameraMutedByInterruption = false
+      return
+    }
+
+    let attemptId = attempt
+    do {
+      try await publication.unmute()
+    } catch {
+      logRoom("Failed to restore the camera after the interruption")
+      return
+    }
+    guard attemptId == attempt, room === self.room else { return }
+
+    cameraMutedByInterruption = false
+    cameraEnabled = true
+    // The capturer reconfigures its session on restart, so re-assert
+    // multitasking access exactly as the enable command does.
+    Self.enableMultitaskingCameraAccess(in: room)
+    emitSnapshotChanged()
   }
 
   // MARK: - Media permissions
@@ -1442,6 +1552,7 @@ extension RoomController: RoomDelegate {
     keyProvider = nil
     microphoneEnabled = false
     cameraEnabled = false
+    cameraMutedByInterruption = false
     screenShareEnabled = false
     callKitController?.setCameraActive(false)
     participantCount = 0

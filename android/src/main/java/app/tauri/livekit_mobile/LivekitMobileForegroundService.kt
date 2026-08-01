@@ -154,6 +154,7 @@ class LivekitMobileForegroundService : Service() {
                 .setOnlyAlertOnce(false)
                 .setFullScreenIntent(buildFullScreenIntent(), true)
         }
+        buildContentIntent()?.let(builder::setContentIntent)
         return builder.build()
     }
 
@@ -193,6 +194,7 @@ class LivekitMobileForegroundService : Service() {
                 .setCategory(Notification.CATEGORY_CALL)
                 .setOngoing(true)
         }
+        buildContentIntent()?.let(builder::setContentIntent)
         return builder.build()
     }
 
@@ -238,6 +240,7 @@ class LivekitMobileForegroundService : Service() {
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
         }
+        buildContentIntent()?.let(builder::setContentIntent)
         return builder.build()
     }
 
@@ -254,6 +257,39 @@ class LivekitMobileForegroundService : Service() {
             ?: Intent()
         return PendingIntent.getActivity(
             this, 0, intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+    }
+
+    /**
+     * Body tap on a call notification. CallStyle only wires the buttons it was
+     * given, so without a content intent the rest of the notification is inert;
+     * a full-screen intent does not stand in for it, since the system drops
+     * that to a heads-up whenever the device is already unlocked and in use.
+     *
+     * Where the full-screen intent exists to raise the ring UI, this one only
+     * has to return to a call that is already running, which is what the
+     * launcher intent gives us: it resolves to the same front-door activity the
+     * launcher icon opens, and it already carries FLAG_ACTIVITY_NEW_TASK, which
+     * an activity content intent is required to have and which brings an
+     * existing task to the front in the state it was last in instead of
+     * starting a second one. SINGLE_TOP goes on top of that so a host whose
+     * activity is not already single-task keeps its running instance rather
+     * than stacking a second copy of it.
+     *
+     * Null when the host app exposes no launcher activity, so the notification
+     * keeps its working buttons instead of carrying an intent that resolves to
+     * nothing.
+     */
+    private fun buildContentIntent(): PendingIntent? {
+        val intent = packageManager.getLaunchIntentForPackage(packageName)
+            ?: return null
+        intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        // Its own request code: PendingIntent matching ignores Intent flags, so
+        // sharing the full-screen intent's would hand back that PendingIntent
+        // and silently drop SINGLE_TOP.
+        return PendingIntent.getActivity(
+            this, 4, intent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
     }
