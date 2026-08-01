@@ -5,6 +5,7 @@ import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.WebView
+import androidx.core.view.doOnLayout
 import io.livekit.android.room.Room
 import io.livekit.android.room.track.RemoteTrackPublication
 import io.livekit.android.room.track.VideoTrack
@@ -174,6 +175,16 @@ internal class RemoteVideoOverlay(
 
     @Volatile private var generation = 0L
 
+    /** True while the tile owns the whole host window for picture-in-picture
+     * and the geometry the JS lane reports no longer applies. */
+    @Volatile private var fullWindow = false
+
+    /** A takeover has to follow the host window through the resize the PiP
+     * transition causes: the mode change lands before the new layout does, so
+     * the size read at that moment is still the pre-transition one. */
+    private val hostLayoutListener =
+        View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> refreshPlacement() }
+
     /**
      * Attaches the remote camera track to the overlay. The same track only
      * re-lays the view; a different track moves the sink over. An unavailable
@@ -240,21 +251,7 @@ internal class RemoteVideoOverlay(
                             track.addRenderer(view)
                         }
 
-                        applyOverlaySize(view, rect.width, rect.height)
-                        if (view.parent !== parent) {
-                            (view.parent as? ViewGroup)?.removeView(view)
-                            val webViewIndex = parent.indexOfChild(webView)
-                            val index =
-                                if (webViewIndex >= 0) webViewIndex + 1 else parent.childCount
-                            parent.addView(view, index)
-                        }
-                        // The clipped rect is WebView viewport-relative; the
-                        // view sits in the WebView's parent, so translate by
-                        // the parent-relative origin. Translations survive
-                        // parent re-layouts.
-                        view.translationX = webView.left + webView.translationX + rect.left
-                        view.translationY = webView.top + webView.translationY + rect.top
-                        view.visibility = View.VISIBLE
+                        place(view, webView, parent, rect)
 
                         if (generation != capturedGeneration) {
                             // The marshal timed out / a teardown landed while
@@ -325,6 +322,9 @@ internal class RemoteVideoOverlay(
                             attachedTrack?.removeRenderer(view)
                             resolved.addRenderer(view)
                             attachedTrack = resolved
+                            // A swap onto an already laid out tile never
+                            // re-lays it, so nothing else would re-sample.
+                            notifyVisibilityAfterLayout(view)
                         }
                         if (view.visibility != View.VISIBLE) {
                             val webView =
@@ -343,18 +343,7 @@ internal class RemoteVideoOverlay(
                                 )
                             // A degenerate viewport keeps the tile hidden; the
                             // sink stays bound so video resumes after layout.
-                            if (rect != null) {
-                                applyOverlaySize(view, rect.width, rect.height)
-                                if (view.parent !== parent) {
-                                    (view.parent as? ViewGroup)?.removeView(view)
-                                    parent.addView(view)
-                                }
-                                view.translationX =
-                                    webView.left + webView.translationX + rect.left
-                                view.translationY =
-                                    webView.top + webView.translationY + rect.top
-                                view.visibility = View.VISIBLE
-                            }
+                            if (rect != null) place(view, webView, parent, rect)
                         }
                         true
                     }
@@ -373,14 +362,20 @@ internal class RemoteVideoOverlay(
         generation++
         val view = renderer
         val track = attachedTrack
+        val wasFullWindow = fullWindow
         renderer = null
         attachedTrack = null
         selectedIdentity = null
         selectedTrackSid = null
         selectedSpec = null
-        if (view == null) return
+        fullWindow = false
+        if (view == null && !wasFullWindow) return
         runCatching {
                 onMainThread {
+                    if (wasFullWindow) {
+                        webViewProvider()?.removeOnLayoutChangeListener(hostLayoutListener)
+                    }
+                    if (view == null) return@onMainThread
                     if (track != null) runCatching { track.removeRenderer(view) }
                     (view.parent as? ViewGroup)?.removeView(view)
                     // May share the view with a timed-out attach rollback.
@@ -388,9 +383,103 @@ internal class RemoteVideoOverlay(
                 }
             }
             .onFailure {
+                if (view == null) return@onFailure
                 if (track != null) runCatching { track.removeRenderer(view) }
                 runCatching { view.release() }
             }
+    }
+
+    /**
+     * Enters or leaves a picture-in-picture takeover. In PiP the plugin hides
+     * the WebView the tile is stacked on, so the tile stops following the
+     * reported geometry and covers the host viewport instead; leaving restores
+     * the reported geometry. Returns false when the main-thread step failed and
+     * the caller should [clear] instead.
+     */
+    fun setFullWindow(enabled: Boolean): Boolean {
+        if (fullWindow == enabled) return true
+        fullWindow = enabled
+        return runCatching {
+                onMainThread {
+                    val webView = webViewProvider()
+                    if (enabled) {
+                        webView?.addOnLayoutChangeListener(hostLayoutListener)
+                    } else {
+                        webView?.removeOnLayoutChangeListener(hostLayoutListener)
+                        // The window is restored after the transition, so the
+                        // reported rect only lines up again on the next layout.
+                        webView?.doOnLayout { refreshPlacement() }
+                    }
+                    refreshPlacement()
+                }
+            }
+            .isSuccess
+    }
+
+    /** Re-pins the tile from the remembered spec. Main thread only. */
+    private fun refreshPlacement() {
+        val view = renderer ?: return
+        val webView = webViewProvider() ?: return
+        val parent = webView.parent as? ViewGroup ?: return
+        val spec = selectedSpec ?: return
+        val rect =
+            overlayRectFromCss(
+                spec.x,
+                spec.y,
+                spec.width,
+                spec.height,
+                spec.devicePixelRatio,
+                webView.width,
+                webView.height,
+            )
+        place(view, webView, parent, rect)
+    }
+
+    /**
+     * Sizes and positions the tile on the main thread, directly after the
+     * WebView so the self-view stacks above it. A null rect only ever reaches
+     * here from [refreshPlacement], where a takeover supplies its own geometry
+     * and a spec that no longer intersects the shrunken viewport must not
+     * abort the placement.
+     */
+    private fun place(
+        view: PassThroughVideoRenderer,
+        webView: WebView,
+        parent: ViewGroup,
+        rect: OverlayRect?,
+    ) {
+        val placed =
+            if (fullWindow) OverlayRect(0, 0, webView.width, webView.height) else rect ?: return
+        applyOverlaySize(view, placed.width, placed.height)
+        if (view.parent !== parent) {
+            (view.parent as? ViewGroup)?.removeView(view)
+            val webViewIndex = parent.indexOfChild(webView)
+            val index = if (webViewIndex >= 0) webViewIndex + 1 else parent.childCount
+            parent.addView(view, index)
+        }
+        // The clipped rect is WebView viewport-relative; the view sits in the
+        // WebView's parent, so translate by the parent-relative origin.
+        // Translations survive parent re-layouts.
+        view.translationX = webView.left + webView.translationX + placed.left
+        view.translationY = webView.top + webView.translationY + placed.top
+        view.visibility = View.VISIBLE
+        notifyVisibilityAfterLayout(view)
+    }
+
+    /**
+     * Re-samples the sink's visibility once the tile has real bounds.
+     *
+     * With `adaptiveStream` on, `RemoteVideoTrack.addRenderer` wraps the view in
+     * the SDK's `ViewVisibility` and samples it there and then. A view that is
+     * not attached to a window yet reports `windowVisibility == GONE` and a zero
+     * size, so the publication keeps the `disabled = true` it is created with
+     * and the SFU is told to stop sending. The SDK's own recovery is a 2 s
+     * debounce off the layout observer, and re-setting an already-VISIBLE view
+     * VISIBLE never fires `onVisibilityChanged`, so nothing else closes that
+     * window. `recalculate` is the hook `ViewVisibility.Notifier` exists for.
+     */
+    private fun notifyVisibilityAfterLayout(view: PassThroughVideoRenderer) {
+        view.doOnLayout { view.viewVisibility?.recalculate() }
     }
 
     /**

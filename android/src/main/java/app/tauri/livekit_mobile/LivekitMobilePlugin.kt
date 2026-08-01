@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
+import android.view.View
 import android.webkit.WebView
 import androidx.core.content.ContextCompat
 import app.tauri.annotation.Command
@@ -60,6 +61,12 @@ internal class SetNativeCallEncryptionKeyArgs {
     var identity: String = ""
     var keyIndex: Int = 0
     var key: String = ""
+}
+
+@InvokeArg
+internal class SetNativeCallPiPEnabledArgs {
+    var callId: String = ""
+    var enabled: Boolean = false
 }
 
 @InvokeArg
@@ -176,6 +183,9 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
 
     private val localVideoOverlay = LocalVideoOverlay(webViewProvider = { hostWebView })
 
+    private val pictureInPicture =
+        NativeCallPictureInPicture(activity) { active -> applyPictureInPictureMode(active) }
+
     private val controller =
         NativeCallController(
             appContext = activity.applicationContext,
@@ -183,6 +193,10 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
             hasCameraPermission = { hasCameraPermission() },
             videoOverlay = videoOverlay,
             localVideoOverlay = localVideoOverlay,
+            // A room can also end from the far side or from Telecom, so the
+            // arm has to be dropped at the single teardown funnel, not only in
+            // the disconnect command.
+            onCallEnded = { activity.runOnUiThread { pictureInPicture.reset() } },
         )
 
     private val callController = AndroidCallController(
@@ -397,18 +411,60 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
         controller.switchCamera(args.callId, invoke)
     }
 
-    /** Neither surface exists on Android: the plugin renders video into overlay
-     * views over the WebView, not into a system PiP window, and it publishes no
-     * screen-share track. Declared so the failure is the bounded code the app
-     * already maps instead of Tauri's generic "method not implemented". */
+    /** The plugin publishes no screen-share track. Declared so the failure is
+     * the bounded code the app already maps instead of Tauri's generic "method
+     * not implemented". */
     @Command
     fun setNativeCallScreenShareEnabled(invoke: Invoke) {
         rejectUnavailable(invoke)
     }
 
+    /**
+     * Arms or disarms picture-in-picture for the call, matching iOS: enabling
+     * does not enter PiP, it lets the system enter it when the user leaves the
+     * app. A stale call id resolves the current snapshot unchanged, as every
+     * other per-call command does.
+     */
     @Command
     fun setNativeCallPiPEnabled(invoke: Invoke) {
-        rejectUnavailable(invoke)
+        val args =
+            runCatching { invoke.parseArgs(SetNativeCallPiPEnabledArgs::class.java) }.getOrNull()
+        if (args == null || args.callId.isBlank()) {
+            reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
+            return
+        }
+        if (!controller.isActiveCall(args.callId)) {
+            invoke.resolve(controller.snapshotJson())
+            return
+        }
+        if (!pictureInPicture.setArmed(args.enabled)) {
+            rejectUnavailable(invoke)
+            return
+        }
+        invoke.resolve(controller.snapshotJson())
+    }
+
+    /**
+     * Dresses the window for picture-in-picture. Remote video is drawn into a
+     * view stacked on the WebView rather than into a system PiP surface, so the
+     * PiP window would otherwise show the whole app UI shrunk down. Hiding the
+     * WebView and the self-view and letting the remote tile cover the viewport
+     * keeps the PiP content to the video, and asks nothing of the JS lane: the
+     * transition would only reach it asynchronously and the PiP window would
+     * show stale chrome until it repainted.
+     *
+     * INVISIBLE, not GONE: the tile is sized against the WebView's bounds, and
+     * a GONE WebView is never measured, so its bounds would freeze at the
+     * pre-transition size.
+     */
+    private fun applyPictureInPictureMode(active: Boolean) {
+        hostWebView?.visibility = if (active) View.INVISIBLE else View.VISIBLE
+        if (!localVideoOverlay.setHidden(active)) {
+            localVideoOverlay.clear()
+        }
+        if (!videoOverlay.setFullWindow(active)) {
+            videoOverlay.clear()
+        }
     }
 
     @Command
@@ -783,6 +839,7 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
         pendingMicrophone = null
         pendingCamera?.let { reject(it.invoke, NativeCallWire.ERR_CANCELLED) }
         pendingCamera = null
+        pictureInPicture.dispose()
         // Release the overlay on the main thread before dispose() parks it:
         // teardown must never wait on a blocked looper to drop EGL resources.
         videoOverlay.clear()

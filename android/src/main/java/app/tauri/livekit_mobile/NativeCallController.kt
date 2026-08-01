@@ -47,6 +47,7 @@ internal class NativeCallController(
     private val hasCameraPermission: () -> Boolean = { false },
     private val videoOverlay: RemoteVideoOverlay = RemoteVideoOverlay { null },
     private val localVideoOverlay: LocalVideoOverlay = LocalVideoOverlay { null },
+    private val onCallEnded: () -> Unit = {},
 ) {
     private val dispatcher =
         Executors.newSingleThreadExecutor { runnable ->
@@ -777,6 +778,7 @@ internal class NativeCallController(
         val endingKeys = e2ee
         e2ee = null
         endingKeys?.destroy()
+        onCallEnded()
     }
 
     private fun emitSnapshotChanged() {

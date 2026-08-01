@@ -39,6 +39,10 @@ internal class LocalVideoOverlay(
 
     @Volatile private var generation = 0L
 
+    /** True while a picture-in-picture takeover owns the window: the self-view
+     * is stacked above the remote tile and would sit on top of it there. */
+    @Volatile private var hidden = false
+
     /**
      * Attaches the local camera track to the overlay. The same track only
      * re-lays the view; a replaced track moves the sink over. An unpublished
@@ -195,6 +199,7 @@ internal class LocalVideoOverlay(
         renderer = null
         attachedTrack = null
         selectedSpec = null
+        hidden = false
         if (view == null) return
         runCatching {
                 onMainThread {
@@ -233,7 +238,28 @@ internal class LocalVideoOverlay(
         // Translations survive parent re-layouts.
         view.translationX = webView.left + webView.translationX + rect.left
         view.translationY = webView.top + webView.translationY + rect.top
-        view.visibility = View.VISIBLE
+        view.visibility = if (hidden) View.GONE else View.VISIBLE
+    }
+
+    /**
+     * Hides or restores the self-view for a picture-in-picture takeover. The
+     * sink stays bound so the camera keeps rendering when the tile comes back.
+     * Returns false when the main-thread step failed and the caller should
+     * [clear] instead.
+     */
+    fun setHidden(hidden: Boolean): Boolean {
+        if (this.hidden == hidden) return true
+        this.hidden = hidden
+        val view = renderer ?: return true
+        return runCatching {
+                onMainThread {
+                    if (renderer !== view) return@onMainThread
+                    // A detached tile is already GONE and must stay that way.
+                    if (attachedTrack == null) return@onMainThread
+                    view.visibility = if (hidden) View.GONE else View.VISIBLE
+                }
+            }
+            .isSuccess
     }
 
     /**
