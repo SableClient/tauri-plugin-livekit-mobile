@@ -16,9 +16,7 @@ Default permissions for the plugin
 - `allow-clear-native-call-remote-video-overlay`
 - `allow-set-native-call-local-video-overlay`
 - `allow-clear-native-call-local-video-overlay`
-- `allow-report-system-incoming-call`
 - `allow-start-system-call`
-- `allow-answer-system-call`
 - `allow-end-system-call`
 - `allow-set-system-call-muted`
 - `allow-drain-pending-system-call-actions`
@@ -30,10 +28,6 @@ Default permissions for the plugin
 - `allow-get-audio-routes`
 - `allow-set-audio-route`
 - `allow-update-call-display`
-- `allow-report-system-call-answered-elsewhere`
-- `allow-report-system-call-declined-elsewhere`
-- `allow-report-system-call-unanswered`
-- `allow-decline-system-call`
 
 ## Permission Table
 
@@ -43,32 +37,6 @@ Default permissions for the plugin
 <th>Description</th>
 </tr>
 
-
-<tr>
-<td>
-
-`livekit-mobile:allow-answer-system-call`
-
-</td>
-<td>
-
-Enables the answer_system_call command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-answer-system-call`
-
-</td>
-<td>
-
-Denies the answer_system_call command without any pre-configured scope.
-
-</td>
-</tr>
 
 <tr>
 <td>
@@ -144,32 +112,6 @@ Enables the connect_native_call command without any pre-configured scope.
 <td>
 
 Denies the connect_native_call command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:allow-decline-system-call`
-
-</td>
-<td>
-
-Enables the decline_system_call command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-decline-system-call`
-
-</td>
-<td>
-
-Denies the decline_system_call command without any pre-configured scope.
 
 </td>
 </tr>
@@ -385,32 +327,6 @@ Denies the get_native_call_state command without any pre-configured scope.
 <tr>
 <td>
 
-`livekit-mobile:allow-report-system-call-answered-elsewhere`
-
-</td>
-<td>
-
-Enables the report_system_call_answered_elsewhere command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-report-system-call-answered-elsewhere`
-
-</td>
-<td>
-
-Denies the report_system_call_answered_elsewhere command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
 `livekit-mobile:allow-report-system-call-connected`
 
 </td>
@@ -430,84 +346,6 @@ Enables the report_system_call_connected command without any pre-configured scop
 <td>
 
 Denies the report_system_call_connected command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:allow-report-system-call-declined-elsewhere`
-
-</td>
-<td>
-
-Enables the report_system_call_declined_elsewhere command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-report-system-call-declined-elsewhere`
-
-</td>
-<td>
-
-Denies the report_system_call_declined_elsewhere command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:allow-report-system-call-unanswered`
-
-</td>
-<td>
-
-Enables the report_system_call_unanswered command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-report-system-call-unanswered`
-
-</td>
-<td>
-
-Denies the report_system_call_unanswered command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:allow-report-system-incoming-call`
-
-</td>
-<td>
-
-Enables the report_system_incoming_call command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`livekit-mobile:deny-report-system-incoming-call`
-
-</td>
-<td>
-
-Denies the report_system_incoming_call command without any pre-configured scope.
 
 </td>
 </tr>

@@ -18,18 +18,15 @@ use crate::error::{Error, Result};
 #[cfg(not(mobile))]
 use crate::models::NativeCallConnectionState;
 use crate::models::{
-    AnswerSystemCallRequest, ClearNativeCallLocalVideoOverlayRequest,
-    ClearNativeCallRemoteVideoOverlayRequest, ConnectNativeCallRequest, DeclineSystemCallRequest,
-    DisconnectNativeCallRequest, EndSystemCallRequest, FulfillAnswerCallRequest,
-    FulfillEndCallRequest, GetAudioRoutesRequest, GetAudioRoutesResponse, NativeCallCapabilities,
-    NativeCallFailureCode, NativeCallSnapshot, ReportAnsweredElsewhereRequest,
-    ReportConnectedRequest, ReportDeclinedElsewhereRequest, ReportSystemIncomingCallRequest,
-    ReportUnansweredRequest, SetAudioRouteRequest, SetNativeCallCameraEnabledRequest,
-    SetNativeCallEncryptionKeyRequest, SetNativeCallLocalVideoOverlayRequest,
-    SetNativeCallMicrophoneEnabledRequest, SetNativeCallPiPEnabledRequest,
-    SetNativeCallRemoteVideoOverlayRequest, SetNativeCallScreenShareEnabledRequest,
-    SetSystemCallMutedRequest, StartSystemCallRequest, SwitchNativeCallCameraRequest,
-    SystemCallAction, UpdateCallDisplayRequest,
+    ClearNativeCallLocalVideoOverlayRequest, ClearNativeCallRemoteVideoOverlayRequest,
+    ConnectNativeCallRequest, DisconnectNativeCallRequest, EndSystemCallRequest,
+    FulfillAnswerCallRequest, FulfillEndCallRequest, GetAudioRoutesRequest, GetAudioRoutesResponse,
+    NativeCallCapabilities, NativeCallFailureCode, NativeCallSnapshot, ReportConnectedRequest,
+    SetAudioRouteRequest, SetNativeCallCameraEnabledRequest, SetNativeCallEncryptionKeyRequest,
+    SetNativeCallLocalVideoOverlayRequest, SetNativeCallMicrophoneEnabledRequest,
+    SetNativeCallPiPEnabledRequest, SetNativeCallRemoteVideoOverlayRequest,
+    SetNativeCallScreenShareEnabledRequest, SetSystemCallMutedRequest, StartSystemCallRequest,
+    SwitchNativeCallCameraRequest, SystemCallAction, UpdateCallDisplayRequest,
 };
 #[cfg(mobile)]
 use crate::models::{NativeCallChannelEvent, NativeConnectCallFields};
@@ -138,16 +135,10 @@ forwarded_commands! {
     SetNativeCallEncryptionKey(SetNativeCallEncryptionKeyRequest) -> NativeCallSnapshot
         => set_native_call_encryption_key, |r| call_id_is_valid(&r.call_id)
             && encryption_key_material_is_valid(&r.identity, &r.key);
-    ReportSystemIncomingCall(ReportSystemIncomingCallRequest) -> ()
-        => report_system_incoming_call, |r| !r.uuid.trim().is_empty()
-            && !r.caller_name.trim().is_empty();
     StartSystemCall(StartSystemCallRequest) -> ()
         => start_system_call, |r| !r.call_id.trim().is_empty()
             && !r.uuid.trim().is_empty()
             && !r.caller_name.trim().is_empty();
-    AnswerSystemCall(AnswerSystemCallRequest) -> ()
-        => answer_system_call, |r| !r.call_id.trim().is_empty()
-            && !r.uuid.trim().is_empty();
     EndSystemCall(EndSystemCallRequest) -> ()
         => end_system_call, |r| !r.call_id.trim().is_empty();
     SetSystemCallMuted(SetSystemCallMutedRequest) -> ()
@@ -166,15 +157,6 @@ forwarded_commands! {
     UpdateCallDisplay(UpdateCallDisplayRequest) -> NativeCallSnapshot
         => update_call_display, |r| call_id_is_valid(&r.call_id)
             && !r.caller_name.trim().is_empty();
-    ReportSystemCallAnsweredElsewhere(ReportAnsweredElsewhereRequest) -> ()
-        => report_system_call_answered_elsewhere, |r| call_id_is_valid(&r.call_id);
-    ReportSystemCallDeclinedElsewhere(ReportDeclinedElsewhereRequest) -> ()
-        => report_system_call_declined_elsewhere, |r| call_id_is_valid(&r.call_id);
-    ReportSystemCallUnanswered(ReportUnansweredRequest) -> ()
-        => report_system_call_unanswered, |r| call_id_is_valid(&r.call_id);
-    DeclineSystemCall(DeclineSystemCallRequest) -> ()
-        => decline_system_call, |r| call_id_is_valid(&r.call_id)
-            && !r.reason.trim().is_empty();
 }
 
 #[cfg(any(mobile, test))]

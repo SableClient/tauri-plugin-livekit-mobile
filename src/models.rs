@@ -465,24 +465,10 @@ pub struct ClearNativeCallLocalVideoOverlayRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ReportSystemIncomingCallRequest {
-    pub uuid: String,
-    pub caller_name: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct StartSystemCallRequest {
     pub call_id: String,
     pub uuid: String,
     pub caller_name: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AnswerSystemCallRequest {
-    pub call_id: String,
-    pub uuid: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -524,31 +510,6 @@ pub struct UpdateCallDisplayRequest {
     pub caller_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub has_video: Option<bool>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ReportAnsweredElsewhereRequest {
-    pub call_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ReportDeclinedElsewhereRequest {
-    pub call_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ReportUnansweredRequest {
-    pub call_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DeclineSystemCallRequest {
-    pub call_id: String,
-    pub reason: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1196,15 +1157,6 @@ mod tests {
             wire(GetAudioRoutesRequest {
                 call_id: "call-1".into(),
             }),
-            wire(ReportAnsweredElsewhereRequest {
-                call_id: "call-1".into(),
-            }),
-            wire(ReportDeclinedElsewhereRequest {
-                call_id: "call-1".into(),
-            }),
-            wire(ReportUnansweredRequest {
-                call_id: "call-1".into(),
-            }),
         ] {
             assert_eq!(payload, serde_json::json!({ "callId": "call-1" }));
         }
@@ -1260,16 +1212,6 @@ mod tests {
     #[test]
     fn native_system_call_payloads_pin_their_field_sets() {
         assert_eq!(
-            wire(ReportSystemIncomingCallRequest {
-                uuid: "3F2504E0-4F89-11D3-9A0C-0305E82C3301".into(),
-                caller_name: "Alice".into(),
-            }),
-            serde_json::json!({
-                "uuid": "3F2504E0-4F89-11D3-9A0C-0305E82C3301",
-                "callerName": "Alice"
-            })
-        );
-        assert_eq!(
             wire(StartSystemCallRequest {
                 call_id: "call-1".into(),
                 uuid: "3F2504E0-4F89-11D3-9A0C-0305E82C3301".into(),
@@ -1279,16 +1221,6 @@ mod tests {
                 "callId": "call-1",
                 "uuid": "3F2504E0-4F89-11D3-9A0C-0305E82C3301",
                 "callerName": "Alice"
-            })
-        );
-        assert_eq!(
-            wire(AnswerSystemCallRequest {
-                call_id: "call-1".into(),
-                uuid: "3F2504E0-4F89-11D3-9A0C-0305E82C3301".into(),
-            }),
-            serde_json::json!({
-                "callId": "call-1",
-                "uuid": "3F2504E0-4F89-11D3-9A0C-0305E82C3301"
             })
         );
         // A local hangup omits `remoteEnded` entirely.
@@ -1312,13 +1244,6 @@ mod tests {
                 muted: true,
             }),
             serde_json::json!({ "callId": "call-1", "muted": true })
-        );
-        assert_eq!(
-            wire(DeclineSystemCallRequest {
-                call_id: "call-1".into(),
-                reason: "user_busy".into(),
-            }),
-            serde_json::json!({ "callId": "call-1", "reason": "user_busy" })
         );
     }
 

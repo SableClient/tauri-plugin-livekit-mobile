@@ -295,18 +295,6 @@
       "type": "string",
       "oneOf": [
         {
-          "description": "Enables the answer_system_call command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-answer-system-call",
-          "markdownDescription": "Enables the answer_system_call command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the answer_system_call command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-answer-system-call",
-          "markdownDescription": "Denies the answer_system_call command without any pre-configured scope."
-        },
-        {
           "description": "Enables the clear_native_call_local_video_overlay command without any pre-configured scope.",
           "type": "string",
           "const": "allow-clear-native-call-local-video-overlay",
@@ -341,18 +329,6 @@
           "type": "string",
           "const": "deny-connect-native-call",
           "markdownDescription": "Denies the connect_native_call command without any pre-configured scope."
-        },
-        {
-          "description": "Enables the decline_system_call command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-decline-system-call",
-          "markdownDescription": "Enables the decline_system_call command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the decline_system_call command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-decline-system-call",
-          "markdownDescription": "Denies the decline_system_call command without any pre-configured scope."
         },
         {
           "description": "Enables the disconnect_native_call command without any pre-configured scope.",
@@ -451,18 +427,6 @@
           "markdownDescription": "Denies the get_native_call_state command without any pre-configured scope."
         },
         {
-          "description": "Enables the report_system_call_answered_elsewhere command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-report-system-call-answered-elsewhere",
-          "markdownDescription": "Enables the report_system_call_answered_elsewhere command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the report_system_call_answered_elsewhere command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-report-system-call-answered-elsewhere",
-          "markdownDescription": "Denies the report_system_call_answered_elsewhere command without any pre-configured scope."
-        },
-        {
           "description": "Enables the report_system_call_connected command without any pre-configured scope.",
           "type": "string",
           "const": "allow-report-system-call-connected",
@@ -473,42 +437,6 @@
           "type": "string",
           "const": "deny-report-system-call-connected",
           "markdownDescription": "Denies the report_system_call_connected command without any pre-configured scope."
-        },
-        {
-          "description": "Enables the report_system_call_declined_elsewhere command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-report-system-call-declined-elsewhere",
-          "markdownDescription": "Enables the report_system_call_declined_elsewhere command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the report_system_call_declined_elsewhere command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-report-system-call-declined-elsewhere",
-          "markdownDescription": "Denies the report_system_call_declined_elsewhere command without any pre-configured scope."
-        },
-        {
-          "description": "Enables the report_system_call_unanswered command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-report-system-call-unanswered",
-          "markdownDescription": "Enables the report_system_call_unanswered command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the report_system_call_unanswered command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-report-system-call-unanswered",
-          "markdownDescription": "Denies the report_system_call_unanswered command without any pre-configured scope."
-        },
-        {
-          "description": "Enables the report_system_incoming_call command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-report-system-incoming-call",
-          "markdownDescription": "Enables the report_system_incoming_call command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the report_system_incoming_call command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-report-system-incoming-call",
-          "markdownDescription": "Denies the report_system_incoming_call command without any pre-configured scope."
         },
         {
           "description": "Enables the set_audio_route command without any pre-configured scope.",
@@ -655,10 +583,10 @@
           "markdownDescription": "Denies the update_call_display command without any pre-configured scope."
         },
         {
-          "description": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-get-native-call-capabilities`\n- `allow-connect-native-call`\n- `allow-disconnect-native-call`\n- `allow-set-native-call-microphone-enabled`\n- `allow-set-native-call-camera-enabled`\n- `allow-set-native-call-screen-share-enabled`\n- `allow-set-native-call-pip-enabled`\n- `allow-switch-native-call-camera`\n- `allow-set-native-call-remote-video-overlay`\n- `allow-clear-native-call-remote-video-overlay`\n- `allow-set-native-call-local-video-overlay`\n- `allow-clear-native-call-local-video-overlay`\n- `allow-report-system-incoming-call`\n- `allow-start-system-call`\n- `allow-answer-system-call`\n- `allow-end-system-call`\n- `allow-set-system-call-muted`\n- `allow-drain-pending-system-call-actions`\n- `allow-fulfill-answer-call`\n- `allow-fulfill-end-call`\n- `allow-report-system-call-connected`\n- `allow-set-native-call-encryption-key`\n- `allow-get-native-call-state`\n- `allow-get-audio-routes`\n- `allow-set-audio-route`\n- `allow-update-call-display`\n- `allow-report-system-call-answered-elsewhere`\n- `allow-report-system-call-declined-elsewhere`\n- `allow-report-system-call-unanswered`\n- `allow-decline-system-call`",
+          "description": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-get-native-call-capabilities`\n- `allow-connect-native-call`\n- `allow-disconnect-native-call`\n- `allow-set-native-call-microphone-enabled`\n- `allow-set-native-call-camera-enabled`\n- `allow-set-native-call-screen-share-enabled`\n- `allow-set-native-call-pip-enabled`\n- `allow-switch-native-call-camera`\n- `allow-set-native-call-remote-video-overlay`\n- `allow-clear-native-call-remote-video-overlay`\n- `allow-set-native-call-local-video-overlay`\n- `allow-clear-native-call-local-video-overlay`\n- `allow-start-system-call`\n- `allow-end-system-call`\n- `allow-set-system-call-muted`\n- `allow-drain-pending-system-call-actions`\n- `allow-fulfill-answer-call`\n- `allow-fulfill-end-call`\n- `allow-report-system-call-connected`\n- `allow-set-native-call-encryption-key`\n- `allow-get-native-call-state`\n- `allow-get-audio-routes`\n- `allow-set-audio-route`\n- `allow-update-call-display`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-get-native-call-capabilities`\n- `allow-connect-native-call`\n- `allow-disconnect-native-call`\n- `allow-set-native-call-microphone-enabled`\n- `allow-set-native-call-camera-enabled`\n- `allow-set-native-call-screen-share-enabled`\n- `allow-set-native-call-pip-enabled`\n- `allow-switch-native-call-camera`\n- `allow-set-native-call-remote-video-overlay`\n- `allow-clear-native-call-remote-video-overlay`\n- `allow-set-native-call-local-video-overlay`\n- `allow-clear-native-call-local-video-overlay`\n- `allow-report-system-incoming-call`\n- `allow-start-system-call`\n- `allow-answer-system-call`\n- `allow-end-system-call`\n- `allow-set-system-call-muted`\n- `allow-drain-pending-system-call-actions`\n- `allow-fulfill-answer-call`\n- `allow-fulfill-end-call`\n- `allow-report-system-call-connected`\n- `allow-set-native-call-encryption-key`\n- `allow-get-native-call-state`\n- `allow-get-audio-routes`\n- `allow-set-audio-route`\n- `allow-update-call-display`\n- `allow-report-system-call-answered-elsewhere`\n- `allow-report-system-call-declined-elsewhere`\n- `allow-report-system-call-unanswered`\n- `allow-decline-system-call`"
+          "markdownDescription": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-get-native-call-capabilities`\n- `allow-connect-native-call`\n- `allow-disconnect-native-call`\n- `allow-set-native-call-microphone-enabled`\n- `allow-set-native-call-camera-enabled`\n- `allow-set-native-call-screen-share-enabled`\n- `allow-set-native-call-pip-enabled`\n- `allow-switch-native-call-camera`\n- `allow-set-native-call-remote-video-overlay`\n- `allow-clear-native-call-remote-video-overlay`\n- `allow-set-native-call-local-video-overlay`\n- `allow-clear-native-call-local-video-overlay`\n- `allow-start-system-call`\n- `allow-end-system-call`\n- `allow-set-system-call-muted`\n- `allow-drain-pending-system-call-actions`\n- `allow-fulfill-answer-call`\n- `allow-fulfill-end-call`\n- `allow-report-system-call-connected`\n- `allow-set-native-call-encryption-key`\n- `allow-get-native-call-state`\n- `allow-get-audio-routes`\n- `allow-set-audio-route`\n- `allow-update-call-display`"
         },
         {
           "description": "Capability probe plus the native LiveKit room lifecycle: connect, disconnect, state, microphone, camera and shared-E2EE keys. The base set every host needs.\n#### This permission set includes:\n\n- `allow-get-native-call-capabilities`\n- `allow-connect-native-call`\n- `allow-disconnect-native-call`\n- `allow-get-native-call-state`\n- `allow-set-native-call-microphone-enabled`\n- `allow-set-native-call-camera-enabled`\n- `allow-switch-native-call-camera`\n- `allow-set-native-call-encryption-key`",
@@ -685,10 +613,10 @@
           "markdownDescription": "Arming picture in picture for the call, so the system may enter it when the user leaves the app.\n#### This permission set includes:\n\n- `allow-set-native-call-pip-enabled`"
         },
         {
-          "description": "Registering the call with the operating system's call UI (CallKit on iOS, Telecom on Android) and answering the actions it reports back.\n#### This permission set includes:\n\n- `allow-report-system-incoming-call`\n- `allow-start-system-call`\n- `allow-answer-system-call`\n- `allow-end-system-call`\n- `allow-set-system-call-muted`\n- `allow-drain-pending-system-call-actions`\n- `allow-fulfill-answer-call`\n- `allow-fulfill-end-call`\n- `allow-report-system-call-connected`\n- `allow-update-call-display`\n- `allow-report-system-call-answered-elsewhere`\n- `allow-report-system-call-declined-elsewhere`\n- `allow-report-system-call-unanswered`\n- `allow-decline-system-call`",
+          "description": "Registering the call with the operating system's call UI (CallKit on iOS, Telecom on Android) and answering the actions it reports back.\n#### This permission set includes:\n\n- `allow-start-system-call`\n- `allow-end-system-call`\n- `allow-set-system-call-muted`\n- `allow-drain-pending-system-call-actions`\n- `allow-fulfill-answer-call`\n- `allow-fulfill-end-call`\n- `allow-report-system-call-connected`\n- `allow-update-call-display`",
           "type": "string",
           "const": "system-calls",
-          "markdownDescription": "Registering the call with the operating system's call UI (CallKit on iOS, Telecom on Android) and answering the actions it reports back.\n#### This permission set includes:\n\n- `allow-report-system-incoming-call`\n- `allow-start-system-call`\n- `allow-answer-system-call`\n- `allow-end-system-call`\n- `allow-set-system-call-muted`\n- `allow-drain-pending-system-call-actions`\n- `allow-fulfill-answer-call`\n- `allow-fulfill-end-call`\n- `allow-report-system-call-connected`\n- `allow-update-call-display`\n- `allow-report-system-call-answered-elsewhere`\n- `allow-report-system-call-declined-elsewhere`\n- `allow-report-system-call-unanswered`\n- `allow-decline-system-call`"
+          "markdownDescription": "Registering the call with the operating system's call UI (CallKit on iOS, Telecom on Android) and answering the actions it reports back.\n#### This permission set includes:\n\n- `allow-start-system-call`\n- `allow-end-system-call`\n- `allow-set-system-call-muted`\n- `allow-drain-pending-system-call-actions`\n- `allow-fulfill-answer-call`\n- `allow-fulfill-end-call`\n- `allow-report-system-call-connected`\n- `allow-update-call-display`"
         },
         {
           "description": "Listing and selecting the call's audio output route.\n#### This permission set includes:\n\n- `allow-get-audio-routes`\n- `allow-set-audio-route`",

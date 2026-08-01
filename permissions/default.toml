@@ -13,9 +13,7 @@ permissions = [
     "allow-clear-native-call-remote-video-overlay",
     "allow-set-native-call-local-video-overlay",
     "allow-clear-native-call-local-video-overlay",
-    "allow-report-system-incoming-call",
     "allow-start-system-call",
-    "allow-answer-system-call",
     "allow-end-system-call",
     "allow-set-system-call-muted",
     "allow-drain-pending-system-call-actions",
@@ -27,8 +25,4 @@ permissions = [
     "allow-get-audio-routes",
     "allow-set-audio-route",
     "allow-update-call-display",
-    "allow-report-system-call-answered-elsewhere",
-    "allow-report-system-call-declined-elsewhere",
-    "allow-report-system-call-unanswered",
-    "allow-decline-system-call",
 ]

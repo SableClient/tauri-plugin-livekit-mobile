@@ -47,9 +47,7 @@ permissions = ["allow-set-native-call-pip-enabled"]
 identifier = "system-calls"
 description = "Registering the call with the operating system's call UI (CallKit on iOS, Telecom on Android) and answering the actions it reports back."
 permissions = [
-    "allow-report-system-incoming-call",
     "allow-start-system-call",
-    "allow-answer-system-call",
     "allow-end-system-call",
     "allow-set-system-call-muted",
     "allow-drain-pending-system-call-actions",
@@ -57,10 +55,6 @@ permissions = [
     "allow-fulfill-end-call",
     "allow-report-system-call-connected",
     "allow-update-call-display",
-    "allow-report-system-call-answered-elsewhere",
-    "allow-report-system-call-declined-elsewhere",
-    "allow-report-system-call-unanswered",
-    "allow-decline-system-call",
 ]
 
 [[set]]

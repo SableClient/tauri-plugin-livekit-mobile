@@ -751,54 +751,6 @@ final class CallKitController: NSObject {
     provider.reportCall(with: uuid, updated: update)
   }
 
-  /// Reports that the call was answered on another device.
-  func reportAnsweredElsewhere(callId: String) {
-    guard !chinaRegion else { return }
-    guard let uuid = uuid(forCallId: callId) else { return }
-    provider.reportCall(with: uuid, endedAt: nil, reason: .answeredElsewhere)
-    forget(uuid: uuid)
-  }
-
-  /// Reports that the call was declined on another device.
-  func reportDeclinedElsewhere(callId: String) {
-    guard !chinaRegion else { return }
-    guard let uuid = uuid(forCallId: callId) else { return }
-    provider.reportCall(with: uuid, endedAt: nil, reason: .declinedElsewhere)
-    forget(uuid: uuid)
-  }
-
-  /// Reports that the call was unanswered (timed out).
-  func reportUnanswered(callId: String) {
-    guard !chinaRegion else { return }
-    guard let uuid = uuid(forCallId: callId) else { return }
-    provider.reportCall(with: uuid, endedAt: nil, reason: .unanswered)
-    forget(uuid: uuid)
-  }
-
-  /// Declines an incoming system call with a reason string that maps to a
-  /// CXCallEndedReason. The caller is responsible for the JS-side cleanup.
-  func declineCall(callId: String, reason: String) {
-    guard !chinaRegion else { return }
-    guard let uuid = uuid(forCallId: callId) else { return }
-
-    let endedReason: CXCallEndedReason
-    switch reason.lowercased() {
-    case "busy", "failed":
-      endedReason = .failed
-    case "dnd", "declinedelsewhere":
-      endedReason = .declinedElsewhere
-    case "answeredelsewhere":
-      endedReason = .answeredElsewhere
-    case "unanswered", "timeout":
-      endedReason = .unanswered
-    default:
-      endedReason = .declinedElsewhere
-    }
-
-    provider.reportCall(with: uuid, endedAt: nil, reason: endedReason)
-    forget(uuid: uuid)
-  }
-
   /// Selectable audio outputs for the route picker. iOS has no output
   /// enumeration API, so availability is derived from the current route and
   /// the available inputs.

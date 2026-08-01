@@ -11,15 +11,13 @@ use tokio::sync::mpsc;
 use crate::{
     error::Error,
     models::{
-        failure_code_from_raw, AnswerSystemCallRequest, ClearNativeCallLocalVideoOverlayRequest,
+        failure_code_from_raw, ClearNativeCallLocalVideoOverlayRequest,
         ClearNativeCallRemoteVideoOverlayRequest, CommandWithSnapshotResponse,
-        DeclineSystemCallRequest, DisconnectNativeCallRequest, EndSystemCallRequest,
-        FulfillAnswerCallRequest, FulfillEndCallRequest, GetAudioRoutesRequest,
-        GetAudioRoutesResponse, NativeCallCapabilities, NativeCallCapabilitiesWire,
-        NativeCallChannelEvent, NativeCallFailureCode, NativeCallSnapshot, NativeConnectCallFields,
-        ReportAnsweredElsewhereRequest, ReportConnectedRequest, ReportDeclinedElsewhereRequest,
-        ReportSystemIncomingCallRequest, ReportUnansweredRequest, SetAudioRouteRequest,
-        SetNativeCallCameraEnabledRequest, SetNativeCallEncryptionKeyRequest,
+        DisconnectNativeCallRequest, EndSystemCallRequest, FulfillAnswerCallRequest,
+        FulfillEndCallRequest, GetAudioRoutesRequest, GetAudioRoutesResponse,
+        NativeCallCapabilities, NativeCallCapabilitiesWire, NativeCallChannelEvent,
+        NativeCallFailureCode, NativeCallSnapshot, NativeConnectCallFields, ReportConnectedRequest,
+        SetAudioRouteRequest, SetNativeCallCameraEnabledRequest, SetNativeCallEncryptionKeyRequest,
         SetNativeCallLocalVideoOverlayRequest, SetNativeCallMicrophoneEnabledRequest,
         SetNativeCallPiPEnabledRequest, SetNativeCallRemoteVideoOverlayRequest,
         SetNativeCallScreenShareEnabledRequest, SetSystemCallMutedRequest, StartSystemCallRequest,
@@ -49,9 +47,7 @@ mod platform_commands {
     pub(super) const CLEAR_REMOTE_VIDEO_OVERLAY: &str = "clearNativeCallRemoteVideoOverlay";
     pub(super) const SET_LOCAL_VIDEO_OVERLAY: &str = "setNativeCallLocalVideoOverlay";
     pub(super) const CLEAR_LOCAL_VIDEO_OVERLAY: &str = "clearNativeCallLocalVideoOverlay";
-    pub(super) const REPORT_INCOMING_CALL: &str = "reportSystemIncomingCall";
     pub(super) const START_SYSTEM_CALL: &str = "startSystemCall";
-    pub(super) const ANSWER_SYSTEM_CALL: &str = "answerSystemCall";
     pub(super) const END_SYSTEM_CALL: &str = "endSystemCall";
     pub(super) const SET_SYSTEM_CALL_MUTED: &str = "setSystemCallMuted";
     pub(super) const DRAIN_PENDING_ACTIONS: &str = "drainPendingSystemCallActions";
@@ -62,10 +58,6 @@ mod platform_commands {
     pub(super) const GET_AUDIO_ROUTES: &str = "getAudioRoutes";
     pub(super) const SET_AUDIO_ROUTE: &str = "setAudioRoute";
     pub(super) const UPDATE_CALL_DISPLAY: &str = "updateCallDisplay";
-    pub(super) const REPORT_ANSWERED_ELSEWHERE: &str = "reportSystemCallAnsweredElsewhere";
-    pub(super) const REPORT_DECLINED_ELSEWHERE: &str = "reportSystemCallDeclinedElsewhere";
-    pub(super) const REPORT_UNANSWERED: &str = "reportSystemCallUnanswered";
-    pub(super) const DECLINE_SYSTEM_CALL: &str = "declineSystemCall";
 }
 #[cfg(target_os = "ios")]
 mod platform_commands {
@@ -83,9 +75,7 @@ mod platform_commands {
     pub(super) const CLEAR_REMOTE_VIDEO_OVERLAY: &str = "clearRemoteVideoOverlay";
     pub(super) const SET_LOCAL_VIDEO_OVERLAY: &str = "setLocalVideoOverlay";
     pub(super) const CLEAR_LOCAL_VIDEO_OVERLAY: &str = "clearLocalVideoOverlay";
-    pub(super) const REPORT_INCOMING_CALL: &str = "reportSystemIncomingCall";
     pub(super) const START_SYSTEM_CALL: &str = "startSystemCall";
-    pub(super) const ANSWER_SYSTEM_CALL: &str = "answerSystemCall";
     pub(super) const END_SYSTEM_CALL: &str = "endSystemCall";
     pub(super) const SET_SYSTEM_CALL_MUTED: &str = "setSystemCallMuted";
     pub(super) const DRAIN_PENDING_ACTIONS: &str = "drainPendingSystemCallActions";
@@ -96,10 +86,6 @@ mod platform_commands {
     pub(super) const GET_AUDIO_ROUTES: &str = "getAudioRoutes";
     pub(super) const SET_AUDIO_ROUTE: &str = "setAudioRoute";
     pub(super) const UPDATE_CALL_DISPLAY: &str = "updateCallDisplay";
-    pub(super) const REPORT_ANSWERED_ELSEWHERE: &str = "reportSystemCallAnsweredElsewhere";
-    pub(super) const REPORT_DECLINED_ELSEWHERE: &str = "reportSystemCallDeclinedElsewhere";
-    pub(super) const REPORT_UNANSWERED: &str = "reportSystemCallUnanswered";
-    pub(super) const DECLINE_SYSTEM_CALL: &str = "declineSystemCall";
 }
 
 /// Upper bound for any single native invocation, so a hung native call
@@ -276,27 +262,11 @@ impl<R: Runtime> MobileBackend<R> {
             .await
     }
 
-    pub(crate) async fn report_system_incoming_call(
-        &self,
-        request: ReportSystemIncomingCallRequest,
-    ) -> crate::Result<()> {
-        self.invoke(platform_commands::REPORT_INCOMING_CALL, request)
-            .await
-    }
-
     pub(crate) async fn start_system_call(
         &self,
         request: StartSystemCallRequest,
     ) -> crate::Result<()> {
         self.invoke(platform_commands::START_SYSTEM_CALL, request)
-            .await
-    }
-
-    pub(crate) async fn answer_system_call(
-        &self,
-        request: AnswerSystemCallRequest,
-    ) -> crate::Result<()> {
-        self.invoke(platform_commands::ANSWER_SYSTEM_CALL, request)
             .await
     }
 
@@ -373,38 +343,6 @@ impl<R: Runtime> MobileBackend<R> {
         request: UpdateCallDisplayRequest,
     ) -> crate::Result<NativeCallSnapshot> {
         self.invoke_for_snapshot(platform_commands::UPDATE_CALL_DISPLAY, request)
-            .await
-    }
-
-    pub(crate) async fn report_system_call_answered_elsewhere(
-        &self,
-        request: ReportAnsweredElsewhereRequest,
-    ) -> crate::Result<()> {
-        self.invoke(platform_commands::REPORT_ANSWERED_ELSEWHERE, request)
-            .await
-    }
-
-    pub(crate) async fn report_system_call_declined_elsewhere(
-        &self,
-        request: ReportDeclinedElsewhereRequest,
-    ) -> crate::Result<()> {
-        self.invoke(platform_commands::REPORT_DECLINED_ELSEWHERE, request)
-            .await
-    }
-
-    pub(crate) async fn report_system_call_unanswered(
-        &self,
-        request: ReportUnansweredRequest,
-    ) -> crate::Result<()> {
-        self.invoke(platform_commands::REPORT_UNANSWERED, request)
-            .await
-    }
-
-    pub(crate) async fn decline_system_call(
-        &self,
-        request: DeclineSystemCallRequest,
-    ) -> crate::Result<()> {
-        self.invoke(platform_commands::DECLINE_SYSTEM_CALL, request)
             .await
     }
 

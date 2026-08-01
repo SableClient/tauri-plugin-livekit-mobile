@@ -90,22 +90,10 @@ internal class SetNativeCallLocalVideoOverlayArgs {
 // ── System-call (Telecom/CallKit) command argument classes ──
 
 @InvokeArg
-internal class ReportSystemIncomingCallArgs {
-    var uuid: String = ""
-    var callerName: String = ""
-}
-
-@InvokeArg
 internal class StartSystemCallArgs {
     var callId: String = ""
     var uuid: String = ""
     var callerName: String = ""
-}
-
-@InvokeArg
-internal class AnswerSystemCallArgs {
-    var callId: String = ""
-    var uuid: String = ""
 }
 
 @InvokeArg
@@ -130,17 +118,6 @@ internal class UpdateCallDisplayArgs {
     var callId: String = ""
     var callerName: String = ""
     var hasVideo: Boolean? = null
-}
-
-@InvokeArg
-internal class SystemCallDetailsArgs {
-    var callId: String = ""
-}
-
-@InvokeArg
-internal class DeclineSystemCallArgs {
-    var callId: String = ""
-    var reason: String = ""
 }
 
 @InvokeArg
@@ -568,31 +545,6 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
 
     // ── System-call (Telecom/CallKit) commands ─────────────────────────────
 
-    @Command
-    fun reportSystemIncomingCall(invoke: Invoke) {
-        val args = runCatching { invoke.parseArgs(ReportSystemIncomingCallArgs::class.java) }.getOrNull()
-        if (args == null || args.callerName.isBlank()) {
-            reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
-            return
-        }
-        val callId = args.uuid.ifBlank { java.util.UUID.randomUUID().toString() }
-        callController.reportIncomingCall(callId, args.callerName) { added ->
-            if (added) {
-                // core-telecom gives the app five seconds from the moment the
-                // call is added to post its CallStyle notification, and this
-                // callback fires the moment Telecom hands back the control
-                // scope. Posting before the call is added would advertise a ring
-                // Telecom may still refuse.
-                controller.presentCall(
-                    callId,
-                    LivekitMobileForegroundService.DIRECTION_INCOMING,
-                    args.callerName,
-                )
-            }
-            settle(invoke, added)
-        }
-    }
-
     /**
      * Registers the call with Telecom and names the ongoing-call notification.
      *
@@ -623,18 +575,6 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
         ) { added ->
             if (!added) controller.dismissCallPresentation(args.callId)
             settle(invoke, added)
-        }
-    }
-
-    @Command
-    fun answerSystemCall(invoke: Invoke) {
-        val args = runCatching { invoke.parseArgs(AnswerSystemCallArgs::class.java) }.getOrNull()
-        if (args == null || args.callId.isBlank()) {
-            reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
-            return
-        }
-        callController.answerCall(args.callId) { answered ->
-            settle(invoke, answered)
         }
     }
 
@@ -750,57 +690,6 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
         // Telecom fixes a call's attributes when it is added; there is no
         // equivalent of CXProvider.reportCall(with:updated:).
         reject(invoke, NativeCallWire.ERR_UNAVAILABLE)
-    }
-
-    @Command
-    fun reportSystemCallAnsweredElsewhere(invoke: Invoke) {
-        val args = runCatching { invoke.parseArgs(SystemCallDetailsArgs::class.java) }.getOrNull()
-        if (args == null || args.callId.isBlank()) {
-            reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
-            return
-        }
-        endSystemCallAndPresentation(args.callId)
-        invoke.resolve(JSObject())
-    }
-
-    @Command
-    fun reportSystemCallDeclinedElsewhere(invoke: Invoke) {
-        val args = runCatching { invoke.parseArgs(SystemCallDetailsArgs::class.java) }.getOrNull()
-        if (args == null || args.callId.isBlank()) {
-            reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
-            return
-        }
-        endSystemCallAndPresentation(args.callId)
-        invoke.resolve(JSObject())
-    }
-
-    @Command
-    fun reportSystemCallUnanswered(invoke: Invoke) {
-        val args = runCatching { invoke.parseArgs(SystemCallDetailsArgs::class.java) }.getOrNull()
-        if (args == null || args.callId.isBlank()) {
-            reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
-            return
-        }
-        endSystemCallAndPresentation(args.callId)
-        invoke.resolve(JSObject())
-    }
-
-    @Command
-    fun declineSystemCall(invoke: Invoke) {
-        val args = runCatching { invoke.parseArgs(DeclineSystemCallArgs::class.java) }.getOrNull()
-        if (args == null || args.callId.isBlank()) {
-            reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
-            return
-        }
-        endSystemCallAndPresentation(args.callId)
-        invoke.resolve(JSObject())
-    }
-
-    /** A call that ended before it ever became a room still owns the ringing
-     * notification and its foreground service; nothing else takes them down. */
-    private fun endSystemCallAndPresentation(callId: String) {
-        callController.endCall(callId)
-        controller.dismissCallPresentation(callId)
     }
 
     // ── Permission callback ────────────────────────────────────────────────

@@ -13,9 +13,7 @@ const COMMANDS: &[&str] = &[
     "clear_native_call_remote_video_overlay",
     "set_native_call_local_video_overlay",
     "clear_native_call_local_video_overlay",
-    "report_system_incoming_call",
     "start_system_call",
-    "answer_system_call",
     "end_system_call",
     "set_system_call_muted",
     "drain_pending_system_call_actions",
@@ -27,10 +25,6 @@ const COMMANDS: &[&str] = &[
     "get_audio_routes",
     "set_audio_route",
     "update_call_display",
-    "report_system_call_answered_elsewhere",
-    "report_system_call_declined_elsewhere",
-    "report_system_call_unanswered",
-    "decline_system_call",
 ];
 
 /// Must match `platforms: [.iOS(...)]` in `ios/Package.swift`.

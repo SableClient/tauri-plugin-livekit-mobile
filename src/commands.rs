@@ -139,29 +139,11 @@ pub(crate) async fn set_native_call_encryption_key<R: Runtime>(
 }
 
 #[tauri_command]
-pub(crate) async fn report_system_incoming_call<R: Runtime>(
-    app: AppHandle<R>,
-    payload: ReportSystemIncomingCallRequest,
-) -> Result<()> {
-    app.native_call_bridge()
-        .report_system_incoming_call(payload)
-        .await
-}
-
-#[tauri_command]
 pub(crate) async fn start_system_call<R: Runtime>(
     app: AppHandle<R>,
     payload: StartSystemCallRequest,
 ) -> Result<()> {
     app.native_call_bridge().start_system_call(payload).await
-}
-
-#[tauri_command]
-pub(crate) async fn answer_system_call<R: Runtime>(
-    app: AppHandle<R>,
-    payload: AnswerSystemCallRequest,
-) -> Result<()> {
-    app.native_call_bridge().answer_system_call(payload).await
 }
 
 #[tauri_command]
@@ -249,42 +231,4 @@ pub(crate) async fn update_call_display<R: Runtime>(
     payload: UpdateCallDisplayRequest,
 ) -> Result<NativeCallSnapshot> {
     app.native_call_bridge().update_call_display(payload).await
-}
-
-#[tauri_command]
-pub(crate) async fn report_system_call_answered_elsewhere<R: Runtime>(
-    app: AppHandle<R>,
-    payload: ReportAnsweredElsewhereRequest,
-) -> Result<()> {
-    app.native_call_bridge()
-        .report_system_call_answered_elsewhere(payload)
-        .await
-}
-
-#[tauri_command]
-pub(crate) async fn report_system_call_declined_elsewhere<R: Runtime>(
-    app: AppHandle<R>,
-    payload: ReportDeclinedElsewhereRequest,
-) -> Result<()> {
-    app.native_call_bridge()
-        .report_system_call_declined_elsewhere(payload)
-        .await
-}
-
-#[tauri_command]
-pub(crate) async fn report_system_call_unanswered<R: Runtime>(
-    app: AppHandle<R>,
-    payload: ReportUnansweredRequest,
-) -> Result<()> {
-    app.native_call_bridge()
-        .report_system_call_unanswered(payload)
-        .await
-}
-
-#[tauri_command]
-pub(crate) async fn decline_system_call<R: Runtime>(
-    app: AppHandle<R>,
-    payload: DeclineSystemCallRequest,
-) -> Result<()> {
-    app.native_call_bridge().decline_system_call(payload).await
 }

@@ -43,9 +43,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::clear_native_call_remote_video_overlay,
             commands::set_native_call_local_video_overlay,
             commands::clear_native_call_local_video_overlay,
-            commands::report_system_incoming_call,
             commands::start_system_call,
-            commands::answer_system_call,
             commands::end_system_call,
             commands::set_system_call_muted,
             commands::drain_pending_system_call_actions,
@@ -57,10 +55,6 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::get_audio_routes,
             commands::set_audio_route,
             commands::update_call_display,
-            commands::report_system_call_answered_elsewhere,
-            commands::report_system_call_declined_elsewhere,
-            commands::report_system_call_unanswered,
-            commands::decline_system_call,
         ])
         .setup(|app, api| {
             #[cfg(mobile)]

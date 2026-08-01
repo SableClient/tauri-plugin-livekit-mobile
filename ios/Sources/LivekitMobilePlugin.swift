@@ -87,20 +87,10 @@ struct SetLocalVideoOverlayArgs: Decodable {
   let devicePixelRatio: Double
 }
 
-struct ReportSystemIncomingCallArgs: Decodable {
-  let uuid: String
-  let callerName: String
-}
-
 struct StartSystemCallArgs: Decodable {
   let callId: String
   let uuid: String
   let callerName: String
-}
-
-struct AnswerSystemCallArgs: Decodable {
-  let callId: String
-  let uuid: String
 }
 
 struct EndSystemCallArgs: Decodable {
@@ -134,11 +124,6 @@ struct UpdateCallDisplayArgs: Decodable {
   let callId: String
   let callerName: String
   let hasVideo: Bool?
-}
-
-struct DeclineSystemCallArgs: Decodable {
-  let callId: String
-  let reason: String
 }
 
 struct ReportConnectedArgs: Decodable {
@@ -605,26 +590,6 @@ final class LivekitMobilePlugin: Plugin {
 
   // MARK: - System call (CallKit) commands
 
-  @objc public func reportSystemIncomingCall(_ invoke: Invoke) throws {
-    guard let args = try? invoke.parseArgs(ReportSystemIncomingCallArgs.self) else {
-      reject(invoke, .invalidRequest)
-      return
-    }
-    Task { @MainActor [weak callKitController] in
-      guard let callKitController else {
-        reject(invoke, .unavailable)
-        return
-      }
-      guard let uuid = UUID(uuidString: args.uuid) else {
-        reject(invoke, .invalidRequest)
-        return
-      }
-      callKitController.reportIncomingCall(uuid: uuid, callerName: args.callerName) { code in
-        Self.settle(invoke, code)
-      }
-    }
-  }
-
   @objc public func startSystemCall(_ invoke: Invoke) throws {
     guard let args = try? invoke.parseArgs(StartSystemCallArgs.self) else {
       reject(invoke, .invalidRequest)
@@ -642,26 +607,6 @@ final class LivekitMobilePlugin: Plugin {
       callKitController.startOutgoingCall(
         uuid: uuid, callId: args.callId, callerName: args.callerName
       ) { code in
-        Self.settle(invoke, code)
-      }
-    }
-  }
-
-  @objc public func answerSystemCall(_ invoke: Invoke) throws {
-    guard let args = try? invoke.parseArgs(AnswerSystemCallArgs.self) else {
-      reject(invoke, .invalidRequest)
-      return
-    }
-    Task { @MainActor [weak callKitController] in
-      guard let callKitController else {
-        reject(invoke, .unavailable)
-        return
-      }
-      guard let uuid = UUID(uuidString: args.uuid) else {
-        reject(invoke, .invalidRequest)
-        return
-      }
-      callKitController.answerCall(uuid: uuid, callId: args.callId) { code in
         Self.settle(invoke, code)
       }
     }
@@ -814,66 +759,6 @@ final class LivekitMobilePlugin: Plugin {
       callKitController.updateCallDisplay(
         callId: args.callId, callerName: args.callerName, hasVideo: args.hasVideo)
       invoke.resolve(SnapshotReceiverResponse(receiver: controller.snapshot()))
-    }
-  }
-
-  @objc public func reportSystemCallAnsweredElsewhere(_ invoke: Invoke) throws {
-    guard let args = try? invoke.parseArgs(DisconnectArgs.self) else {
-      reject(invoke, .invalidRequest)
-      return
-    }
-    Task { @MainActor [weak callKitController] in
-      guard let callKitController else {
-        reject(invoke, .unavailable)
-        return
-      }
-      callKitController.reportAnsweredElsewhere(callId: args.callId)
-      invoke.resolve()
-    }
-  }
-
-  @objc public func reportSystemCallDeclinedElsewhere(_ invoke: Invoke) throws {
-    guard let args = try? invoke.parseArgs(DisconnectArgs.self) else {
-      reject(invoke, .invalidRequest)
-      return
-    }
-    Task { @MainActor [weak callKitController] in
-      guard let callKitController else {
-        reject(invoke, .unavailable)
-        return
-      }
-      callKitController.reportDeclinedElsewhere(callId: args.callId)
-      invoke.resolve()
-    }
-  }
-
-  @objc public func reportSystemCallUnanswered(_ invoke: Invoke) throws {
-    guard let args = try? invoke.parseArgs(DisconnectArgs.self) else {
-      reject(invoke, .invalidRequest)
-      return
-    }
-    Task { @MainActor [weak callKitController] in
-      guard let callKitController else {
-        reject(invoke, .unavailable)
-        return
-      }
-      callKitController.reportUnanswered(callId: args.callId)
-      invoke.resolve()
-    }
-  }
-
-  @objc public func declineSystemCall(_ invoke: Invoke) throws {
-    guard let args = try? invoke.parseArgs(DeclineSystemCallArgs.self) else {
-      reject(invoke, .invalidRequest)
-      return
-    }
-    Task { @MainActor [weak callKitController] in
-      guard let callKitController else {
-        reject(invoke, .unavailable)
-        return
-      }
-      callKitController.declineCall(callId: args.callId, reason: args.reason)
-      invoke.resolve()
     }
   }
 
