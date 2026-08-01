@@ -245,12 +245,14 @@ struct BridgeRemoteParticipant: Encodable, Equatable {
   let connectionQuality: BridgeConnectionQuality?
 }
 
-/// One selectable audio output/input route.
+/// One selectable audio output route. `id` round-trips unchanged to
+/// `setAudioRoute`; `type` is bounded to earpiece, speaker, wired, bluetooth
+/// or unknown.
 struct AudioRoute: Encodable {
+  let id: String
   let name: String
   let type: String
-  let id: String
-  let label: String
+  let current: Bool
 }
 
 /// Wire shape for `getAudioRoutes`.

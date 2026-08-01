@@ -76,6 +76,11 @@ final class CallKitController: NSObject {
   /// Actions deferred until providerDidBegin fires.
   private var pendingStartupActions: [() -> Void] = []
 
+  /// Whether `setAudioRoute` last forced the output to the speaker; used by
+  /// the route picker to tell a receiver-less device from a receiver that is
+  /// simply not carrying the route.
+  private var speakerOverridden = false
+
   /// The two audio-session modes are mutually exclusive:
   ///
   /// - CallKit present: the SDK must not touch AVAudioSession and the engine
@@ -602,59 +607,111 @@ final class CallKitController: NSObject {
     forget(uuid: uuid)
   }
 
-  /// Returns current audio route + available inputs as a JSON array.
+  /// Selectable audio outputs for the route picker. iOS has no output
+  /// enumeration API, so availability is derived from the current route and
+  /// the available inputs.
+  ///
+  /// The default-output entry is either wired or the receiver, never both:
+  /// with a wired output attached, `overrideOutputAudioPort(.none)` lands on
+  /// the wired port, so an earpiece entry would be a no-op.
   func getAudioRoutes(callId: String) -> [AudioRoute] {
     guard !chinaRegion else { return [] }
     let session = AVAudioSession.sharedInstance()
+    let outputs = session.currentRoute.outputs
+    let inputs = session.availableInputs ?? []
     var routes: [AudioRoute] = []
 
-    // Current route first.
-    if let currentOutput = session.currentRoute.outputs.first {
+    let wiredOutput = outputs.first { Self.wiredOutputPorts.contains($0.portType) }
+    if wiredOutput != nil || inputs.contains(where: { Self.wiredInputPorts.contains($0.portType) }) {
+      routes.append(
+        AudioRoute(id: "wired", name: "Headphones", type: "wired", current: wiredOutput != nil))
+    } else if hasReceiver(outputs: outputs) {
       routes.append(
         AudioRoute(
-          name: currentOutput.portName,
-          type: currentOutput.portType.rawValue,
-          id: currentOutput.uid,
-          label: "current"))
+          id: "earpiece", name: "iPhone", type: "earpiece",
+          current: outputs.contains { $0.portType == .builtInReceiver }))
     }
 
-    if let inputs = session.availableInputs {
-      for input in inputs {
-        routes.append(
-          AudioRoute(
-            name: input.portName,
-            type: input.portType.rawValue,
-            id: input.uid,
-            label: "input"))
-      }
+    routes.append(
+      AudioRoute(
+        id: "speaker", name: "Speaker", type: "speaker",
+        current: outputs.contains { $0.portType == .builtInSpeaker }))
+
+    let bluetoothOutput = outputs.first { Self.bluetoothOutputPorts.contains($0.portType) }
+    for input in inputs where input.portType == .bluetoothHFP {
+      let current = bluetoothOutput.map { $0.uid == input.uid || $0.portName == input.portName }
+      routes.append(
+        AudioRoute(
+          id: input.uid, name: input.portName, type: "bluetooth", current: current ?? false))
     }
 
     return routes
   }
 
-  /// Sets the audio route for a call. "speaker" → override output to speaker,
-  /// "earpiece" → restore default (override none), otherwise tries to select
-  /// a Bluetooth or wired input by UID.
+  /// Applies a route id handed out by `getAudioRoutes`. Bluetooth outputs are
+  /// selected through their HFP input, and the built-in mic has to be restored
+  /// explicitly or that preference keeps the output on the headset.
   func setAudioRoute(callId: String, routeId: String) {
     guard !chinaRegion else { return }
     // callId is unused aside from guard; the route change is session-wide.
     let session = AVAudioSession.sharedInstance()
-    if routeId == "speaker" {
+    switch routeId {
+    case "speaker":
+      preferInput(portType: .builtInMic)
       try? session.overrideOutputAudioPort(.speaker)
+      speakerOverridden = true
       log("Audio route set to speaker")
-    } else if routeId == "earpiece" {
+    case "earpiece":
+      preferInput(portType: .builtInMic)
       try? session.overrideOutputAudioPort(.none)
-      log("Audio route set to earpiece (default)")
-    } else {
-      // Try to select Bluetooth/wired device by UID.
+      speakerOverridden = false
+      log("Audio route set to earpiece")
+    case "wired":
+      if let wired = session.availableInputs?.first(where: {
+        Self.wiredInputPorts.contains($0.portType)
+      }) {
+        try? session.setPreferredInput(wired)
+      }
+      try? session.overrideOutputAudioPort(.none)
+      speakerOverridden = false
+      log("Audio route set to wired")
+    default:
       if let preferredInput = session.availableInputs?.first(where: { $0.uid == routeId }) {
+        try? session.overrideOutputAudioPort(.none)
         try? session.setPreferredInput(preferredInput)
-        log("Audio route set to preferred input: \(preferredInput.portName)")
+        speakerOverridden = false
+        log("Audio route set to bluetooth")
       } else {
-        log("Audio route \(routeId) not found in available inputs")
+        log("Audio route not available")
       }
     }
   }
+
+  /// The receiver is only observable while it carries the route, so a speaker
+  /// override this controller applied itself also counts as proof it exists.
+  /// Devices without one (iPad) default to the built-in speaker and never
+  /// need the override.
+  private func hasReceiver(outputs: [AVAudioSessionPortDescription]) -> Bool {
+    outputs.contains { $0.portType == .builtInReceiver } || speakerOverridden
+  }
+
+  private func preferInput(portType: AVAudioSession.Port) {
+    let session = AVAudioSession.sharedInstance()
+    guard let input = session.availableInputs?.first(where: { $0.portType == portType }) else {
+      return
+    }
+    try? session.setPreferredInput(input)
+  }
+
+  private static let wiredOutputPorts: Set<AVAudioSession.Port> = [
+    .headphones, .usbAudio, .lineOut,
+  ]
+  private static let wiredInputPorts: Set<AVAudioSession.Port> = [
+    .headsetMic, .usbAudio, .lineIn,
+  ]
+  private static let bluetoothOutputPorts: Set<AVAudioSession.Port> = [
+    .bluetoothHFP, .bluetoothA2DP, .bluetoothLE,
+  ]
 
   // MARK: - Pending action queue (JS-suspended path)
 

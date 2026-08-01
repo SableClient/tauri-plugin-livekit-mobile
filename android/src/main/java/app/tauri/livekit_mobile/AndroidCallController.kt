@@ -143,7 +143,8 @@ internal class AndroidCallController(
                 onResult(emptyList())
                 return@launch
             }
-            onResult(availableEndpoints(control).mapNotNull(::routeProjection))
+            val currentId = currentEndpoint(control)?.identifier?.toString()
+            onResult(availableEndpoints(control).mapNotNull { routeProjection(it, currentId) })
         }
     }
 
@@ -299,23 +300,35 @@ internal class AndroidCallController(
             emptyList()
         }
 
-    /** Device names never cross the bridge, so the bounded type doubles as the
-     * label. Streaming and unknown endpoints have no wire value and are
-     * dropped. */
-    private fun routeProjection(endpoint: CallEndpointCompat): SystemAudioRoute? {
-        val (type, label) =
+    private suspend fun currentEndpoint(control: CallControlScope): CallEndpointCompat? =
+        try {
+            withTimeoutOrNull(ENDPOINT_TIMEOUT_MS) { control.currentCallEndpoint.first() }
+        } catch (_: Exception) {
+            null
+        }
+
+    /** Streaming and unknown endpoints have no wire value and are dropped.
+     * Bluetooth carries the paired device name so two headsets stay
+     * distinguishable in the picker. */
+    private fun routeProjection(
+        endpoint: CallEndpointCompat,
+        currentId: String?,
+    ): SystemAudioRoute? {
+        val (type, name) =
             when (endpoint.type) {
                 CallEndpointCompat.TYPE_EARPIECE ->
-                    NativeCallWire.ROUTE_EARPIECE to "Earpiece"
+                    NativeCallWire.ROUTE_EARPIECE to "Phone"
                 CallEndpointCompat.TYPE_SPEAKER ->
                     NativeCallWire.ROUTE_SPEAKER to "Speaker"
                 CallEndpointCompat.TYPE_WIRED_HEADSET ->
-                    NativeCallWire.ROUTE_WIRED_HEADSET to "Wired headset"
+                    ROUTE_WIRED to "Headphones"
                 CallEndpointCompat.TYPE_BLUETOOTH ->
-                    NativeCallWire.ROUTE_BLUETOOTH to "Bluetooth"
+                    NativeCallWire.ROUTE_BLUETOOTH to
+                        endpoint.name.toString().ifBlank { "Bluetooth" }
                 else -> return null
             }
-        return SystemAudioRoute(endpoint.identifier.toString(), type, label)
+        val id = endpoint.identifier.toString()
+        return SystemAudioRoute(id, name, type, id == currentId)
     }
 
     // ── Pending action queue (JS-suspended path) ──────────────────────────
@@ -353,6 +366,10 @@ internal class AndroidCallController(
          * documented bound addCall waits for Telecom to hand back a scope. */
         const val ADD_CALL_TIMEOUT_MS = 5_000L
         const val ENDPOINT_TIMEOUT_MS = 1_000L
+
+        /** The picker contract spells this type "wired"; NativeCallWire still
+         * carries the older "wired_headset" spelling. */
+        const val ROUTE_WIRED = "wired"
     }
 }
 
@@ -360,15 +377,16 @@ internal class AndroidCallController(
 
 internal data class SystemAudioRoute(
     val id: String,
+    val name: String,
     val type: String,
-    val label: String,
+    val current: Boolean,
 ) {
     fun toJSObject(): JSObject =
         JSObject()
             .put("id", id)
-            .put("name", label)
+            .put("name", name)
             .put("type", type)
-            .put("label", label)
+            .put("current", current)
 }
 
 // ── SystemCallAction (trigger payload, mirrors Swift side) ────────────────
