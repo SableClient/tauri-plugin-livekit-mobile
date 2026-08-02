@@ -8,7 +8,9 @@ import android.webkit.WebView
 import androidx.core.view.doOnLayout
 import io.livekit.android.room.Room
 import io.livekit.android.room.track.RemoteTrackPublication
+import io.livekit.android.room.track.Track
 import io.livekit.android.room.track.VideoTrack
+import livekit.org.webrtc.RendererCommon.ScalingType
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
@@ -249,6 +251,7 @@ internal class RemoteVideoOverlay(
                         if (attachedTrack !== track) {
                             attachedTrack?.removeRenderer(view)
                             track.addRenderer(view)
+                            applyScalingType(view, room, participantIdentity, trackSid)
                         }
 
                         place(view, webView, parent, rect)
@@ -322,6 +325,7 @@ internal class RemoteVideoOverlay(
                             attachedTrack?.removeRenderer(view)
                             resolved.addRenderer(view)
                             attachedTrack = resolved
+                            room?.let { applyScalingType(view, it, identity, trackSid) }
                             // A swap onto an already laid out tile never
                             // re-lays it, so nothing else would re-sample.
                             notifyVisibilityAfterLayout(view)
@@ -540,7 +544,14 @@ internal class RemoteVideoOverlay(
         room: Room,
         participantIdentity: String,
         trackSid: String,
-    ): VideoTrack? {
+    ): VideoTrack? =
+        resolveSubscribedPublication(room, participantIdentity, trackSid)?.track as? VideoTrack
+
+    private fun resolveSubscribedPublication(
+        room: Room,
+        participantIdentity: String,
+        trackSid: String,
+    ): RemoteTrackPublication? {
         val participant =
             room.remoteParticipants.entries
                 .firstOrNull { (identity, _) -> identity.value == participantIdentity }
@@ -551,7 +562,30 @@ internal class RemoteVideoOverlay(
                 as? RemoteTrackPublication
                 ?: return null
         if (!publication.subscribed) return null
-        return publication.track as? VideoTrack
+        return publication
+    }
+
+    /**
+     * A shared screen is letterboxed: VideoLayoutMeasure defaults to
+     * SCALE_ASPECT_BALANCED, which crops to fill the tile and cuts the sides
+     * off a desktop shown in a portrait slot. Cameras keep that default, where
+     * filling the tile is what you want. Called only on a rebind: the scaling
+     * follows the bound track, and setScalingType always requests a layout.
+     */
+    private fun applyScalingType(
+        view: PassThroughVideoRenderer,
+        room: Room,
+        participantIdentity: String,
+        trackSid: String,
+    ) {
+        val source = resolveSubscribedPublication(room, participantIdentity, trackSid)?.source
+        view.setScalingType(
+            if (source == Track.Source.SCREEN_SHARE) {
+                ScalingType.SCALE_ASPECT_FIT
+            } else {
+                ScalingType.SCALE_ASPECT_BALANCED
+            }
+        )
     }
 
     private fun <T> onMainThread(block: () -> T): T =

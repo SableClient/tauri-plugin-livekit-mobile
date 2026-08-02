@@ -706,10 +706,18 @@ final class RoomController: NSObject {
     if view.track !== track {
       view.track = track
     }
+    view.layoutMode = Self.overlayLayoutMode(for: track)
     view.frame = clipped
     view.isHidden = false
     if #available(iOS 15.0, *) { refreshPiP() }
     invoke.resolve(snapshot())
+  }
+
+  /// A shared screen is letterboxed: `VideoView` defaults to `.fill`, which
+  /// cuts the sides off a desktop shown in a portrait slot. Cameras keep
+  /// `.fill`, where covering the tile is what you want.
+  nonisolated static func overlayLayoutMode(for track: VideoTrack) -> VideoView.LayoutMode {
+    track.source == .screenShareVideo ? .fit : .fill
   }
 
   /// Removes the overlay view. A stale call id is a no-op resolve, matching
@@ -784,6 +792,7 @@ final class RoomController: NSObject {
     if view.track !== track {
       view.track = track
     }
+    view.layoutMode = Self.overlayLayoutMode(for: track)
     view.isHidden = false
     if #available(iOS 15.0, *) { refreshPiP() }
   }
