@@ -24,6 +24,5 @@ build/
 
 dist
 
-# The guest package is consumed directly by Sable's local file dependency.
-!dist-js/
-!dist-js/**
+# Built by the prepare script when a host installs the guest package.
+dist-js/

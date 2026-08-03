@@ -65,9 +65,15 @@ The crate is not yet published to crates.io; use a Git or path dependency.
 tauri-plugin-livekit-mobile = { git = "https://github.com/SableClient/tauri-plugin-livekit-mobile.git" }
 ```
 
-This plugin ships no JavaScript package: call the commands with
-`invoke('plugin:livekit-mobile|<command>')` from `@tauri-apps/api/core`, and
-subscribe to snapshots with `addPluginListener`.
+The guest bindings are not published to npm; install them from the same commit
+as the crate so the wire types match the native side:
+
+```json
+"@sableclient/tauri-plugin-livekit-mobile": "github:SableClient/tauri-plugin-livekit-mobile#<rev>"
+```
+
+`dist-js` is built by the `prepare` script on install, so pnpm hosts must allow
+this package to run its build scripts.
 
 Register the plugin in `src-tauri/src/lib.rs` (or `main.rs`):
 
