@@ -54,11 +54,13 @@ export type NativeCallSnapshot = {
   connectionState: NativeCallConnectionState;
   microphoneEnabled: boolean;
   cameraEnabled: boolean;
+  screenShareEnabled: boolean;
   participantCount: number;
   // Present on current native builds; optional so older payloads and test
   // fixtures without the field remain valid.
   remoteParticipants?: NativeCallRemoteParticipant[];
   lastError?: { code: NativeCallFailureCode; message: string };
+  localConnectionQuality?: string;
 };
 
 export type ConnectNativeCallRequest = {
@@ -159,6 +161,8 @@ export type SystemCallAction = {
   action: SystemCallActionKind;
   uuid: string;
   muted?: boolean;
+  roomId?: string;
+  callerName?: string;
 };
 
 const NATIVE_CALL_EVENT = 'plugin:livekit-mobile://native-call-event';
@@ -185,6 +189,14 @@ export const setNativeCallCameraEnabled = (request: {
   enabled: boolean;
 }): Promise<NativeCallSnapshot> =>
   invoke<NativeCallSnapshot>('plugin:livekit-mobile|set_native_call_camera_enabled', {
+    payload: request,
+  });
+
+export const setNativeCallScreenShareEnabled = (request: {
+  callId: string;
+  enabled: boolean;
+}): Promise<NativeCallSnapshot> =>
+  invoke<NativeCallSnapshot>('plugin:livekit-mobile|set_native_call_screen_share_enabled', {
     payload: request,
   });
 

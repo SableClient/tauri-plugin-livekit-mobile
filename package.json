@@ -20,11 +20,14 @@
     "import": "./dist-js/index.js",
     "require": "./dist-js/index.cjs"
   },
-  "files": ["dist-js"],
+  "files": [
+    "dist-js"
+  ],
   "scripts": {
     "build": "rollup -c",
-    "typecheck": "tsc",
-    "prepare": "rollup -c"
+    "typecheck": "tsc && node scripts/check-command-bindings.mjs",
+    "prepare": "rollup -c",
+    "check-bindings": "node scripts/check-command-bindings.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0"
