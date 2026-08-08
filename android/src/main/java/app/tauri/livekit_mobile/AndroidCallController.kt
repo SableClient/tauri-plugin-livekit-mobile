@@ -138,7 +138,10 @@ internal class AndroidCallController(
      * app's route picker hidden instead of showing a stale list. */
     fun audioRoutes(callId: String, onResult: (List<SystemAudioRoute>) -> Unit) {
         scope.launch {
-            val control = awaitControl(callId)
+            // A picker opening cannot wait out the add-call timeout: where
+            // Telecom never settles this is the whole latency the user sees
+            // before the menu has anything in it.
+            val control = awaitControl(callId, ROUTES_SETTLE_TIMEOUT_MS)
             if (control == null) {
                 onResult(emptyList())
                 return@launch
@@ -151,7 +154,7 @@ internal class AndroidCallController(
     /** Moves call audio to a route previously reported by [audioRoutes]. */
     fun setAudioRoute(callId: String, routeId: String, onResult: (Boolean) -> Unit) {
         scope.launch {
-            val control = awaitControl(callId)
+            val control = awaitControl(callId, ROUTES_SETTLE_TIMEOUT_MS)
             if (control == null) {
                 onResult(false)
                 return@launch
@@ -294,14 +297,20 @@ internal class AndroidCallController(
     /** Waits for the control scope addCall hands back; Telecom may take up to
      * its own add timeout to get there, and answering/routing before then
      * would silently do nothing. */
-    private suspend fun awaitControl(callId: String): CallControlScope? {
+    private suspend fun awaitControl(
+        callId: String,
+        settleTimeoutMs: Long = ADD_CALL_TIMEOUT_MS,
+    ): CallControlScope? {
         val active = activeCalls[callId] ?: return null
-        awaitSettled(active)
+        awaitSettled(active, settleTimeoutMs)
         return active.control
     }
 
-    private suspend fun awaitSettled(active: ActiveCall) {
-        withTimeoutOrNull(ADD_CALL_TIMEOUT_MS) { active.settled.await() }
+    private suspend fun awaitSettled(
+        active: ActiveCall,
+        timeoutMs: Long = ADD_CALL_TIMEOUT_MS,
+    ) {
+        withTimeoutOrNull(timeoutMs) { active.settled.await() }
     }
 
     /** Runs a Telecom transaction, reporting whether it was accepted. */
@@ -388,6 +397,7 @@ internal class AndroidCallController(
          * documented bound addCall waits for Telecom to hand back a scope. */
         const val ADD_CALL_TIMEOUT_MS = 5_000L
         const val ENDPOINT_TIMEOUT_MS = 1_000L
+        const val ROUTES_SETTLE_TIMEOUT_MS = 300L
 
         /** The picker contract spells this type "wired"; NativeCallWire still
          * carries the older "wired_headset" spelling. */
