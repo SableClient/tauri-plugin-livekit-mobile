@@ -9,7 +9,11 @@ import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSArray
 import app.tauri.plugin.JSObject
 import io.livekit.android.LiveKit
+import io.livekit.android.AudioOptions
+import io.livekit.android.LiveKitOverrides
 import io.livekit.android.RoomOptions
+import io.livekit.android.audio.AudioSwitchHandler
+import com.twilio.audioswitch.AudioDevice
 import io.livekit.android.e2ee.E2EEOptions
 import io.livekit.android.events.RoomEvent
 import io.livekit.android.events.collect
@@ -72,6 +76,58 @@ internal class NativeCallController(
 
     /** What the foreground-service notification currently shows. */
     private var presentation = NativeCallPresentation.NONE
+
+    /** LiveKit's audio handler for the current room; it owns the output route. */
+    @Volatile
+    private var audioHandler: AudioSwitchHandler? = null
+
+    /** Outputs LiveKit currently offers, in the wire vocabulary. */
+    fun audioRoutes(callId: String): List<SystemAudioRoute> {
+        if (!isActiveCall(callId)) return emptyList()
+        val handler = audioHandler ?: return emptyList()
+        val selected = handler.selectedAudioDevice
+        return handler.availableAudioDevices.mapNotNull { device ->
+            val type = audioRouteType(device) ?: return@mapNotNull null
+            SystemAudioRoute(
+                id = audioRouteId(device),
+                name = audioRouteName(device),
+                type = type,
+                current = device == selected,
+            )
+        }
+    }
+
+    fun setAudioRoute(callId: String, routeId: String): Boolean {
+        if (!isActiveCall(callId)) return false
+        val handler = audioHandler ?: return false
+        val device =
+            handler.availableAudioDevices.firstOrNull { audioRouteId(it) == routeId }
+                ?: return false
+        handler.selectDevice(device)
+        return true
+    }
+
+    private fun audioRouteType(device: AudioDevice): String? =
+        when (device) {
+            is AudioDevice.Earpiece -> NativeCallWire.ROUTE_EARPIECE
+            is AudioDevice.Speakerphone -> NativeCallWire.ROUTE_SPEAKER
+            is AudioDevice.WiredHeadset -> NativeCallWire.ROUTE_WIRED_HEADSET
+            is AudioDevice.BluetoothHeadset -> NativeCallWire.ROUTE_BLUETOOTH
+            else -> null
+        }
+
+    private fun audioRouteName(device: AudioDevice): String =
+        when (device) {
+            is AudioDevice.Earpiece -> "Phone"
+            is AudioDevice.Speakerphone -> "Speaker"
+            is AudioDevice.WiredHeadset -> "Headphones"
+            else -> device.name.ifBlank { "Bluetooth" }
+        }
+
+    /** Stable within a call: AudioSwitch reuses the device instances, and the
+     * name is what distinguishes two paired headsets. */
+    private fun audioRouteId(device: AudioDevice): String =
+        "${audioRouteType(device) ?: "unknown"}:${device.name}"
 
     fun snapshotJson(): JSObject {
         val current = snapshot
@@ -183,6 +239,17 @@ internal class NativeCallController(
                         LiveKit.create(
                             appContext,
                             RoomOptions(adaptiveStream = true, dynacast = true),
+                            // Owning the handler is what makes the route picker
+                            // work: LiveKit drives the communication device for
+                            // the whole call, so a Telecom endpoint change is
+                            // overridden before it can be confirmed.
+                            LiveKitOverrides(
+                                audioOptions = AudioOptions(
+                                    audioHandler = AudioSwitchHandler(appContext).also {
+                                        audioHandler = it
+                                    },
+                                ),
+                            ),
                         )
                     } catch (_: Exception) {
                         failConnect(currentAttempt, null, invoke, NativeCallWire.ERR_CONNECT_FAILED)
@@ -970,6 +1037,7 @@ internal class NativeCallController(
     }
 
     private fun teardownRoom() {
+        audioHandler = null
         // The renderer's EGL context belongs to the room: drop it first.
         videoOverlay.clear()
         localVideoOverlay.clear()

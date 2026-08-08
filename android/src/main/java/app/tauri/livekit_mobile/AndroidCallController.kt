@@ -9,7 +9,6 @@ import androidx.annotation.RequiresApi
 import androidx.core.telecom.CallAttributesCompat
 import androidx.core.telecom.CallControlResult
 import androidx.core.telecom.CallControlScope
-import androidx.core.telecom.CallEndpointCompat
 import androidx.core.telecom.CallsManager
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
@@ -19,8 +18,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -60,16 +57,6 @@ internal class AndroidCallController(
         /** Completes once addCall either handed back a control scope or gave up,
          * so callers can wait instead of racing the scope into existence. */
         val settled = CompletableDeferred<Unit>()
-
-        /** Latest values of the endpoint flows. Telecom emits these once, right
-         * after the call is added; they are plain flows with no replay, so a
-         * subscriber that arrives when the picker opens sees nothing at all.
-         * Collected for the call's lifetime instead, exactly as isMuted is. */
-        @Volatile
-        var endpoints: List<CallEndpointCompat> = emptyList()
-
-        @Volatile
-        var currentEndpoint: CallEndpointCompat? = null
     }
 
     /** callId → the coroutine and control scope owning that Telecom call. */
@@ -141,44 +128,6 @@ internal class AndroidCallController(
             onResult(
                 transact { control.answer(CallAttributesCompat.CALL_TYPE_AUDIO_CALL) },
             )
-        }
-    }
-
-    /** The endpoints Telecom currently offers for a call, bounded to the wire
-     * vocabulary. Empty when the call has no control scope, which keeps the
-     * app's route picker hidden instead of showing a stale list. */
-    fun audioRoutes(callId: String, onResult: (List<SystemAudioRoute>) -> Unit) {
-        scope.launch {
-            val active = activeCalls[callId]
-            if (active == null) {
-                onResult(emptyList())
-                return@launch
-            }
-            // Only covers a picker opened before Telecom settled; once it has,
-            // the cached endpoints answer without waiting on anything.
-            awaitSettled(active, ROUTES_SETTLE_TIMEOUT_MS)
-            val currentId = active.currentEndpoint?.identifier?.toString()
-            onResult(active.endpoints.mapNotNull { routeProjection(it, currentId) })
-        }
-    }
-
-    /** Moves call audio to a route previously reported by [audioRoutes]. */
-    fun setAudioRoute(callId: String, routeId: String, onResult: (Boolean) -> Unit) {
-        scope.launch {
-            val control = awaitControl(callId, ROUTES_SETTLE_TIMEOUT_MS)
-            if (control == null) {
-                onResult(false)
-                return@launch
-            }
-            val endpoint =
-                activeCalls[callId]?.endpoints?.firstOrNull {
-                    it.identifier.toString() == routeId
-                }
-            if (endpoint == null) {
-                onResult(false)
-                return@launch
-            }
-            onResult(transact { control.requestEndpointChange(endpoint) })
         }
     }
 
@@ -285,26 +234,6 @@ internal class AndroidCallController(
                 ) {
                     active.control = this
                     active.settled.complete(Unit)
-                    // Both flows complete after their first emission, and
-                    // Telecom mints fresh endpoint identifiers whenever it
-                    // rebuilds the set. A single collect therefore freezes the
-                    // cache on identifiers Telecom no longer knows, and
-                    // requestEndpointChange then times out instead of
-                    // confirming. Resubscribe so the ids stay the live ones.
-                    launch {
-                        while (isActive) {
-                            runCatching { availableEndpoints.collect { active.endpoints = it } }
-                            delay(ENDPOINT_RESUBSCRIBE_DELAY_MS)
-                        }
-                    }
-                    launch {
-                        while (isActive) {
-                            runCatching {
-                                currentCallEndpoint.collect { active.currentEndpoint = it }
-                            }
-                            delay(ENDPOINT_RESUBSCRIBE_DELAY_MS)
-                        }
-                    }
                     launch {
                         // The only mute signal core-telecom offers. Calls start
                         // unmuted, so the flow's initial value is not an event.
@@ -354,30 +283,6 @@ internal class AndroidCallController(
             false
         }
 
-    /** Streaming and unknown endpoints have no wire value and are dropped.
-     * Bluetooth carries the paired device name so two headsets stay
-     * distinguishable in the picker. */
-    private fun routeProjection(
-        endpoint: CallEndpointCompat,
-        currentId: String?,
-    ): SystemAudioRoute? {
-        val (type, name) =
-            when (endpoint.type) {
-                CallEndpointCompat.TYPE_EARPIECE ->
-                    NativeCallWire.ROUTE_EARPIECE to "Phone"
-                CallEndpointCompat.TYPE_SPEAKER ->
-                    NativeCallWire.ROUTE_SPEAKER to "Speaker"
-                CallEndpointCompat.TYPE_WIRED_HEADSET ->
-                    ROUTE_WIRED to "Headphones"
-                CallEndpointCompat.TYPE_BLUETOOTH ->
-                    NativeCallWire.ROUTE_BLUETOOTH to
-                        endpoint.name.toString().ifBlank { "Bluetooth" }
-                else -> return null
-            }
-        val id = endpoint.identifier.toString()
-        return SystemAudioRoute(id, name, type, id == currentId)
-    }
-
     // ── Pending action queue (JS-suspended path) ──────────────────────────
 
     private fun enqueue(action: SystemCallAction) {
@@ -412,12 +317,9 @@ internal class AndroidCallController(
         /** CallsManager.ADD_CALL_TIMEOUT is internal to core-telecom; 5s is the
          * documented bound addCall waits for Telecom to hand back a scope. */
         const val ADD_CALL_TIMEOUT_MS = 5_000L
-        const val ROUTES_SETTLE_TIMEOUT_MS = 300L
-        const val ENDPOINT_RESUBSCRIBE_DELAY_MS = 200L
 
         /** The picker contract spells this type "wired"; NativeCallWire still
          * carries the older "wired_headset" spelling. */
-        const val ROUTE_WIRED = "wired"
     }
 }
 

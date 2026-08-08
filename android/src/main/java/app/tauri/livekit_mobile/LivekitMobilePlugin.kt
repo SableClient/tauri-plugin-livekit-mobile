@@ -680,16 +680,12 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
             reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
             return
         }
-        callController.audioRoutes(args.callId) { routes ->
-            invoke.resolve(
-                JSObject()
-                    .put(
-                        "routes",
-                        JSArray().apply { routes.forEach { put(it.toJSObject()) } },
-                    )
-                    .put("receiver", controller.snapshotJson()),
-            )
-        }
+        val routes = controller.audioRoutes(args.callId)
+        invoke.resolve(
+            JSObject()
+                .put("routes", JSArray().apply { routes.forEach { put(it.toJSObject()) } })
+                .put("receiver", controller.snapshotJson()),
+        )
     }
 
     @Command
@@ -699,12 +695,10 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
             reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
             return
         }
-        callController.setAudioRoute(args.callId, args.routeId) { changed ->
-            if (changed) {
-                invoke.resolve(JSObject().put("receiver", controller.snapshotJson()))
-            } else {
-                rejectUnavailable(invoke)
-            }
+        if (controller.setAudioRoute(args.callId, args.routeId)) {
+            invoke.resolve(JSObject().put("receiver", controller.snapshotJson()))
+        } else {
+            rejectUnavailable(invoke)
         }
     }
 
