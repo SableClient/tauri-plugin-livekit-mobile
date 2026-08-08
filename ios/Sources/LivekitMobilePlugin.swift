@@ -219,12 +219,20 @@ struct BridgeRemoteScreenShare: Encodable, Equatable {
   let subscribed: Bool
 }
 
+struct BridgeRemoteMicrophone: Encodable, Equatable {
+  let sid: String
+  let muted: Bool
+  let subscribed: Bool
+}
+
 struct BridgeRemoteParticipant: Encodable, Equatable {
   let identity: String
   /// Present only while the participant has a camera publication.
   let camera: BridgeRemoteCamera?
   /// Present only while the participant has a screen-share publication.
   let screenShare: BridgeRemoteScreenShare?
+  /// Present only while the participant has an audio publication.
+  let microphone: BridgeRemoteMicrophone?
   /// Omitted when the SDK reports `.unknown`.
   let connectionQuality: BridgeConnectionQuality?
 }
@@ -316,6 +324,9 @@ struct BridgeCapabilities: Encodable {
   let backgroundAudio: Bool
   let camera: Bool
   let nativeVideoOverlay: Bool
+  let screenShare: Bool
+  let audioRoutes: Bool
+  let systemCalls: Bool
   let callKit: Bool
   let nativePiP: Bool
 }
@@ -369,6 +380,7 @@ final class LivekitMobilePlugin: Plugin {
     invoke.resolve(
       BridgeCapabilities(
         microphone: true, backgroundAudio: true, camera: true, nativeVideoOverlay: true,
+        screenShare: true, audioRoutes: true, systemCalls: true,
         callKit: callKitController.isCallKitAvailable, nativePiP: piPAvailable))
   }
 

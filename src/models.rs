@@ -251,11 +251,21 @@ pub struct NativeCallScreenShare {
     pub subscribed: bool,
 }
 
+/// Microphone projection of one remote participant's audio publication.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeCallRemoteMicrophone {
+    pub sid: String,
+    pub muted: bool,
+    pub subscribed: bool,
+}
+
 /// Remote-only participant projection; `identity` is the opaque backend
 /// identity. `camera` exists only while the participant has a remote camera
 /// publication. `screen_share` exists only while the participant has a
-/// remote screen-share publication. `connection_quality` is the bounded
-/// LiveKit ``ConnectionQuality`` vocabulary ("lost"/"poor"/"good"/
+/// remote screen-share publication. `microphone` exists only while the
+/// participant has a remote audio publication. `connection_quality` is the
+/// bounded LiveKit ``ConnectionQuality`` vocabulary ("lost"/"poor"/"good"/
 /// "excellent"); omitted when unknown.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -265,6 +275,8 @@ pub struct NativeCallRemoteParticipant {
     pub camera: Option<NativeCallRemoteCamera>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub screen_share: Option<NativeCallScreenShare>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub microphone: Option<NativeCallRemoteMicrophone>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connection_quality: Option<String>,
 }
@@ -840,12 +852,14 @@ mod tests {
                         subscribed: true,
                     }),
                     screen_share: None,
+                    microphone: None,
                     connection_quality: None,
                 },
                 NativeCallRemoteParticipant {
                     identity: "@bob:example.org".into(),
                     camera: None,
                     screen_share: None,
+                    microphone: None,
                     connection_quality: None,
                 },
             ]

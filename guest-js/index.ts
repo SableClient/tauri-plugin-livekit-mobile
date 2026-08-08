@@ -26,7 +26,12 @@ export type NativeCallCapabilities = {
   nativeRoom: boolean;
   camera: boolean;
   nativeVideoOverlay: boolean;
+  screenShare: boolean;
+  pictureInPicture: boolean;
   callKit: boolean;
+  systemCalls: boolean;
+  audioRoutes: boolean;
+  pushKit: boolean;
 };
 
 export type NativeCallEncryptionKeyPayload = {
@@ -45,6 +50,7 @@ export type NativeCallRemoteParticipant = {
   identity: string;
   camera?: NativeCallRemoteCamera;
   screenShare?: NativeCallRemoteCamera;
+  microphone?: NativeCallRemoteCamera;
   connectionQuality?: string;
 };
 

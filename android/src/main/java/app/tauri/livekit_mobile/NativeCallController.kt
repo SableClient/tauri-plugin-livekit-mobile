@@ -81,6 +81,7 @@ internal class NativeCallController(
             put("connectionState", current.connectionState)
             put("microphoneEnabled", current.microphoneEnabled)
             put("cameraEnabled", current.cameraEnabled)
+            put("screenShareEnabled", current.screenShareEnabled)
             put("participantCount", current.participantCount)
             put(
                 "remoteParticipants",
@@ -98,6 +99,24 @@ internal class NativeCallController(
                                             .put("subscribed", camera.subscribed),
                                     )
                                 }
+                                participant.screenShare?.let { screenShare ->
+                                    put(
+                                        "screenShare",
+                                        JSObject()
+                                            .put("sid", screenShare.sid)
+                                            .put("muted", screenShare.muted)
+                                            .put("subscribed", screenShare.subscribed),
+                                    )
+                                }
+                                participant.microphone?.let { microphone ->
+                                    put(
+                                        "microphone",
+                                        JSObject()
+                                            .put("sid", microphone.sid)
+                                            .put("muted", microphone.muted)
+                                            .put("subscribed", microphone.subscribed),
+                                    )
+                                }
                                 participant.connectionQuality?.let { quality ->
                                     put("connectionQuality", quality)
                                 }
@@ -113,6 +132,9 @@ internal class NativeCallController(
                         .put("code", code)
                         .put("message", NativeCallWire.messageFor(code)),
                 )
+            }
+            current.localConnectionQuality?.let { quality ->
+                put("localConnectionQuality", quality)
             }
         }
     }
@@ -736,15 +758,19 @@ internal class NativeCallController(
                 videoOverlay.reconcile(room)
             }
             is RoomEvent.ConnectionQualityChanged ->
-                applyRemoteProjectionIfChanged(event.participant)
+                if (event.participant is RemoteParticipant) {
+                    applyRemoteProjectionIfChanged(event.participant)
+                } else {
+                    applyLocalConnectionQualityIfChanged(event.quality)
+                }
             else -> Unit
         }
     }
 
     /**
      * Smallest authoritative remote-only projection: identity, connection
-     * quality, plus the remote CAMERA publication (sid, muted, remote-aware
-     * subscribed) when one exists.
+     * quality, plus the remote CAMERA, SCREEN_SHARE and MICROPHONE
+     * publications (sid, muted, remote-aware subscribed) when one exists.
      * Sorted so identical room state always projects to an equal list.
      */
     private fun remoteParticipantsProjection(
@@ -753,23 +779,43 @@ internal class NativeCallController(
         val participants = currentRoom?.remoteParticipants ?: return emptyList()
         return participants.entries
             .map { (identity, participant) ->
-                // sid is non-null in 2.27.0; sort so several camera
-                // publications project deterministically (matches iOS).
-                val camera =
+                // sid is non-null in 2.27.0; sort so several publications of the
+                // same source project deterministically (matches iOS).
+                val publicationFor = { source: Track.Source ->
                     participant.trackPublications.values
-                        .filter { it.source == Track.Source.CAMERA }
+                        .filter { it.source == source }
                         .sortedBy { it.sid }
                         .firstOrNull()
-                        ?.let { publication ->
-                            NativeRemoteParticipant.Camera(
-                                sid = publication.sid,
-                                muted = publication.muted,
-                                subscribed = publication.subscribed,
-                            )
-                        }
+                }
+                val camera =
+                    publicationFor(Track.Source.CAMERA)?.let { publication ->
+                        NativeRemoteParticipant.Camera(
+                            sid = publication.sid,
+                            muted = publication.muted,
+                            subscribed = publication.subscribed,
+                        )
+                    }
+                val screenShare =
+                    publicationFor(Track.Source.SCREEN_SHARE)?.let { publication ->
+                        NativeRemoteParticipant.ScreenShare(
+                            sid = publication.sid,
+                            muted = publication.muted,
+                            subscribed = publication.subscribed,
+                        )
+                    }
+                val microphone =
+                    publicationFor(Track.Source.MICROPHONE)?.let { publication ->
+                        NativeRemoteParticipant.Microphone(
+                            sid = publication.sid,
+                            muted = publication.muted,
+                            subscribed = publication.subscribed,
+                        )
+                    }
                 NativeRemoteParticipant(
                     identity = identity.value,
                     camera = camera,
+                    screenShare = screenShare,
+                    microphone = microphone,
                     connectionQuality = connectionQualityWire(participant.connectionQuality),
                 )
             }
@@ -792,6 +838,13 @@ internal class NativeCallController(
         val projection = remoteParticipantsProjection(room)
         if (snapshot.remoteParticipants == projection) return
         transition { copy(remoteParticipants = projection) }
+        emitSnapshotChanged()
+    }
+
+    private fun applyLocalConnectionQualityIfChanged(quality: ConnectionQuality) {
+        val wire = connectionQualityWire(quality)
+        if (snapshot.localConnectionQuality == wire) return
+        transition { copy(localConnectionQuality = wire) }
         emitSnapshotChanged()
     }
 

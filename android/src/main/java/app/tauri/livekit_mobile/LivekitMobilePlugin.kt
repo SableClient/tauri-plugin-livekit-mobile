@@ -251,6 +251,9 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
                 .put("camera", true)
                 .put("nativeVideoOverlay", true)
                 .put("screenShare", false)
+                .put("pictureInPicture", pictureInPicture.supported)
+                .put("systemCalls", true)
+                .put("audioRoutes", true)
                 .put("devicePicker", false),
         )
     }

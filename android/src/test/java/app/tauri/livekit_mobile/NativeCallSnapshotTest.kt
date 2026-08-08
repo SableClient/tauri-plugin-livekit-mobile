@@ -93,6 +93,73 @@ class NativeCallSnapshotTest {
     }
 
     @Test
+    fun `remote participant screen share defaults to omitted`() {
+        assertNull(NativeRemoteParticipant(identity = "alice").screenShare)
+    }
+
+    @Test
+    fun `remote participant microphone defaults to omitted`() {
+        assertNull(NativeRemoteParticipant(identity = "alice").microphone)
+    }
+
+    @Test
+    fun `projection tracks a remote mute flip`() {
+        val unmuted =
+            NativeRemoteParticipant(
+                identity = "alice",
+                microphone =
+                    NativeRemoteParticipant.Microphone(
+                        sid = "TR_MIC1",
+                        muted = false,
+                        subscribed = true,
+                    ),
+            )
+        val muted =
+            unmuted.copy(microphone = unmuted.microphone?.copy(muted = true))
+        assertNotEquals(unmuted, muted)
+    }
+
+    @Test
+    fun `toIdle clears screen share and local connection quality`() {
+        val active =
+            NativeCallSnapshot(
+                callId = "a",
+                connectionState = NativeCallWire.STATE_CONNECTED,
+                screenShareEnabled = true,
+                localConnectionQuality = NativeCallWire.QUALITY_POOR,
+            )
+        val idle = active.toIdle()
+        assertFalse(idle.screenShareEnabled)
+        assertNull(idle.localConnectionQuality)
+    }
+
+    @Test
+    fun `projection distinguishes a screen share from a camera`() {
+        val cameraOnly =
+            NativeRemoteParticipant(
+                identity = "alice",
+                camera =
+                    NativeRemoteParticipant.Camera(
+                        sid = "TR_CAM1",
+                        muted = false,
+                        subscribed = true,
+                    ),
+            )
+        val sharing =
+            cameraOnly.copy(
+                screenShare =
+                    NativeRemoteParticipant.ScreenShare(
+                        sid = "TR_SCREEN1",
+                        muted = false,
+                        subscribed = true,
+                    ),
+            )
+        assertNotEquals(cameraOnly, sharing)
+        assertEquals("TR_CAM1", sharing.camera?.sid)
+        assertEquals("TR_SCREEN1", sharing.screenShare?.sid)
+    }
+
+    @Test
     fun `projection equality dedupes no-op camera changes`() {
         val base =
             NativeCallSnapshot(

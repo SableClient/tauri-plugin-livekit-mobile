@@ -164,9 +164,12 @@ final class WireContractTests: XCTestCase {
             camera: BridgeRemoteCamera(sid: "TR_VC1", muted: false, subscribed: true),
             screenShare: BridgeRemoteScreenShare(
               sid: "TR_SS1", muted: false, subscribed: true),
+            microphone: BridgeRemoteMicrophone(
+              sid: "TR_MIC1", muted: true, subscribed: true),
             connectionQuality: .excellent),
           BridgeRemoteParticipant(
-            identity: "bob", camera: nil, screenShare: nil, connectionQuality: nil),
+            identity: "bob", camera: nil, screenShare: nil, microphone: nil,
+            connectionQuality: nil),
         ],
         lastError: BridgeError(.mediaFailed), localConnectionQuality: .good))
     try assertSnapshotKeys(
@@ -186,19 +189,24 @@ final class WireContractTests: XCTestCase {
     XCTAssertEqual(screenShare["sid"] as? String, "TR_SS1")
     XCTAssertEqual(screenShare["muted"] as? Bool, false)
     XCTAssertEqual(screenShare["subscribed"] as? Bool, true)
+    let microphone = try XCTUnwrap(alice["microphone"] as? [String: Any])
+    XCTAssertEqual(microphone["sid"] as? String, "TR_MIC1")
+    XCTAssertEqual(microphone["muted"] as? Bool, true)
+    XCTAssertEqual(microphone["subscribed"] as? Bool, true)
     XCTAssertEqual(alice["connectionQuality"] as? String, "excellent")
 
-    // `camera`, `screenShare` and `connectionQuality` are omitted (not null)
-    // when the participant has no such publication or no known quality.
+    // `camera`, `screenShare`, `microphone` and `connectionQuality` are
+    // omitted (not null) when the participant has no such publication or no
+    // known quality.
     let bob = participants[1]
     XCTAssertEqual(bob["identity"] as? String, "bob")
     XCTAssertNil(bob["camera"])
     XCTAssertNil(bob["screenShare"])
+    XCTAssertNil(bob["microphone"])
     XCTAssertNil(bob["connectionQuality"])
-    // The projection never carries names, metadata, or audio tracks.
+    // The projection never carries names or metadata.
     XCTAssertNil(alice["name"])
     XCTAssertNil(alice["metadata"])
-    XCTAssertNil(alice["audio"])
 
     let lastError = try XCTUnwrap(state["lastError"] as? [String: Any])
     XCTAssertEqual(lastError["code"] as? String, "media_failed")

@@ -1198,8 +1198,9 @@ final class RoomController: NSObject {
   // MARK: - Remote participant projection
 
   /// Minimal remote-only projection: identity (from the room's participant
-  /// key) plus the camera and screen-share publications with remote-aware
-  /// mute/subscription state. Sorted by identity so the snapshot is stable.
+  /// key) plus the camera, screen-share and microphone publications with
+  /// remote-aware mute/subscription state. Sorted by identity so the snapshot
+  /// is stable.
   nonisolated static func projectRemoteParticipants(
     in room: Room
   ) -> [BridgeRemoteParticipant] {
@@ -1225,9 +1226,20 @@ final class RoomController: NSObject {
               sid: $0.sid.stringValue, muted: $0.isMuted,
               subscribed: $0.isSubscribed)
           }
+        let microphone =
+          participant.trackPublications.values
+          .filter { $0.source == .microphone }
+          .sorted { $0.sid.stringValue < $1.sid.stringValue }
+          .first
+          .map {
+            BridgeRemoteMicrophone(
+              sid: $0.sid.stringValue, muted: $0.isMuted,
+              subscribed: $0.isSubscribed)
+          }
         return BridgeRemoteParticipant(
           identity: identity.stringValue, camera: camera,
           screenShare: screenShare,
+          microphone: microphone,
           connectionQuality: Self.connectionQualityWire(participant.connectionQuality))
       }
       .sorted { $0.identity < $1.identity }
