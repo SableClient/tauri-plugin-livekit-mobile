@@ -19,6 +19,7 @@ import io.livekit.android.room.participant.Participant
 import io.livekit.android.room.participant.RemoteParticipant
 import io.livekit.android.room.track.LocalVideoTrack
 import io.livekit.android.room.track.Track
+import io.livekit.android.room.track.screencapture.ScreenCaptureParams
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -460,6 +461,119 @@ internal class NativeCallController(
         }
     }
 
+    /**
+     * Publishes or retracts the screen share. [projectionData] is the Intent
+     * MediaProjection handed back from the system consent dialog; it is
+     * required to enable and ignored to disable.
+     */
+    fun setScreenShareEnabled(
+        callId: String,
+        enabled: Boolean,
+        projectionData: Intent?,
+        invoke: Invoke,
+    ) {
+        scope.launch {
+            if (snapshot.callId != callId) {
+                invoke.resolve(snapshotJson())
+                return@launch
+            }
+            val currentRoom = room
+            if (currentRoom == null) {
+                reject(invoke, NativeCallWire.ERR_UNAVAILABLE)
+                return@launch
+            }
+            if (snapshot.screenShareEnabled == enabled) {
+                invoke.resolve(snapshotJson())
+                return@launch
+            }
+            // Non-null exactly while enabling, which is also what selects the
+            // capture branch below.
+            val consent = if (enabled) projectionData else null
+            if (enabled && consent == null) {
+                reject(invoke, NativeCallWire.ERR_PERMISSION_DENIED)
+                return@launch
+            }
+            // The mediaProjection service type has to be foreground *before*
+            // capture starts on Android 14+, so the restart cannot wait until
+            // after the publication the way the camera's does.
+            if (enabled) {
+                startCallForegroundService(
+                    preferMicrophone = snapshot.microphoneEnabled,
+                    preferCamera = snapshot.cameraEnabled,
+                    preferScreenShare = true,
+                )
+            }
+            val applied = try {
+                if (consent != null) {
+                    currentRoom.localParticipant.setScreenShareEnabled(
+                        true,
+                        ScreenCaptureParams(
+                            mediaProjectionPermissionResultData = consent,
+                            // The system's own "Stop sharing" bypasses this
+                            // plugin entirely; without this the snapshot would
+                            // keep claiming a share that no longer exists.
+                            onStop = { handleScreenShareStopped(callId) },
+                        ),
+                    )
+                } else {
+                    currentRoom.localParticipant.setScreenShareEnabled(false)
+                }
+            } catch (_: Exception) {
+                if (enabled) {
+                    startCallForegroundService(
+                        preferMicrophone = snapshot.microphoneEnabled,
+                        preferCamera = snapshot.cameraEnabled,
+                        preferScreenShare = false,
+                    )
+                }
+                transition { copy(lastErrorCode = NativeCallWire.ERR_MEDIA_FAILED) }
+                emitSnapshotChanged()
+                reject(invoke, NativeCallWire.ERR_MEDIA_FAILED)
+                return@launch
+            }
+            // The SDK reports a refused capture by returning false, not by
+            // throwing, so the result has to be checked as well as the throw.
+            if (!applied) {
+                if (enabled) {
+                    startCallForegroundService(
+                        preferMicrophone = snapshot.microphoneEnabled,
+                        preferCamera = snapshot.cameraEnabled,
+                        preferScreenShare = false,
+                    )
+                }
+                transition { copy(lastErrorCode = NativeCallWire.ERR_MEDIA_FAILED) }
+                emitSnapshotChanged()
+                reject(invoke, NativeCallWire.ERR_MEDIA_FAILED)
+                return@launch
+            }
+            transition { copy(screenShareEnabled = enabled) }
+            if (!enabled) {
+                startCallForegroundService(
+                    preferMicrophone = snapshot.microphoneEnabled,
+                    preferCamera = snapshot.cameraEnabled,
+                    preferScreenShare = false,
+                )
+            }
+            emitSnapshotChanged()
+            invoke.resolve(snapshotJson())
+        }
+    }
+
+    /** The user stopped the share from the system UI; the track is already gone
+     * by the time this runs, so only our own state and service type follow. */
+    private fun handleScreenShareStopped(callId: String) {
+        scope.launch {
+            if (snapshot.callId != callId || !snapshot.screenShareEnabled) return@launch
+            transition { copy(screenShareEnabled = false) }
+            startCallForegroundService(
+                preferMicrophone = snapshot.microphoneEnabled,
+                preferCamera = snapshot.cameraEnabled,
+                preferScreenShare = false,
+            )
+            emitSnapshotChanged()
+        }
+    }
+
     fun switchCamera(callId: String, invoke: Invoke) {
         scope.launch {
             if (snapshot.callId != callId) {
@@ -896,6 +1010,7 @@ internal class NativeCallController(
     private fun startCallForegroundService(
         preferMicrophone: Boolean,
         preferCamera: Boolean = false,
+        preferScreenShare: Boolean = snapshot.screenShareEnabled,
     ) {
         val intent =
             Intent(appContext, LivekitMobileForegroundService::class.java)
@@ -917,6 +1032,10 @@ internal class NativeCallController(
                     presentation.callerName,
                 )
                 .putExtra(LivekitMobileForegroundService.EXTRA_PLAYBACK, true)
+                .putExtra(
+                    LivekitMobileForegroundService.EXTRA_SCREEN_SHARE,
+                    preferScreenShare,
+                )
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 ContextCompat.startForegroundService(appContext, intent)

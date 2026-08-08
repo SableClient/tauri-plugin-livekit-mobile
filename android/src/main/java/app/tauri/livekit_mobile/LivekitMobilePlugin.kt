@@ -1,11 +1,15 @@
 package app.tauri.livekit_mobile
 
 import android.app.Activity
+import android.content.Context
 import android.content.pm.PackageManager
+import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.view.View
 import android.webkit.WebView
+import androidx.activity.result.ActivityResult
 import androidx.core.content.ContextCompat
+import app.tauri.annotation.ActivityCallback
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.Permission
@@ -47,6 +51,12 @@ internal class SetNativeCallMicrophoneEnabledArgs {
 
 @InvokeArg
 internal class SetNativeCallCameraEnabledArgs {
+    var callId: String = ""
+    var enabled: Boolean = false
+}
+
+@InvokeArg
+internal class SetNativeCallScreenShareEnabledArgs {
     var callId: String = ""
     var enabled: Boolean = false
 }
@@ -156,6 +166,10 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
 
     private val localVideoOverlay = LocalVideoOverlay(webViewProvider = { hostWebView })
 
+    /** Survives the trip through the system consent dialog, which cannot carry
+     * arguments of its own. */
+    private var pendingScreenShareCallId: String? = null
+
     private val pictureInPicture =
         NativeCallPictureInPicture(activity) { active -> applyPictureInPictureMode(active) }
 
@@ -250,7 +264,7 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
                 .put("backgroundJavascript", false)
                 .put("camera", true)
                 .put("nativeVideoOverlay", true)
-                .put("screenShare", false)
+                .put("screenShare", true)
                 .put("pictureInPicture", pictureInPicture.supported)
                 .put("systemCalls", true)
                 .put("audioRoutes", true)
@@ -399,12 +413,65 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
         controller.switchCamera(args.callId, invoke)
     }
 
-    /** The plugin publishes no screen-share track. Declared so the failure is
-     * the bounded code the app already maps instead of Tauri's generic "method
-     * not implemented". */
+    /**
+     * Publishing needs the user's MediaProjection consent, which only an
+     * Activity result can give. Enabling therefore hands the invoke to the
+     * system dialog and settles it in [handleScreenCaptureConsent]; disabling
+     * needs no consent and settles here.
+     */
     @Command
     fun setNativeCallScreenShareEnabled(invoke: Invoke) {
-        rejectUnavailable(invoke)
+        val args =
+            runCatching { invoke.parseArgs(SetNativeCallScreenShareEnabledArgs::class.java) }
+                .getOrNull()
+        if (args == null || args.callId.isBlank()) {
+            reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
+            return
+        }
+        if (!controller.isActiveCall(args.callId)) {
+            invoke.resolve(controller.snapshotJson())
+            return
+        }
+        if (!args.enabled) {
+            controller.setScreenShareEnabled(args.callId, false, null, invoke)
+            return
+        }
+        val manager =
+            activity.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as? MediaProjectionManager
+        if (manager == null) {
+            reject(invoke, NativeCallWire.ERR_UNAVAILABLE)
+            return
+        }
+        pendingScreenShareCallId = args.callId
+        runCatching {
+                startActivityForResult(
+                    invoke,
+                    manager.createScreenCaptureIntent(),
+                    "handleScreenCaptureConsent",
+                )
+            }
+            .onFailure {
+                pendingScreenShareCallId = null
+                reject(invoke, NativeCallWire.ERR_UNAVAILABLE)
+            }
+    }
+
+    @ActivityCallback
+    fun handleScreenCaptureConsent(invoke: Invoke, result: ActivityResult) {
+        val callId = pendingScreenShareCallId
+        pendingScreenShareCallId = null
+        val data = result.data
+        if (callId == null) {
+            reject(invoke, NativeCallWire.ERR_UNAVAILABLE)
+            return
+        }
+        // Declining the system dialog is a user choice, not a failure: settle
+        // with the unchanged snapshot so the toggle simply springs back.
+        if (result.resultCode != Activity.RESULT_OK || data == null) {
+            invoke.resolve(controller.snapshotJson())
+            return
+        }
+        controller.setScreenShareEnabled(callId, true, data, invoke)
     }
 
     /**

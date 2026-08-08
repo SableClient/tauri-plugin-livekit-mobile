@@ -35,6 +35,7 @@ class LivekitMobileForegroundService : Service() {
         val wantsMicrophone = intent?.getBooleanExtra(EXTRA_MICROPHONE, false) ?: false
         val wantsCamera = intent?.getBooleanExtra(EXTRA_CAMERA, false) ?: false
         val wantsPlayback = intent?.getBooleanExtra(EXTRA_PLAYBACK, true) ?: true
+        val wantsScreenShare = intent?.getBooleanExtra(EXTRA_SCREEN_SHARE, false) ?: false
 
         val notification = when (callDirection) {
             DIRECTION_INCOMING -> buildIncomingCallNotification(callerName, callId)
@@ -51,6 +52,12 @@ class LivekitMobileForegroundService : Service() {
                 // since an unmet precondition throws instead.
                 if (wantsCamera) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
                 if (wantsPlayback) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                // Android 14+ refuses MediaProjection.createVirtualDisplay
+                // unless a service carrying this type is already foreground, so
+                // the caller restarts us with the extra before capture starts.
+                if (wantsScreenShare) {
+                    types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                }
                 // FOREGROUND_SERVICE_TYPE_PHONE_CALL for targetSdk 34+ system-call usage.
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                     types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
@@ -313,6 +320,7 @@ class LivekitMobileForegroundService : Service() {
         const val EXTRA_MICROPHONE = "app.tauri.livekit_mobile.extra.MICROPHONE"
         const val EXTRA_CAMERA = "app.tauri.livekit_mobile.extra.CAMERA"
         const val EXTRA_PLAYBACK = "app.tauri.livekit_mobile.extra.PLAYBACK"
+        const val EXTRA_SCREEN_SHARE = "app.tauri.livekit_mobile.extra.SCREEN_SHARE"
         const val EXTRA_CALL_DIRECTION = "app.tauri.livekit_mobile.extra.CALL_DIRECTION"
         const val EXTRA_CALLER_NAME = "app.tauri.livekit_mobile.extra.CALLER_NAME"
         const val EXTRA_CALL_ID = "app.tauri.livekit_mobile.extra.CALL_ID"
