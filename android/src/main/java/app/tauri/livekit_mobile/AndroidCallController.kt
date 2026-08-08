@@ -19,7 +19,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -59,6 +58,16 @@ internal class AndroidCallController(
         /** Completes once addCall either handed back a control scope or gave up,
          * so callers can wait instead of racing the scope into existence. */
         val settled = CompletableDeferred<Unit>()
+
+        /** Latest values of the endpoint flows. Telecom emits these once, right
+         * after the call is added; they are plain flows with no replay, so a
+         * subscriber that arrives when the picker opens sees nothing at all.
+         * Collected for the call's lifetime instead, exactly as isMuted is. */
+        @Volatile
+        var endpoints: List<CallEndpointCompat> = emptyList()
+
+        @Volatile
+        var currentEndpoint: CallEndpointCompat? = null
     }
 
     /** callId → the coroutine and control scope owning that Telecom call. */
@@ -138,16 +147,16 @@ internal class AndroidCallController(
      * app's route picker hidden instead of showing a stale list. */
     fun audioRoutes(callId: String, onResult: (List<SystemAudioRoute>) -> Unit) {
         scope.launch {
-            // A picker opening cannot wait out the add-call timeout: where
-            // Telecom never settles this is the whole latency the user sees
-            // before the menu has anything in it.
-            val control = awaitControl(callId, ROUTES_SETTLE_TIMEOUT_MS)
-            if (control == null) {
+            val active = activeCalls[callId]
+            if (active == null) {
                 onResult(emptyList())
                 return@launch
             }
-            val currentId = currentEndpoint(control)?.identifier?.toString()
-            onResult(availableEndpoints(control).mapNotNull { routeProjection(it, currentId) })
+            // Only covers a picker opened before Telecom settled; once it has,
+            // the cached endpoints answer without waiting on anything.
+            awaitSettled(active, ROUTES_SETTLE_TIMEOUT_MS)
+            val currentId = active.currentEndpoint?.identifier?.toString()
+            onResult(active.endpoints.mapNotNull { routeProjection(it, currentId) })
         }
     }
 
@@ -160,7 +169,9 @@ internal class AndroidCallController(
                 return@launch
             }
             val endpoint =
-                availableEndpoints(control).firstOrNull { it.identifier.toString() == routeId }
+                activeCalls[callId]?.endpoints?.firstOrNull {
+                    it.identifier.toString() == routeId
+                }
             if (endpoint == null) {
                 onResult(false)
                 return@launch
@@ -272,6 +283,8 @@ internal class AndroidCallController(
                 ) {
                     active.control = this
                     active.settled.complete(Unit)
+                    launch { availableEndpoints.collect { active.endpoints = it } }
+                    launch { currentCallEndpoint.collect { active.currentEndpoint = it } }
                     launch {
                         // The only mute signal core-telecom offers. Calls start
                         // unmuted, so the flow's initial value is not an event.
@@ -319,23 +332,6 @@ internal class AndroidCallController(
             block() is CallControlResult.Success
         } catch (_: Exception) {
             false
-        }
-
-    private suspend fun availableEndpoints(
-        control: CallControlScope,
-    ): List<CallEndpointCompat> =
-        try {
-            withTimeoutOrNull(ENDPOINT_TIMEOUT_MS) { control.availableEndpoints.first() }
-                ?: emptyList()
-        } catch (_: Exception) {
-            emptyList()
-        }
-
-    private suspend fun currentEndpoint(control: CallControlScope): CallEndpointCompat? =
-        try {
-            withTimeoutOrNull(ENDPOINT_TIMEOUT_MS) { control.currentCallEndpoint.first() }
-        } catch (_: Exception) {
-            null
         }
 
     /** Streaming and unknown endpoints have no wire value and are dropped.
@@ -396,7 +392,6 @@ internal class AndroidCallController(
         /** CallsManager.ADD_CALL_TIMEOUT is internal to core-telecom; 5s is the
          * documented bound addCall waits for Telecom to hand back a scope. */
         const val ADD_CALL_TIMEOUT_MS = 5_000L
-        const val ENDPOINT_TIMEOUT_MS = 1_000L
         const val ROUTES_SETTLE_TIMEOUT_MS = 300L
 
         /** The picker contract spells this type "wired"; NativeCallWire still
