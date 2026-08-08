@@ -52,9 +52,8 @@ class LivekitMobileForegroundService : Service() {
                 // since an unmet precondition throws instead.
                 if (wantsCamera) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
                 if (wantsPlayback) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
-                // Android 14+ refuses MediaProjection.createVirtualDisplay
-                // unless a service carrying this type is already foreground, so
-                // the caller restarts us with the extra before capture starts.
+                // Android 14+ refuses createVirtualDisplay unless this type is
+                // already foreground.
                 if (wantsScreenShare) {
                     types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
                 }

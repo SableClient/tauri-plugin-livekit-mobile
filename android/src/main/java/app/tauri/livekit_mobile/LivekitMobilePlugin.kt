@@ -166,8 +166,7 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
 
     private val localVideoOverlay = LocalVideoOverlay(webViewProvider = { hostWebView })
 
-    /** Survives the trip through the system consent dialog, which cannot carry
-     * arguments of its own. */
+    /** The consent dialog carries no arguments of its own. */
     private var pendingScreenShareCallId: String? = null
 
     private val pictureInPicture =
@@ -413,12 +412,7 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
         controller.switchCamera(args.callId, invoke)
     }
 
-    /**
-     * Publishing needs the user's MediaProjection consent, which only an
-     * Activity result can give. Enabling therefore hands the invoke to the
-     * system dialog and settles it in [handleScreenCaptureConsent]; disabling
-     * needs no consent and settles here.
-     */
+    /** Enabling settles in [handleScreenCaptureConsent]; disabling settles here. */
     @Command
     fun setNativeCallScreenShareEnabled(invoke: Invoke) {
         val args =
@@ -465,8 +459,6 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
             reject(invoke, NativeCallWire.ERR_UNAVAILABLE)
             return
         }
-        // Declining the system dialog is a user choice, not a failure: settle
-        // with the unchanged snapshot so the toggle simply springs back.
         if (result.resultCode != Activity.RESULT_OK || data == null) {
             invoke.resolve(controller.snapshotJson())
             return

@@ -77,11 +77,10 @@ internal class NativeCallController(
     /** What the foreground-service notification currently shows. */
     private var presentation = NativeCallPresentation.NONE
 
-    /** LiveKit's audio handler for the current room; it owns the output route. */
+    /** LiveKit owns the output route for the whole call. */
     @Volatile
     private var audioHandler: AudioSwitchHandler? = null
 
-    /** Outputs LiveKit currently offers, in the wire vocabulary. */
     fun audioRoutes(callId: String): List<SystemAudioRoute> {
         if (!isActiveCall(callId)) return emptyList()
         val handler = audioHandler ?: return emptyList()
@@ -124,8 +123,7 @@ internal class NativeCallController(
             else -> device.name.ifBlank { "Bluetooth" }
         }
 
-    /** Stable within a call: AudioSwitch reuses the device instances, and the
-     * name is what distinguishes two paired headsets. */
+    /** The name is what separates two paired headsets. */
     private fun audioRouteId(device: AudioDevice): String =
         "${audioRouteType(device) ?: "unknown"}:${device.name}"
 
@@ -240,9 +238,8 @@ internal class NativeCallController(
                             appContext,
                             RoomOptions(adaptiveStream = true, dynacast = true),
                             // Owning the handler is what makes the route picker
-                            // work: LiveKit drives the communication device for
-                            // the whole call, so a Telecom endpoint change is
-                            // overridden before it can be confirmed.
+                            // work; a Telecom endpoint change is overridden
+                            // before it can be confirmed.
                             LiveKitOverrides(
                                 audioOptions = AudioOptions(
                                     audioHandler = AudioSwitchHandler(appContext).also {
@@ -528,11 +525,7 @@ internal class NativeCallController(
         }
     }
 
-    /**
-     * Publishes or retracts the screen share. [projectionData] is the Intent
-     * MediaProjection handed back from the system consent dialog; it is
-     * required to enable and ignored to disable.
-     */
+    /** [projectionData] is the consent Intent; required to enable, ignored to disable. */
     fun setScreenShareEnabled(
         callId: String,
         enabled: Boolean,
@@ -553,16 +546,13 @@ internal class NativeCallController(
                 invoke.resolve(snapshotJson())
                 return@launch
             }
-            // Non-null exactly while enabling, which is also what selects the
-            // capture branch below.
             val consent = if (enabled) projectionData else null
             if (enabled && consent == null) {
                 reject(invoke, NativeCallWire.ERR_PERMISSION_DENIED)
                 return@launch
             }
-            // The mediaProjection service type has to be foreground *before*
-            // capture starts on Android 14+, so the restart cannot wait until
-            // after the publication the way the camera's does.
+            // The service type must be foreground before capture starts, so
+            // unlike the camera this restart cannot wait until after.
             if (enabled) {
                 startCallForegroundService(
                     preferMicrophone = snapshot.microphoneEnabled,
@@ -576,9 +566,7 @@ internal class NativeCallController(
                         true,
                         ScreenCaptureParams(
                             mediaProjectionPermissionResultData = consent,
-                            // The system's own "Stop sharing" bypasses this
-                            // plugin entirely; without this the snapshot would
-                            // keep claiming a share that no longer exists.
+                            // The system's own "Stop sharing" bypasses us.
                             onStop = { handleScreenShareStopped(callId) },
                         ),
                     )
@@ -598,8 +586,7 @@ internal class NativeCallController(
                 reject(invoke, NativeCallWire.ERR_MEDIA_FAILED)
                 return@launch
             }
-            // The SDK reports a refused capture by returning false, not by
-            // throwing, so the result has to be checked as well as the throw.
+            // The SDK reports a refusal by returning false, not by throwing.
             if (!applied) {
                 if (enabled) {
                     startCallForegroundService(
@@ -626,8 +613,7 @@ internal class NativeCallController(
         }
     }
 
-    /** The user stopped the share from the system UI; the track is already gone
-     * by the time this runs, so only our own state and service type follow. */
+    /** Stopped from the system UI; the track is already gone. */
     private fun handleScreenShareStopped(callId: String) {
         scope.launch {
             if (snapshot.callId != callId || !snapshot.screenShareEnabled) return@launch
