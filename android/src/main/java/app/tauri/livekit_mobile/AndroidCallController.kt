@@ -19,6 +19,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -283,8 +285,26 @@ internal class AndroidCallController(
                 ) {
                     active.control = this
                     active.settled.complete(Unit)
-                    launch { availableEndpoints.collect { active.endpoints = it } }
-                    launch { currentCallEndpoint.collect { active.currentEndpoint = it } }
+                    // Both flows complete after their first emission, and
+                    // Telecom mints fresh endpoint identifiers whenever it
+                    // rebuilds the set. A single collect therefore freezes the
+                    // cache on identifiers Telecom no longer knows, and
+                    // requestEndpointChange then times out instead of
+                    // confirming. Resubscribe so the ids stay the live ones.
+                    launch {
+                        while (isActive) {
+                            runCatching { availableEndpoints.collect { active.endpoints = it } }
+                            delay(ENDPOINT_RESUBSCRIBE_DELAY_MS)
+                        }
+                    }
+                    launch {
+                        while (isActive) {
+                            runCatching {
+                                currentCallEndpoint.collect { active.currentEndpoint = it }
+                            }
+                            delay(ENDPOINT_RESUBSCRIBE_DELAY_MS)
+                        }
+                    }
                     launch {
                         // The only mute signal core-telecom offers. Calls start
                         // unmuted, so the flow's initial value is not an event.
@@ -393,6 +413,7 @@ internal class AndroidCallController(
          * documented bound addCall waits for Telecom to hand back a scope. */
         const val ADD_CALL_TIMEOUT_MS = 5_000L
         const val ROUTES_SETTLE_TIMEOUT_MS = 300L
+        const val ENDPOINT_RESUBSCRIBE_DELAY_MS = 200L
 
         /** The picker contract spells this type "wired"; NativeCallWire still
          * carries the older "wired_headset" spelling. */
