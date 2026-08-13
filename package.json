@@ -1,6 +1,6 @@
 {
   "name": "@sableclient/tauri-plugin-livekit-mobile",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "Sable Contributors",
   "description": "LiveKit calls rendered natively on Tauri mobile, with Android Telecom and iOS CallKit integration.",
   "license": "AGPL-3.0-only",
