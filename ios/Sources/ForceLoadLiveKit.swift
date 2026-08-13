@@ -32,7 +32,7 @@ func forceLinkLiveKitObjCSurface() -> Int {
   let refs: [Any] = [
     Room.add,
     Room.remove,
-    Room.allParticipants,
+    { (room: Room) in room.allParticipants },
     Participant.add,
     Participant.remove,
     Track.add,
