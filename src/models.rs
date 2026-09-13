@@ -485,6 +485,18 @@ pub struct StartSystemCallRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ReportIncomingCallRequest {
+    pub call_id: String,
+    pub uuid: String,
+    pub caller_name: String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub has_video: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub room_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EndSystemCallRequest {
     pub call_id: String,
     #[serde(default, skip_serializing_if = "is_false")]
@@ -1477,6 +1489,38 @@ mod tests {
         assert!(!capabilities.system_calls);
         assert!(!capabilities.audio_routes);
         assert!(!capabilities.push_kit);
+    }
+
+    #[test]
+    fn report_incoming_call_request_parses_camel_case_and_omits_absent_hints() {
+        let request: ReportIncomingCallRequest = serde_json::from_value(serde_json::json!({
+            "callId": "!room:example.org",
+            "uuid": "3F2504E0-4F89-11D3-9A0C-0305E82C3301",
+            "callerName": "Bob",
+            "hasVideo": true,
+            "roomId": "!room:example.org",
+        }))
+        .unwrap();
+        assert!(request.has_video);
+        assert_eq!(request.room_id.as_deref(), Some("!room:example.org"));
+
+        // Both hints are optional, and absent ones stay off the wire.
+        let minimal: ReportIncomingCallRequest = serde_json::from_value(serde_json::json!({
+            "callId": "!room:example.org",
+            "uuid": "3F2504E0-4F89-11D3-9A0C-0305E82C3301",
+            "callerName": "Bob",
+        }))
+        .unwrap();
+        assert!(!minimal.has_video);
+        assert_eq!(minimal.room_id, None);
+        assert_eq!(
+            wire(minimal),
+            serde_json::json!({
+                "callId": "!room:example.org",
+                "uuid": "3F2504E0-4F89-11D3-9A0C-0305E82C3301",
+                "callerName": "Bob",
+            })
+        );
     }
 
     #[test]

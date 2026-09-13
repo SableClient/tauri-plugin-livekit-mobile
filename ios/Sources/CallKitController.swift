@@ -329,7 +329,7 @@ final class CallKitController: NSObject {
   /// CallKit has accepted or rejected the report, never before: the PushKit
   /// completion handler and the JS invoke both hang off it.
   func reportIncomingCall(
-    uuid: UUID, callerName: String, roomId: String? = nil,
+    uuid: UUID, callerName: String, roomId: String? = nil, hasVideo: Bool = false,
     outcome: @escaping (BridgeFailureCode?) -> Void = { _ in }
   ) {
     guard !chinaRegion else {
@@ -346,7 +346,7 @@ final class CallKitController: NSObject {
 
     let update = CXCallUpdate()
     update.localizedCallerName = callerName
-    update.hasVideo = false  // video starts off; the answerer enables it
+    update.hasVideo = hasVideo  // a VoIP push carries no intent, so it stays off there
     update.supportsGrouping = false
     update.supportsUngrouping = false
     update.supportsDTMF = false

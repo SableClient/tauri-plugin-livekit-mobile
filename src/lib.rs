@@ -44,6 +44,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::set_native_call_local_video_overlay,
             commands::clear_native_call_local_video_overlay,
             commands::start_system_call,
+            commands::report_incoming_call,
             commands::end_system_call,
             commands::set_system_call_muted,
             commands::drain_pending_system_call_actions,

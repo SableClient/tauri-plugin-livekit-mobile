@@ -124,6 +124,14 @@ export type StartSystemCallRequest = {
   callerName: string;
 };
 
+export type ReportIncomingCallRequest = {
+  callId: string;
+  uuid: string;
+  callerName: string;
+  hasVideo?: boolean;
+  roomId?: string;
+};
+
 export type EndSystemCallRequest = {
   callId: string;
   remoteEnded?: boolean;
@@ -264,6 +272,9 @@ export const listenNativeCallSnapshot = (
 
 export const startSystemCall = (request: StartSystemCallRequest): Promise<void> =>
   invoke<void>('plugin:livekit-mobile|start_system_call', { payload: request });
+
+export const reportIncomingCall = (request: ReportIncomingCallRequest): Promise<void> =>
+  invoke<void>('plugin:livekit-mobile|report_incoming_call', { payload: request });
 
 export const endSystemCall = (request: EndSystemCallRequest): Promise<void> =>
   invoke<void>('plugin:livekit-mobile|end_system_call', { payload: request });
