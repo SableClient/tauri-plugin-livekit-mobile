@@ -17,11 +17,12 @@ use crate::{
         FulfillEndCallRequest, GetAudioRoutesRequest, GetAudioRoutesResponse,
         NativeCallCapabilities, NativeCallCapabilitiesWire, NativeCallChannelEvent,
         NativeCallFailureCode, NativeCallSnapshot, NativeConnectCallFields, ReportConnectedRequest,
-        SetAudioRouteRequest, SetNativeCallCameraEnabledRequest, SetNativeCallEncryptionKeyRequest,
-        SetNativeCallLocalVideoOverlayRequest, SetNativeCallMicrophoneEnabledRequest,
-        SetNativeCallPiPEnabledRequest, SetNativeCallRemoteVideoOverlayRequest,
-        SetNativeCallScreenShareEnabledRequest, SetSystemCallMutedRequest, StartSystemCallRequest,
-        SwitchNativeCallCameraRequest, SystemCallAction, UpdateCallDisplayRequest,
+        ReportIncomingCallRequest, SetAudioRouteRequest, SetNativeCallCameraEnabledRequest,
+        SetNativeCallEncryptionKeyRequest, SetNativeCallLocalVideoOverlayRequest,
+        SetNativeCallMicrophoneEnabledRequest, SetNativeCallPiPEnabledRequest,
+        SetNativeCallRemoteVideoOverlayRequest, SetNativeCallScreenShareEnabledRequest,
+        SetSystemCallMutedRequest, StartSystemCallRequest, SwitchNativeCallCameraRequest,
+        SystemCallAction, UpdateCallDisplayRequest,
     },
 };
 
@@ -48,6 +49,7 @@ mod platform_commands {
     pub(super) const SET_LOCAL_VIDEO_OVERLAY: &str = "setNativeCallLocalVideoOverlay";
     pub(super) const CLEAR_LOCAL_VIDEO_OVERLAY: &str = "clearNativeCallLocalVideoOverlay";
     pub(super) const START_SYSTEM_CALL: &str = "startSystemCall";
+    pub(super) const REPORT_INCOMING_CALL: &str = "reportIncomingCall";
     pub(super) const END_SYSTEM_CALL: &str = "endSystemCall";
     pub(super) const SET_SYSTEM_CALL_MUTED: &str = "setSystemCallMuted";
     pub(super) const DRAIN_PENDING_ACTIONS: &str = "drainPendingSystemCallActions";
@@ -76,6 +78,7 @@ mod platform_commands {
     pub(super) const SET_LOCAL_VIDEO_OVERLAY: &str = "setLocalVideoOverlay";
     pub(super) const CLEAR_LOCAL_VIDEO_OVERLAY: &str = "clearLocalVideoOverlay";
     pub(super) const START_SYSTEM_CALL: &str = "startSystemCall";
+    pub(super) const REPORT_INCOMING_CALL: &str = "reportIncomingCall";
     pub(super) const END_SYSTEM_CALL: &str = "endSystemCall";
     pub(super) const SET_SYSTEM_CALL_MUTED: &str = "setSystemCallMuted";
     pub(super) const DRAIN_PENDING_ACTIONS: &str = "drainPendingSystemCallActions";
@@ -267,6 +270,14 @@ impl<R: Runtime> MobileBackend<R> {
         request: StartSystemCallRequest,
     ) -> crate::Result<()> {
         self.invoke(platform_commands::START_SYSTEM_CALL, request)
+            .await
+    }
+
+    pub(crate) async fn report_incoming_call(
+        &self,
+        request: ReportIncomingCallRequest,
+    ) -> crate::Result<()> {
+        self.invoke(platform_commands::REPORT_INCOMING_CALL, request)
             .await
     }
 

@@ -17,6 +17,7 @@ Default permissions for the plugin
 - `allow-set-native-call-local-video-overlay`
 - `allow-clear-native-call-local-video-overlay`
 - `allow-start-system-call`
+- `allow-report-incoming-call`
 - `allow-end-system-call`
 - `allow-set-system-call-muted`
 - `allow-drain-pending-system-call-actions`
@@ -320,6 +321,32 @@ Enables the get_native_call_state command without any pre-configured scope.
 <td>
 
 Denies the get_native_call_state command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:allow-report-incoming-call`
+
+</td>
+<td>
+
+Enables the report_incoming_call command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:deny-report-incoming-call`
+
+</td>
+<td>
+
+Denies the report_incoming_call command without any pre-configured scope.
 
 </td>
 </tr>

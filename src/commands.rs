@@ -147,6 +147,14 @@ pub(crate) async fn start_system_call<R: Runtime>(
 }
 
 #[tauri_command]
+pub(crate) async fn report_incoming_call<R: Runtime>(
+    app: AppHandle<R>,
+    payload: ReportIncomingCallRequest,
+) -> Result<()> {
+    app.native_call_bridge().report_incoming_call(payload).await
+}
+
+#[tauri_command]
 pub(crate) async fn end_system_call<R: Runtime>(
     app: AppHandle<R>,
     payload: EndSystemCallRequest,

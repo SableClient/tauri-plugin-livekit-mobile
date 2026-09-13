@@ -14,6 +14,7 @@ permissions = [
     "allow-set-native-call-local-video-overlay",
     "allow-clear-native-call-local-video-overlay",
     "allow-start-system-call",
+    "allow-report-incoming-call",
     "allow-end-system-call",
     "allow-set-system-call-muted",
     "allow-drain-pending-system-call-actions",

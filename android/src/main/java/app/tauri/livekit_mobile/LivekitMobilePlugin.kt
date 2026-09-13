@@ -107,6 +107,15 @@ internal class StartSystemCallArgs {
 }
 
 @InvokeArg
+internal class ReportIncomingCallArgs {
+    var callId: String = ""
+    var uuid: String = ""
+    var callerName: String = ""
+    var hasVideo: Boolean = false
+    var roomId: String? = null
+}
+
+@InvokeArg
 internal class EndSystemCallArgs {
     var callId: String = ""
     var remoteEnded: Boolean = false
@@ -632,6 +641,27 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
             args.callerName,
         )
         callController.startOutgoingCall(
+            args.callId,
+            args.callerName.ifBlank { args.callId },
+        ) { added ->
+            if (!added) controller.dismissCallPresentation(args.callId)
+            settle(invoke, added)
+        }
+    }
+
+    @Command
+    fun reportIncomingCall(invoke: Invoke) {
+        val args = runCatching { invoke.parseArgs(ReportIncomingCallArgs::class.java) }.getOrNull()
+        if (args == null || args.callId.isBlank()) {
+            reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
+            return
+        }
+        controller.presentCall(
+            args.callId,
+            LivekitMobileForegroundService.DIRECTION_INCOMING,
+            args.callerName,
+        )
+        callController.reportIncomingCall(
             args.callId,
             args.callerName.ifBlank { args.callId },
         ) { added ->

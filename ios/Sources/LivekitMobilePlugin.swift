@@ -93,6 +93,14 @@ struct StartSystemCallArgs: Decodable {
   let callerName: String
 }
 
+struct ReportIncomingCallArgs: Decodable {
+  let callId: String
+  let uuid: String
+  let callerName: String
+  let hasVideo: Bool?
+  let roomId: String?
+}
+
 struct EndSystemCallArgs: Decodable {
   let callId: String
   let remoteEnded: Bool?
@@ -618,6 +626,29 @@ final class LivekitMobilePlugin: Plugin {
       }
       callKitController.startOutgoingCall(
         uuid: uuid, callId: args.callId, callerName: args.callerName
+      ) { code in
+        Self.settle(invoke, code)
+      }
+    }
+  }
+
+  @objc public func reportIncomingCall(_ invoke: Invoke) throws {
+    guard let args = try? invoke.parseArgs(ReportIncomingCallArgs.self) else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+    Task { @MainActor [weak callKitController] in
+      guard let callKitController else {
+        reject(invoke, .unavailable)
+        return
+      }
+      guard let uuid = UUID(uuidString: args.uuid) else {
+        reject(invoke, .invalidRequest)
+        return
+      }
+      callKitController.reportIncomingCall(
+        uuid: uuid, callerName: args.callerName, roomId: args.roomId ?? args.callId,
+        hasVideo: args.hasVideo ?? false
       ) { code in
         Self.settle(invoke, code)
       }

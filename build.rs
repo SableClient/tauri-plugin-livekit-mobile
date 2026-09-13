@@ -14,6 +14,7 @@ const COMMANDS: &[&str] = &[
     "set_native_call_local_video_overlay",
     "clear_native_call_local_video_overlay",
     "start_system_call",
+    "report_incoming_call",
     "end_system_call",
     "set_system_call_muted",
     "drain_pending_system_call_actions",

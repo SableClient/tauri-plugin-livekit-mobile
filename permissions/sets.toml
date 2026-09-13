@@ -48,6 +48,7 @@ identifier = "system-calls"
 description = "Registering the call with the operating system's call UI (CallKit on iOS, Telecom on Android) and answering the actions it reports back."
 permissions = [
     "allow-start-system-call",
+    "allow-report-incoming-call",
     "allow-end-system-call",
     "allow-set-system-call-muted",
     "allow-drain-pending-system-call-actions",

@@ -22,11 +22,12 @@ use crate::models::{
     ConnectNativeCallRequest, DisconnectNativeCallRequest, EndSystemCallRequest,
     FulfillAnswerCallRequest, FulfillEndCallRequest, GetAudioRoutesRequest, GetAudioRoutesResponse,
     NativeCallCapabilities, NativeCallFailureCode, NativeCallSnapshot, ReportConnectedRequest,
-    SetAudioRouteRequest, SetNativeCallCameraEnabledRequest, SetNativeCallEncryptionKeyRequest,
-    SetNativeCallLocalVideoOverlayRequest, SetNativeCallMicrophoneEnabledRequest,
-    SetNativeCallPiPEnabledRequest, SetNativeCallRemoteVideoOverlayRequest,
-    SetNativeCallScreenShareEnabledRequest, SetSystemCallMutedRequest, StartSystemCallRequest,
-    SwitchNativeCallCameraRequest, SystemCallAction, UpdateCallDisplayRequest,
+    ReportIncomingCallRequest, SetAudioRouteRequest, SetNativeCallCameraEnabledRequest,
+    SetNativeCallEncryptionKeyRequest, SetNativeCallLocalVideoOverlayRequest,
+    SetNativeCallMicrophoneEnabledRequest, SetNativeCallPiPEnabledRequest,
+    SetNativeCallRemoteVideoOverlayRequest, SetNativeCallScreenShareEnabledRequest,
+    SetSystemCallMutedRequest, StartSystemCallRequest, SwitchNativeCallCameraRequest,
+    SystemCallAction, UpdateCallDisplayRequest,
 };
 #[cfg(mobile)]
 use crate::models::{NativeCallChannelEvent, NativeConnectCallFields};
@@ -137,6 +138,10 @@ forwarded_commands! {
             && encryption_key_material_is_valid(&r.identity, &r.key);
     StartSystemCall(StartSystemCallRequest) -> ()
         => start_system_call, |r| !r.call_id.trim().is_empty()
+            && !r.uuid.trim().is_empty()
+            && !r.caller_name.trim().is_empty();
+    ReportIncomingCall(ReportIncomingCallRequest) -> ()
+        => report_incoming_call, |r| !r.call_id.trim().is_empty()
             && !r.uuid.trim().is_empty()
             && !r.caller_name.trim().is_empty();
     EndSystemCall(EndSystemCallRequest) -> ()
