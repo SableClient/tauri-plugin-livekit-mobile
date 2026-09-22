@@ -219,7 +219,7 @@ final class RoomController: NSObject {
     microphoneEnabled = false
     cameraEnabled = false
     cameraMutedByInterruption = false
-    audioProcessing = args.audioProcessing.captureOptions
+    audioProcessing = args.audioProcessing?.captureOptions ?? AudioCaptureOptions()
     participantVolumes.removeAll()
     screenShareEnabled = false
     participantCount = 0
