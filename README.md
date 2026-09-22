@@ -100,6 +100,7 @@ Allow the default permission set in `src-tauri/capabilities/default.json`:
 
 This grants `getNativeCallCapabilities`, `connectNativeCall`,
 `disconnectNativeCall`, `setNativeCallMicrophoneEnabled`,
+`setNativeCallAudioProcessing`, `setNativeCallParticipantVolume`,
 `setNativeCallCameraEnabled`, `switchNativeCallCamera`, and
 `setNativeCallRemoteVideoOverlay`, `clearNativeCallRemoteVideoOverlay`,
 `setNativeCallEncryptionKey`, and `getNativeCallState`.
@@ -179,6 +180,8 @@ import {
   connectNativeCall,
   disconnectNativeCall,
   setNativeCallMicrophoneEnabled,
+  setNativeCallAudioProcessing,
+  setNativeCallParticipantVolume,
   setNativeCallCameraEnabled,
   switchNativeCallCamera,
   setNativeCallRemoteVideoOverlay,
@@ -202,9 +205,21 @@ const state = await connectNativeCall({
   url: 'wss://livekit.example',
   token: livekitJwt,
   microphoneEnabled: true,
+  // Omitted means every effect on, which is both SDKs' own default.
+  audioProcessing: { noiseSuppression: false },
 });
 
 await setNativeCallMicrophoneEnabled({ callId: 'mxc-call-id', enabled: false });
+
+// Capture processing is changed on the live track, not on the next call.
+await setNativeCallAudioProcessing({ callId: 'mxc-call-id', noiseSuppression: true });
+
+// A gain, not a fraction: 0 mutes, 1 is unity, the platforms clamp at 10.
+await setNativeCallParticipantVolume({
+  callId: 'mxc-call-id',
+  identity: '@alice:example.org',
+  volume: 0.4,
+});
 if (capabilities.camera) {
   await setNativeCallCameraEnabled({ callId: 'mxc-call-id', enabled: true });
   await switchNativeCallCamera({ callId: 'mxc-call-id' });
@@ -235,7 +250,8 @@ await unlisten();
   or replays room state: it validates basic input, forwards invocations and
   returns or forwards native snapshots.
 - Every command (`connectNativeCall`, `disconnectNativeCall`,
-  `setNativeCallMicrophoneEnabled`, `setNativeCallCameraEnabled`,
+  `setNativeCallMicrophoneEnabled`, `setNativeCallAudioProcessing`,
+  `setNativeCallParticipantVolume`, `setNativeCallCameraEnabled`,
   `switchNativeCallCamera`, `setNativeCallRemoteVideoOverlay`,
   `clearNativeCallRemoteVideoOverlay`, `setNativeCallEncryptionKey`,
   `getNativeCallState`) resolves with the

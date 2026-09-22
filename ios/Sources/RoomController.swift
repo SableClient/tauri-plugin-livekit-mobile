@@ -75,6 +75,13 @@ final class RoomController: NSObject {
   private var participantCount = 0
   private var remoteParticipants: [BridgeRemoteParticipant] = []
   private var lastError: BridgeError?
+  /// Capture processing for this call's microphone. The room is built with it
+  /// and a later change is pushed to the live track.
+  private var audioProcessing = AudioCaptureOptions()
+  /// Playout gains by remote identity. Kept across subscriptions: a track
+  /// arrives at unity gain, so a gain set before it publishes — or before a
+  /// reconnect resubscribes it — is lost unless it is re-applied.
+  private var participantVolumes: [String: Double] = [:]
   /// Local connection quality from the last
   /// `room(_:participant:didUpdateConnectionQuality:)` delegate event for the
   /// local participant. Nil until the first such event arrives.
@@ -212,6 +219,8 @@ final class RoomController: NSObject {
     microphoneEnabled = false
     cameraEnabled = false
     cameraMutedByInterruption = false
+    audioProcessing = args.audioProcessing.captureOptions
+    participantVolumes.removeAll()
     screenShareEnabled = false
     participantCount = 0
     remoteParticipants = []
@@ -246,7 +255,9 @@ final class RoomController: NSObject {
     // also encrypts data channels, which the web peers do not support.
     let e2eeOptions = keyProvider.map { E2EEOptions(keyProvider: $0) }
     let newRoom = Room(
-      delegate: self, roomOptions: Self.makeRoomOptions(e2eeOptions: e2eeOptions))
+      delegate: self,
+      roomOptions: Self.makeRoomOptions(
+        e2eeOptions: e2eeOptions, audioProcessing: audioProcessing))
     room = newRoom
 
     let connectOptions = Self.buildConnectOptions(from: args)
@@ -366,6 +377,59 @@ final class RoomController: NSObject {
     }
     emitSnapshotChanged()
     invoke.resolve(snapshot())
+  }
+
+  /// Records the processing for later captures and pushes it to a live
+  /// microphone track. `setAudioProcessingOptions` throws only when the track
+  /// cannot take them, which is the one case that reports a media failure.
+  func setAudioProcessing(
+    callId requestedCallId: String, processing: AudioCaptureOptions, invoke: Invoke
+  ) async {
+    guard callId == requestedCallId else {
+      invoke.resolve(snapshot())
+      return
+    }
+    audioProcessing = processing
+    let publication = room?.localParticipant.trackPublications.values
+      .first(where: { $0.source == .microphone })
+    if let track = publication?.track as? LocalAudioTrack {
+      do {
+        _ = try track.setAudioProcessingOptions(
+          AudioProcessingOptions(
+            echoCancellation: processing.echoCancellation,
+            autoGainControl: processing.autoGainControl,
+            noiseSuppression: processing.noiseSuppression))
+      } catch {
+        lastError = BridgeError(.mediaFailed)
+        emitSnapshotChanged()
+        reject(invoke, .mediaFailed)
+        return
+      }
+    }
+    invoke.resolve(snapshot())
+  }
+
+  func setParticipantVolume(
+    callId requestedCallId: String, identity: String, volume: Double, invoke: Invoke
+  ) async {
+    guard callId == requestedCallId else {
+      invoke.resolve(snapshot())
+      return
+    }
+    participantVolumes[identity] = volume
+    applyParticipantVolumes()
+    invoke.resolve(snapshot())
+  }
+
+  private func applyParticipantVolumes() {
+    guard let room else { return }
+    for (identity, participant) in room.remoteParticipants {
+      guard let volume = participantVolumes[identity.stringValue] else { continue }
+      for publication in participant.trackPublications.values
+      where publication.source == .microphone {
+        (publication.track as? RemoteAudioTrack)?.volume = volume
+      }
+    }
   }
 
   func setCameraEnabled(
@@ -604,8 +668,11 @@ final class RoomController: NSObject {
   /// The room options for every attempt, encrypted or not: the SDK defaults
   /// leave adaptive stream and dynacast off, and would suspend the local
   /// camera as soon as the app backgrounds, which freezes the video in PiP.
-  nonisolated static func makeRoomOptions(e2eeOptions: E2EEOptions?) -> RoomOptions {
+  nonisolated static func makeRoomOptions(
+    e2eeOptions: E2EEOptions?, audioProcessing: AudioCaptureOptions
+  ) -> RoomOptions {
     RoomOptions(
+      defaultAudioCaptureOptions: audioProcessing,
       adaptiveStream: true, dynacast: true,
       suspendLocalVideoTracksInBackground: false,
       e2eeOptions: e2eeOptions,
@@ -1554,6 +1621,7 @@ extension RoomController: RoomDelegate {
     didSubscribeTrack publication: RemoteTrackPublication
   ) {
     Task { @MainActor [weak self] in
+      self?.applyParticipantVolumes()
       self?.updateRemoteParticipants(from: room)
     }
   }

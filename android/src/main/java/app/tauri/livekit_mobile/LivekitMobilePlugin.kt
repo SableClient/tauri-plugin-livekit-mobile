@@ -20,6 +20,17 @@ import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSArray
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
+import io.livekit.android.room.track.LocalAudioTrackOptions
+
+/** Matches both platform SDKs' own ceiling for a remote playout gain. */
+private const val MAX_PARTICIPANT_VOLUME = 10.0
+
+private fun audioProcessingOf(args: NativeCallAudioProcessingArgs?): LocalAudioTrackOptions =
+    LocalAudioTrackOptions(
+        noiseSuppression = args?.noiseSuppression ?: true,
+        echoCancellation = args?.echoCancellation ?: true,
+        autoGainControl = args?.autoGainControl ?: true,
+    )
 
 @InvokeArg
 internal class NativeCallEncryptionKeyEntry {
@@ -29,13 +40,36 @@ internal class NativeCallEncryptionKeyEntry {
 }
 
 @InvokeArg
+internal class NativeCallAudioProcessingArgs {
+    var echoCancellation: Boolean = true
+    var noiseSuppression: Boolean = true
+    var autoGainControl: Boolean = true
+}
+
+@InvokeArg
 internal class ConnectNativeCallArgs {
     var callId: String = ""
     var url: String = ""
     var token: String = ""
     var microphoneEnabled: Boolean = false
     var encryptionKeys: List<NativeCallEncryptionKeyEntry>? = null
+    var audioProcessing: NativeCallAudioProcessingArgs? = null
     lateinit var channel: Channel
+}
+
+@InvokeArg
+internal class SetNativeCallAudioProcessingArgs {
+    var callId: String = ""
+    var echoCancellation: Boolean = true
+    var noiseSuppression: Boolean = true
+    var autoGainControl: Boolean = true
+}
+
+@InvokeArg
+internal class SetNativeCallParticipantVolumeArgs {
+    var callId: String = ""
+    var identity: String = ""
+    var volume: Double = 1.0
 }
 
 @InvokeArg
@@ -327,6 +361,7 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
             args.token,
             args.microphoneEnabled,
             encryptionKeys,
+            audioProcessingOf(args.audioProcessing),
             args.channel,
             invoke,
         )
@@ -381,6 +416,45 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
             return
         }
         controller.setMicrophoneEnabled(args.callId, args.enabled, invoke)
+    }
+
+    @Command
+    fun setNativeCallAudioProcessing(invoke: Invoke) {
+        val args =
+            runCatching { invoke.parseArgs(SetNativeCallAudioProcessingArgs::class.java) }
+                .getOrNull()
+        if (args == null || args.callId.isBlank()) {
+            reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
+            return
+        }
+        controller.setAudioProcessing(
+            args.callId,
+            LocalAudioTrackOptions(
+                noiseSuppression = args.noiseSuppression,
+                echoCancellation = args.echoCancellation,
+                autoGainControl = args.autoGainControl,
+            ),
+            invoke,
+        )
+    }
+
+    @Command
+    fun setNativeCallParticipantVolume(invoke: Invoke) {
+        val args =
+            runCatching { invoke.parseArgs(SetNativeCallParticipantVolumeArgs::class.java) }
+                .getOrNull()
+        if (args == null || args.callId.isBlank() || args.identity.isBlank() ||
+            !args.volume.isFinite()
+        ) {
+            reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
+            return
+        }
+        controller.setParticipantVolume(
+            args.callId,
+            args.identity,
+            args.volume.coerceIn(0.0, MAX_PARTICIPANT_VOLUME),
+            invoke,
+        )
     }
 
     @Command
@@ -803,6 +877,7 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
                         pending.args.token,
                         pending.args.microphoneEnabled,
                         encryptionKeys,
+                        audioProcessingOf(pending.args.audioProcessing),
                         pending.args.channel,
                         pending.invoke,
                     )

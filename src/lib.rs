@@ -36,6 +36,8 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::disconnect_native_call,
             commands::set_native_call_microphone_enabled,
             commands::set_native_call_camera_enabled,
+            commands::set_native_call_audio_processing,
+            commands::set_native_call_participant_volume,
             commands::set_native_call_screen_share_enabled,
             commands::set_native_call_pip_enabled,
             commands::switch_native_call_camera,

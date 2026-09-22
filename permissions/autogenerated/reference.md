@@ -9,6 +9,8 @@ Default permissions for the plugin
 - `allow-disconnect-native-call`
 - `allow-set-native-call-microphone-enabled`
 - `allow-set-native-call-camera-enabled`
+- `allow-set-native-call-audio-processing`
+- `allow-set-native-call-participant-volume`
 - `allow-set-native-call-screen-share-enabled`
 - `allow-set-native-call-pip-enabled`
 - `allow-switch-native-call-camera`
@@ -406,6 +408,32 @@ Denies the set_audio_route command without any pre-configured scope.
 <tr>
 <td>
 
+`livekit-mobile:allow-set-native-call-audio-processing`
+
+</td>
+<td>
+
+Enables the set_native_call_audio_processing command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:deny-set-native-call-audio-processing`
+
+</td>
+<td>
+
+Denies the set_native_call_audio_processing command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `livekit-mobile:allow-set-native-call-camera-enabled`
 
 </td>
@@ -503,6 +531,32 @@ Enables the set_native_call_microphone_enabled command without any pre-configure
 <td>
 
 Denies the set_native_call_microphone_enabled command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:allow-set-native-call-participant-volume`
+
+</td>
+<td>
+
+Enables the set_native_call_participant_volume command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:deny-set-native-call-participant-volume`
+
+</td>
+<td>
+
+Denies the set_native_call_participant_volume command without any pre-configured scope.
 
 </td>
 </tr>

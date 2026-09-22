@@ -49,6 +49,26 @@ pub(crate) async fn set_native_call_microphone_enabled<R: Runtime>(
 }
 
 #[tauri_command]
+pub(crate) async fn set_native_call_audio_processing<R: Runtime>(
+    app: AppHandle<R>,
+    payload: SetNativeCallAudioProcessingRequest,
+) -> Result<NativeCallSnapshot> {
+    app.native_call_bridge()
+        .set_native_call_audio_processing(payload)
+        .await
+}
+
+#[tauri_command]
+pub(crate) async fn set_native_call_participant_volume<R: Runtime>(
+    app: AppHandle<R>,
+    payload: SetNativeCallParticipantVolumeRequest,
+) -> Result<NativeCallSnapshot> {
+    app.native_call_bridge()
+        .set_native_call_participant_volume(payload)
+        .await
+}
+
+#[tauri_command]
 pub(crate) async fn set_native_call_camera_enabled<R: Runtime>(
     app: AppHandle<R>,
     payload: SetNativeCallCameraEnabledRequest,

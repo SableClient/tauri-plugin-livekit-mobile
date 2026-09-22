@@ -69,12 +69,21 @@ export type NativeCallSnapshot = {
   localConnectionQuality?: string;
 };
 
+/** Microphone processing the native capturer applies. Every field defaults to
+    `true`, which is what both platform SDKs capture with. */
+export type NativeCallAudioProcessing = {
+  echoCancellation?: boolean;
+  noiseSuppression?: boolean;
+  autoGainControl?: boolean;
+};
+
 export type ConnectNativeCallRequest = {
   callId: string;
   url: string;
   token: string;
   microphoneEnabled: boolean;
   encryptionKeys?: NativeCallEncryptionKeyPayload[];
+  audioProcessing?: NativeCallAudioProcessing;
 };
 
 export type SetNativeCallEncryptionKeyRequest = {
@@ -203,6 +212,23 @@ export const setNativeCallCameraEnabled = (request: {
   enabled: boolean;
 }): Promise<NativeCallSnapshot> =>
   invoke<NativeCallSnapshot>('plugin:livekit-mobile|set_native_call_camera_enabled', {
+    payload: request,
+  });
+
+export const setNativeCallAudioProcessing = (
+  request: { callId: string } & NativeCallAudioProcessing
+): Promise<NativeCallSnapshot> =>
+  invoke<NativeCallSnapshot>('plugin:livekit-mobile|set_native_call_audio_processing', {
+    payload: request,
+  });
+
+/** `volume` is a gain: `0` mutes, `1` is unity and the platforms clamp at `10`. */
+export const setNativeCallParticipantVolume = (request: {
+  callId: string;
+  identity: string;
+  volume: number;
+}): Promise<NativeCallSnapshot> =>
+  invoke<NativeCallSnapshot>('plugin:livekit-mobile|set_native_call_participant_volume', {
     payload: request,
   });
 
