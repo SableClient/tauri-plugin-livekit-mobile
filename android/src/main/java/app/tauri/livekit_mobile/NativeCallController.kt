@@ -21,7 +21,10 @@ import io.livekit.android.room.Room
 import io.livekit.android.room.participant.ConnectionQuality
 import io.livekit.android.room.participant.Participant
 import io.livekit.android.room.participant.RemoteParticipant
+import io.livekit.android.room.track.LocalAudioTrack
+import io.livekit.android.room.track.LocalAudioTrackOptions
 import io.livekit.android.room.track.LocalVideoTrack
+import io.livekit.android.room.track.RemoteAudioTrack
 import io.livekit.android.room.track.Track
 import io.livekit.android.room.track.screencapture.ScreenCaptureParams
 import java.util.concurrent.CountDownLatch
@@ -73,6 +76,16 @@ internal class NativeCallController(
     private var connectJob: Job? = null
     private var attempt = 0L
     private var intentionalDisconnect = false
+
+    /** Capture processing for this call's microphone; the room is built with it
+     * and a later change is applied to the live track. */
+    private var audioProcessing = LocalAudioTrackOptions()
+
+    /** Playout gains by remote identity. Kept across subscriptions: a track
+     * arrives at unity gain, so a volume set before it publishes — or before a
+     * reconnect resubscribes it — is lost unless it is re-applied on every
+     * projection. */
+    private val participantVolumes = mutableMapOf<String, Double>()
 
     /** What the foreground-service notification currently shows. */
     private var presentation = NativeCallPresentation.NONE
@@ -206,6 +219,7 @@ internal class NativeCallController(
         token: String,
         microphoneEnabled: Boolean,
         encryptionKeys: List<NativeCallKeyMaterial>,
+        processing: LocalAudioTrackOptions,
         callChannel: Channel,
         invoke: Invoke,
     ) {
@@ -213,6 +227,8 @@ internal class NativeCallController(
             scope.launch {
                 val currentAttempt = ++attempt
                 intentionalDisconnect = false
+                audioProcessing = processing
+                participantVolumes.clear()
                 channel = callChannel
                 presentation = presentation.forCall(callId)
                 transition {
@@ -236,7 +252,11 @@ internal class NativeCallController(
                         // and decode layers nobody is displaying.
                         LiveKit.create(
                             appContext,
-                            RoomOptions(adaptiveStream = true, dynacast = true),
+                            RoomOptions(
+                                adaptiveStream = true,
+                                dynacast = true,
+                                audioTrackCaptureDefaults = audioProcessing,
+                            ),
                             // Owning the handler is what makes the route picker
                             // work; a Telecom endpoint change is overridden
                             // before it can be confirmed.
@@ -374,6 +394,52 @@ internal class NativeCallController(
 
     fun setMicrophoneEnabled(callId: String, enabled: Boolean, invoke: Invoke) =
         applyMicrophone(callId, enabled, invoke)
+
+    /** Records the processing for later captures and applies it to a live
+     * microphone track. `applyOptions` fails on a disposed track, which is the
+     * only case that reports a media failure. */
+    fun setAudioProcessing(callId: String, processing: LocalAudioTrackOptions, invoke: Invoke) {
+        scope.launch {
+            if (snapshot.callId != callId) {
+                invoke.resolve(snapshotJson())
+                return@launch
+            }
+            audioProcessing = processing
+            val track =
+                room?.localParticipant
+                    ?.getTrackPublication(Track.Source.MICROPHONE)
+                    ?.track as? LocalAudioTrack
+            if (track != null && track.applyOptions(processing).isFailure) {
+                transition { copy(lastErrorCode = NativeCallWire.ERR_MEDIA_FAILED) }
+                emitSnapshotChanged()
+                reject(invoke, NativeCallWire.ERR_MEDIA_FAILED)
+                return@launch
+            }
+            invoke.resolve(snapshotJson())
+        }
+    }
+
+    fun setParticipantVolume(callId: String, identity: String, volume: Double, invoke: Invoke) {
+        scope.launch {
+            if (snapshot.callId != callId) {
+                invoke.resolve(snapshotJson())
+                return@launch
+            }
+            participantVolumes[identity] = volume
+            applyParticipantVolumes()
+            invoke.resolve(snapshotJson())
+        }
+    }
+
+    private fun applyParticipantVolumes() {
+        val participants = room?.remoteParticipants ?: return
+        participants.forEach { (identity, participant) ->
+            val volume = participantVolumes[identity.value] ?: return@forEach
+            participant.trackPublications.values
+                .filter { it.source == Track.Source.MICROPHONE }
+                .forEach { (it.track as? RemoteAudioTrack)?.setVolume(volume) }
+        }
+    }
 
     /** Telecom deactivated the call (another call took priority): stop
      * publishing audio. There is no hold capability to restore from, so the
@@ -917,6 +983,7 @@ internal class NativeCallController(
             is RoomEvent.TrackUnmuted ->
                 applyRemoteProjectionIfChanged(event.participant)
             is RoomEvent.TrackSubscribed -> {
+                applyParticipantVolumes()
                 applyRemoteProjectionIfChanged()
                 videoOverlay.reconcile(room)
             }

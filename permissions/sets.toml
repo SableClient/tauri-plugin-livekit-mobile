@@ -19,6 +19,8 @@ permissions = [
     "allow-get-native-call-state",
     "allow-set-native-call-microphone-enabled",
     "allow-set-native-call-camera-enabled",
+    "allow-set-native-call-audio-processing",
+    "allow-set-native-call-participant-volume",
     "allow-switch-native-call-camera",
     "allow-set-native-call-encryption-key",
 ]

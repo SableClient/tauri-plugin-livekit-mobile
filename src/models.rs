@@ -382,6 +382,9 @@ pub struct ConnectNativeCallRequest {
     /// Overrides the default reconnection-attempt count (10).
     #[serde(default)]
     pub reconnect_attempts: Option<u32>,
+    /// Omitted means every effect on, which is both SDKs' own default.
+    #[serde(default)]
+    pub audio_processing: AudioProcessingOptions,
 }
 
 // Token and key material must never land in logs: redact them in `Debug`.
@@ -395,8 +398,55 @@ impl std::fmt::Debug for ConnectNativeCallRequest {
             .field("encryption_keys", &self.encryption_keys)
             .field("ice_servers", &self.ice_servers)
             .field("reconnect_attempts", &self.reconnect_attempts)
+            .field("audio_processing", &self.audio_processing)
             .finish()
     }
+}
+
+/// Microphone processing the native capturer applies. Every field defaults to
+/// `true`, which is what both platform SDKs capture with when the block is
+/// omitted, so an older frontend keeps the behaviour it had.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioProcessingOptions {
+    #[serde(default = "enabled")]
+    pub echo_cancellation: bool,
+    #[serde(default = "enabled")]
+    pub noise_suppression: bool,
+    #[serde(default = "enabled")]
+    pub auto_gain_control: bool,
+}
+
+fn enabled() -> bool {
+    true
+}
+
+impl Default for AudioProcessingOptions {
+    fn default() -> Self {
+        Self {
+            echo_cancellation: true,
+            noise_suppression: true,
+            auto_gain_control: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetNativeCallAudioProcessingRequest {
+    pub call_id: String,
+    #[serde(flatten)]
+    pub processing: AudioProcessingOptions,
+}
+
+/// `volume` is a gain, not a fraction: both SDKs take `0.0` (muted) to `10.0`
+/// (10x), with `1.0` unity. The bridge clamps rather than rejects.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetNativeCallParticipantVolumeRequest {
+    pub call_id: String,
+    pub identity: String,
+    pub volume: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -620,6 +670,7 @@ pub struct NativeConnectCallFields<'a> {
     pub ice_servers: Option<&'a [IceServerConfig]>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reconnect_attempts: Option<u32>,
+    pub audio_processing: AudioProcessingOptions,
 }
 
 // Token and key material must never land in logs: redact them in `Debug`.
@@ -633,6 +684,7 @@ impl std::fmt::Debug for NativeConnectCallFields<'_> {
             .field("encryption_keys", &self.encryption_keys)
             .field("ice_servers", &self.ice_servers)
             .field("reconnect_attempts", &self.reconnect_attempts)
+            .field("audio_processing", &self.audio_processing)
             .finish()
     }
 }
@@ -997,6 +1049,7 @@ mod tests {
             encryption_keys: &[],
             ice_servers: None,
             reconnect_attempts: None,
+            audio_processing: AudioProcessingOptions::default(),
         };
         // No E2EE keys: the `encryptionKeys` key is omitted entirely, so
         // natives that predate the field see an unchanged payload.
@@ -1006,7 +1059,12 @@ mod tests {
                 "callId": "call-1",
                 "url": "wss://livekit.example",
                 "token": "secret-jwt",
-                "microphoneEnabled": true
+                "microphoneEnabled": true,
+                "audioProcessing": {
+                    "echoCancellation": true,
+                    "noiseSuppression": true,
+                    "autoGainControl": true
+                }
             })
         );
         let debug = format!("{fields:?}");
@@ -1031,7 +1089,12 @@ mod tests {
                 "microphoneEnabled": true,
                 "encryptionKeys": [
                     { "identity": "@alice:example.org", "keyIndex": 0, "key": "c2VjcmV0LWtleQ==" }
-                ]
+                ],
+                "audioProcessing": {
+                    "echoCancellation": true,
+                    "noiseSuppression": true,
+                    "autoGainControl": true
+                }
             })
         );
         let debug = format!("{encrypted:?}");
@@ -1153,6 +1216,11 @@ mod tests {
                 encryption_keys: &keys,
                 ice_servers: Some(&ice_servers),
                 reconnect_attempts: Some(3),
+                audio_processing: AudioProcessingOptions {
+                    echo_cancellation: false,
+                    noise_suppression: false,
+                    auto_gain_control: true,
+                },
             }),
             serde_json::json!({
                 "callId": "call-1",
@@ -1169,7 +1237,12 @@ mod tests {
                         "credential": "turn-pass"
                     }
                 ],
-                "reconnectAttempts": 3
+                "reconnectAttempts": 3,
+                "audioProcessing": {
+                    "echoCancellation": false,
+                    "noiseSuppression": false,
+                    "autoGainControl": true
+                }
             })
         );
     }

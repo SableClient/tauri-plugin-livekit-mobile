@@ -39,6 +39,8 @@ mod platform_commands {
     pub(super) const DISCONNECT: &str = "disconnectNativeCall";
     pub(super) const SET_MICROPHONE_ENABLED: &str = "setNativeCallMicrophoneEnabled";
     pub(super) const SET_CAMERA_ENABLED: &str = "setNativeCallCameraEnabled";
+    pub(super) const SET_AUDIO_PROCESSING: &str = "setNativeCallAudioProcessing";
+    pub(super) const SET_PARTICIPANT_VOLUME: &str = "setNativeCallParticipantVolume";
     pub(super) const SET_SCREEN_SHARE_ENABLED: &str = "setNativeCallScreenShareEnabled";
     pub(super) const SET_PIP_ENABLED: &str = "setNativeCallPiPEnabled";
     pub(super) const SWITCH_CAMERA: &str = "switchNativeCallCamera";
@@ -68,6 +70,8 @@ mod platform_commands {
     pub(super) const DISCONNECT: &str = "disconnect";
     pub(super) const SET_MICROPHONE_ENABLED: &str = "setMicrophoneEnabled";
     pub(super) const SET_CAMERA_ENABLED: &str = "setCameraEnabled";
+    pub(super) const SET_AUDIO_PROCESSING: &str = "setAudioProcessing";
+    pub(super) const SET_PARTICIPANT_VOLUME: &str = "setParticipantVolume";
     pub(super) const SET_SCREEN_SHARE_ENABLED: &str = "setScreenShareEnabled";
     pub(super) const SET_PIP_ENABLED: &str = "setNativeCallPiPEnabled";
     pub(super) const SWITCH_CAMERA: &str = "switchCamera";
@@ -199,6 +203,22 @@ impl<R: Runtime> MobileBackend<R> {
         request: SetNativeCallMicrophoneEnabledRequest,
     ) -> crate::Result<NativeCallSnapshot> {
         self.invoke(platform_commands::SET_MICROPHONE_ENABLED, request)
+            .await
+    }
+
+    pub(crate) async fn set_native_call_audio_processing(
+        &self,
+        request: SetNativeCallAudioProcessingRequest,
+    ) -> crate::Result<NativeCallSnapshot> {
+        self.invoke(platform_commands::SET_AUDIO_PROCESSING, request)
+            .await
+    }
+
+    pub(crate) async fn set_native_call_participant_volume(
+        &self,
+        request: SetNativeCallParticipantVolumeRequest,
+    ) -> crate::Result<NativeCallSnapshot> {
+        self.invoke(platform_commands::SET_PARTICIPANT_VOLUME, request)
             .await
     }
 

@@ -463,6 +463,18 @@
           "markdownDescription": "Denies the set_audio_route command without any pre-configured scope."
         },
         {
+          "description": "Enables the set_native_call_audio_processing command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-native-call-audio-processing",
+          "markdownDescription": "Enables the set_native_call_audio_processing command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_native_call_audio_processing command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-native-call-audio-processing",
+          "markdownDescription": "Denies the set_native_call_audio_processing command without any pre-configured scope."
+        },
+        {
           "description": "Enables the set_native_call_camera_enabled command without any pre-configured scope.",
           "type": "string",
           "const": "allow-set-native-call-camera-enabled",
@@ -509,6 +521,18 @@
           "type": "string",
           "const": "deny-set-native-call-microphone-enabled",
           "markdownDescription": "Denies the set_native_call_microphone_enabled command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_native_call_participant_volume command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-native-call-participant-volume",
+          "markdownDescription": "Enables the set_native_call_participant_volume command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_native_call_participant_volume command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-native-call-participant-volume",
+          "markdownDescription": "Denies the set_native_call_participant_volume command without any pre-configured scope."
         },
         {
           "description": "Enables the set_native_call_pip_enabled command without any pre-configured scope.",
@@ -595,16 +619,16 @@
           "markdownDescription": "Denies the update_call_display command without any pre-configured scope."
         },
         {
-          "description": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-get-native-call-capabilities`\n- `allow-connect-native-call`\n- `allow-disconnect-native-call`\n- `allow-set-native-call-microphone-enabled`\n- `allow-set-native-call-camera-enabled`\n- `allow-set-native-call-screen-share-enabled`\n- `allow-set-native-call-pip-enabled`\n- `allow-switch-native-call-camera`\n- `allow-set-native-call-remote-video-overlay`\n- `allow-clear-native-call-remote-video-overlay`\n- `allow-set-native-call-local-video-overlay`\n- `allow-clear-native-call-local-video-overlay`\n- `allow-start-system-call`\n- `allow-report-incoming-call`\n- `allow-end-system-call`\n- `allow-set-system-call-muted`\n- `allow-drain-pending-system-call-actions`\n- `allow-fulfill-answer-call`\n- `allow-fulfill-end-call`\n- `allow-report-system-call-connected`\n- `allow-set-native-call-encryption-key`\n- `allow-get-native-call-state`\n- `allow-get-audio-routes`\n- `allow-set-audio-route`\n- `allow-update-call-display`",
+          "description": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-get-native-call-capabilities`\n- `allow-connect-native-call`\n- `allow-disconnect-native-call`\n- `allow-set-native-call-microphone-enabled`\n- `allow-set-native-call-camera-enabled`\n- `allow-set-native-call-audio-processing`\n- `allow-set-native-call-participant-volume`\n- `allow-set-native-call-screen-share-enabled`\n- `allow-set-native-call-pip-enabled`\n- `allow-switch-native-call-camera`\n- `allow-set-native-call-remote-video-overlay`\n- `allow-clear-native-call-remote-video-overlay`\n- `allow-set-native-call-local-video-overlay`\n- `allow-clear-native-call-local-video-overlay`\n- `allow-start-system-call`\n- `allow-report-incoming-call`\n- `allow-end-system-call`\n- `allow-set-system-call-muted`\n- `allow-drain-pending-system-call-actions`\n- `allow-fulfill-answer-call`\n- `allow-fulfill-end-call`\n- `allow-report-system-call-connected`\n- `allow-set-native-call-encryption-key`\n- `allow-get-native-call-state`\n- `allow-get-audio-routes`\n- `allow-set-audio-route`\n- `allow-update-call-display`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-get-native-call-capabilities`\n- `allow-connect-native-call`\n- `allow-disconnect-native-call`\n- `allow-set-native-call-microphone-enabled`\n- `allow-set-native-call-camera-enabled`\n- `allow-set-native-call-screen-share-enabled`\n- `allow-set-native-call-pip-enabled`\n- `allow-switch-native-call-camera`\n- `allow-set-native-call-remote-video-overlay`\n- `allow-clear-native-call-remote-video-overlay`\n- `allow-set-native-call-local-video-overlay`\n- `allow-clear-native-call-local-video-overlay`\n- `allow-start-system-call`\n- `allow-report-incoming-call`\n- `allow-end-system-call`\n- `allow-set-system-call-muted`\n- `allow-drain-pending-system-call-actions`\n- `allow-fulfill-answer-call`\n- `allow-fulfill-end-call`\n- `allow-report-system-call-connected`\n- `allow-set-native-call-encryption-key`\n- `allow-get-native-call-state`\n- `allow-get-audio-routes`\n- `allow-set-audio-route`\n- `allow-update-call-display`"
+          "markdownDescription": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-get-native-call-capabilities`\n- `allow-connect-native-call`\n- `allow-disconnect-native-call`\n- `allow-set-native-call-microphone-enabled`\n- `allow-set-native-call-camera-enabled`\n- `allow-set-native-call-audio-processing`\n- `allow-set-native-call-participant-volume`\n- `allow-set-native-call-screen-share-enabled`\n- `allow-set-native-call-pip-enabled`\n- `allow-switch-native-call-camera`\n- `allow-set-native-call-remote-video-overlay`\n- `allow-clear-native-call-remote-video-overlay`\n- `allow-set-native-call-local-video-overlay`\n- `allow-clear-native-call-local-video-overlay`\n- `allow-start-system-call`\n- `allow-report-incoming-call`\n- `allow-end-system-call`\n- `allow-set-system-call-muted`\n- `allow-drain-pending-system-call-actions`\n- `allow-fulfill-answer-call`\n- `allow-fulfill-end-call`\n- `allow-report-system-call-connected`\n- `allow-set-native-call-encryption-key`\n- `allow-get-native-call-state`\n- `allow-get-audio-routes`\n- `allow-set-audio-route`\n- `allow-update-call-display`"
         },
         {
-          "description": "Capability probe plus the native LiveKit room lifecycle: connect, disconnect, state, microphone, camera and shared-E2EE keys. The base set every host needs.\n#### This permission set includes:\n\n- `allow-get-native-call-capabilities`\n- `allow-connect-native-call`\n- `allow-disconnect-native-call`\n- `allow-get-native-call-state`\n- `allow-set-native-call-microphone-enabled`\n- `allow-set-native-call-camera-enabled`\n- `allow-switch-native-call-camera`\n- `allow-set-native-call-encryption-key`",
+          "description": "Capability probe plus the native LiveKit room lifecycle: connect, disconnect, state, microphone, camera and shared-E2EE keys. The base set every host needs.\n#### This permission set includes:\n\n- `allow-get-native-call-capabilities`\n- `allow-connect-native-call`\n- `allow-disconnect-native-call`\n- `allow-get-native-call-state`\n- `allow-set-native-call-microphone-enabled`\n- `allow-set-native-call-camera-enabled`\n- `allow-set-native-call-audio-processing`\n- `allow-set-native-call-participant-volume`\n- `allow-switch-native-call-camera`\n- `allow-set-native-call-encryption-key`",
           "type": "string",
           "const": "native-room",
-          "markdownDescription": "Capability probe plus the native LiveKit room lifecycle: connect, disconnect, state, microphone, camera and shared-E2EE keys. The base set every host needs.\n#### This permission set includes:\n\n- `allow-get-native-call-capabilities`\n- `allow-connect-native-call`\n- `allow-disconnect-native-call`\n- `allow-get-native-call-state`\n- `allow-set-native-call-microphone-enabled`\n- `allow-set-native-call-camera-enabled`\n- `allow-switch-native-call-camera`\n- `allow-set-native-call-encryption-key`"
+          "markdownDescription": "Capability probe plus the native LiveKit room lifecycle: connect, disconnect, state, microphone, camera and shared-E2EE keys. The base set every host needs.\n#### This permission set includes:\n\n- `allow-get-native-call-capabilities`\n- `allow-connect-native-call`\n- `allow-disconnect-native-call`\n- `allow-get-native-call-state`\n- `allow-set-native-call-microphone-enabled`\n- `allow-set-native-call-camera-enabled`\n- `allow-set-native-call-audio-processing`\n- `allow-set-native-call-participant-volume`\n- `allow-switch-native-call-camera`\n- `allow-set-native-call-encryption-key`"
         },
         {
           "description": "Positioning the natively rendered remote and local video views over the webview. Needed only by a host that reports tile geometry.\n#### This permission set includes:\n\n- `allow-set-native-call-remote-video-overlay`\n- `allow-clear-native-call-remote-video-overlay`\n- `allow-set-native-call-local-video-overlay`\n- `allow-clear-native-call-local-video-overlay`",

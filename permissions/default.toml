@@ -6,6 +6,8 @@ permissions = [
     "allow-disconnect-native-call",
     "allow-set-native-call-microphone-enabled",
     "allow-set-native-call-camera-enabled",
+    "allow-set-native-call-audio-processing",
+    "allow-set-native-call-participant-volume",
     "allow-set-native-call-screen-share-enabled",
     "allow-set-native-call-pip-enabled",
     "allow-switch-native-call-camera",

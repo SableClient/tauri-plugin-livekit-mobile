@@ -22,9 +22,10 @@ use crate::models::{
     ConnectNativeCallRequest, DisconnectNativeCallRequest, EndSystemCallRequest,
     FulfillAnswerCallRequest, FulfillEndCallRequest, GetAudioRoutesRequest, GetAudioRoutesResponse,
     NativeCallCapabilities, NativeCallFailureCode, NativeCallSnapshot, ReportConnectedRequest,
-    ReportIncomingCallRequest, SetAudioRouteRequest, SetNativeCallCameraEnabledRequest,
-    SetNativeCallEncryptionKeyRequest, SetNativeCallLocalVideoOverlayRequest,
-    SetNativeCallMicrophoneEnabledRequest, SetNativeCallPiPEnabledRequest,
+    ReportIncomingCallRequest, SetAudioRouteRequest, SetNativeCallAudioProcessingRequest,
+    SetNativeCallCameraEnabledRequest, SetNativeCallEncryptionKeyRequest,
+    SetNativeCallLocalVideoOverlayRequest, SetNativeCallMicrophoneEnabledRequest,
+    SetNativeCallParticipantVolumeRequest, SetNativeCallPiPEnabledRequest,
     SetNativeCallRemoteVideoOverlayRequest, SetNativeCallScreenShareEnabledRequest,
     SetSystemCallMutedRequest, StartSystemCallRequest, SwitchNativeCallCameraRequest,
     SystemCallAction, UpdateCallDisplayRequest,
@@ -119,6 +120,12 @@ forwarded_commands! {
         => set_native_call_microphone_enabled, |r| call_id_is_valid(&r.call_id);
     SetNativeCallCameraEnabled(SetNativeCallCameraEnabledRequest) -> NativeCallSnapshot
         => set_native_call_camera_enabled, |r| call_id_is_valid(&r.call_id);
+    SetNativeCallAudioProcessing(SetNativeCallAudioProcessingRequest) -> NativeCallSnapshot
+        => set_native_call_audio_processing, |r| call_id_is_valid(&r.call_id);
+    SetNativeCallParticipantVolume(SetNativeCallParticipantVolumeRequest) -> NativeCallSnapshot
+        => set_native_call_participant_volume, |r| call_id_is_valid(&r.call_id)
+            && !r.identity.trim().is_empty()
+            && r.volume.is_finite();
     SetNativeCallScreenShareEnabled(SetNativeCallScreenShareEnabledRequest) -> NativeCallSnapshot
         => set_native_call_screen_share_enabled, |r| call_id_is_valid(&r.call_id);
     SetNativeCallPiPEnabled(SetNativeCallPiPEnabledRequest) -> NativeCallSnapshot
@@ -441,6 +448,7 @@ impl<R: Runtime> Actor<R> {
                     encryption_keys: &request.encryption_keys,
                     ice_servers: request.ice_servers.as_deref(),
                     reconnect_attempts: request.reconnect_attempts,
+                    audio_processing: request.audio_processing,
                 },
                 channel,
             })
@@ -602,6 +610,7 @@ mod tests {
 
     fn connect_request(call_id: &str) -> ConnectNativeCallRequest {
         ConnectNativeCallRequest {
+            audio_processing: Default::default(),
             call_id: call_id.into(),
             url: "wss://livekit.example".into(),
             token: "jwt".into(),

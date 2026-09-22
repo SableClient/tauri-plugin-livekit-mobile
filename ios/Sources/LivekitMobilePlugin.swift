@@ -28,11 +28,50 @@ struct BridgeIceServer: Decodable {
   let credential: String?
 }
 
+/// Matches both platform SDKs' own ceiling for a remote playout gain.
+let maxParticipantVolume = 10.0
+
+/// Microphone processing the capturer applies. Every field defaults to `true`,
+/// which is the SDK's own default, so an older guest is unchanged.
+struct BridgeAudioProcessing: Decodable {
+  let echoCancellation: Bool?
+  let noiseSuppression: Bool?
+  let autoGainControl: Bool?
+
+  var captureOptions: AudioCaptureOptions {
+    AudioCaptureOptions(
+      echoCancellation: echoCancellation ?? true,
+      autoGainControl: autoGainControl ?? true,
+      noiseSuppression: noiseSuppression ?? true)
+  }
+}
+
+struct SetAudioProcessingArgs: Decodable {
+  let callId: String
+  let echoCancellation: Bool?
+  let noiseSuppression: Bool?
+  let autoGainControl: Bool?
+
+  var captureOptions: AudioCaptureOptions {
+    AudioCaptureOptions(
+      echoCancellation: echoCancellation ?? true,
+      autoGainControl: autoGainControl ?? true,
+      noiseSuppression: noiseSuppression ?? true)
+  }
+}
+
+struct SetParticipantVolumeArgs: Decodable {
+  let callId: String
+  let identity: String
+  let volume: Double
+}
+
 struct ConnectArgs: Decodable {
   let callId: String
   let url: String
   let token: String
   let microphoneEnabled: Bool
+  let audioProcessing: BridgeAudioProcessing?
   /// Per-participant E2EE key material. Absent or empty means an
   /// unencrypted (generic) call.
   let encryptionKeys: [EncryptionKeyPayload]?
@@ -448,6 +487,39 @@ final class LivekitMobilePlugin: Plugin {
       }
       await controller.setMicrophoneEnabled(
         callId: args.callId, enabled: args.enabled, invoke: invoke)
+    }
+  }
+
+  @objc public func setAudioProcessing(_ invoke: Invoke) throws {
+    guard let args = try? invoke.parseArgs(SetAudioProcessingArgs.self) else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+    Task { @MainActor [weak controller] in
+      guard let controller else {
+        reject(invoke, .unavailable)
+        return
+      }
+      await controller.setAudioProcessing(
+        callId: args.callId, processing: args.captureOptions, invoke: invoke)
+    }
+  }
+
+  @objc public func setParticipantVolume(_ invoke: Invoke) throws {
+    guard let args = try? invoke.parseArgs(SetParticipantVolumeArgs.self),
+      !args.identity.isEmpty, args.volume.isFinite
+    else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+    Task { @MainActor [weak controller] in
+      guard let controller else {
+        reject(invoke, .unavailable)
+        return
+      }
+      await controller.setParticipantVolume(
+        callId: args.callId, identity: args.identity,
+        volume: min(max(args.volume, 0), maxParticipantVolume), invoke: invoke)
     }
   }
 

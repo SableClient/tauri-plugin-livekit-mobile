@@ -262,6 +262,59 @@ final class WireContractTests: XCTestCase {
     XCTAssertEqual(try XCTUnwrap(args.channel).id, 7)
   }
 
+  func testConnectArgsDecodeOptionalAudioProcessing() throws {
+    // Absent: every effect stays on, which is the SDK's own default.
+    let (plainInvoke, _) = makeInvoke(data: """
+      {
+        "callId": "call-1",
+        "url": "wss://example.test",
+        "token": "T0K3N",
+        "microphoneEnabled": true,
+        "channel": "__CHANNEL__:7"
+      }
+      """)
+    let plain = try plainInvoke.parseArgs(ConnectArgs.self)
+    XCTAssertNil(plain.audioProcessing)
+
+    let (invoke, _) = makeInvoke(data: """
+      {
+        "callId": "call-1",
+        "url": "wss://example.test",
+        "token": "T0K3N",
+        "microphoneEnabled": true,
+        "audioProcessing": {
+          "echoCancellation": false,
+          "noiseSuppression": false,
+          "autoGainControl": true
+        },
+        "channel": "__CHANNEL__:7"
+      }
+      """)
+    let options = try XCTUnwrap(try invoke.parseArgs(ConnectArgs.self).audioProcessing)
+      .captureOptions
+    XCTAssertFalse(options.echoCancellation)
+    XCTAssertFalse(options.noiseSuppression)
+    XCTAssertTrue(options.autoGainControl)
+  }
+
+  func testAudioProcessingArgsDefaultEveryEffectOn() throws {
+    let (invoke, _) = makeInvoke(data: #"{"callId": "call-1", "noiseSuppression": false}"#)
+    let args = try invoke.parseArgs(SetAudioProcessingArgs.self)
+    XCTAssertEqual(args.callId, "call-1")
+    XCTAssertFalse(args.captureOptions.noiseSuppression)
+    XCTAssertTrue(args.captureOptions.echoCancellation)
+    XCTAssertTrue(args.captureOptions.autoGainControl)
+  }
+
+  func testParticipantVolumeArgsDecode() throws {
+    let (invoke, _) = makeInvoke(
+      data: #"{"callId": "call-1", "identity": "@alice:example.org", "volume": 0.4}"#)
+    let args = try invoke.parseArgs(SetParticipantVolumeArgs.self)
+    XCTAssertEqual(args.callId, "call-1")
+    XCTAssertEqual(args.identity, "@alice:example.org")
+    XCTAssertEqual(args.volume, 0.4, accuracy: 0.0001)
+  }
+
   func testCallIdOnlyArgsDecode() throws {
     let (invoke, _) = makeInvoke(data: #"{"callId": "call-1"}"#)
     let args = try invoke.parseArgs(DisconnectArgs.self)
