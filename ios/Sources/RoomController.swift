@@ -991,7 +991,7 @@ final class RoomController: NSObject {
     let view = VideoView()
     view.isUserInteractionEnabled = false
     view.isHidden = true
-    view.mirrorMode = .mirror
+    view.mirrorMode = .auto
     container.addSubview(view)
     localOverlayView = view
     return view

@@ -27,6 +27,7 @@ import io.livekit.android.room.track.LocalVideoTrack
 import io.livekit.android.room.track.RemoteAudioTrack
 import io.livekit.android.room.track.Track
 import io.livekit.android.room.track.screencapture.ScreenCaptureParams
+import io.livekit.android.util.flow
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -36,7 +37,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 
 /**
@@ -715,6 +718,7 @@ internal class NativeCallController(
                 reject(invoke, NativeCallWire.ERR_MEDIA_FAILED)
                 return@launch
             }
+            val previousOptions = cameraTrack.options
             try {
                 cameraTrack.switchCamera()
             } catch (_: Exception) {
@@ -724,6 +728,10 @@ internal class NativeCallController(
                 return@launch
             }
             invoke.resolve(snapshotJson())
+            withTimeoutOrNull(CAMERA_SWITCH_TIMEOUT_MS) {
+                cameraTrack::options.flow.first { it != previousOptions }
+            }
+            localVideoOverlay.refreshMirror()
         }
     }
 
@@ -1184,5 +1192,6 @@ internal class NativeCallController(
 
     private companion object {
         const val DISPOSE_TIMEOUT_MS = 3_000L
+        const val CAMERA_SWITCH_TIMEOUT_MS = 5_000L
     }
 }

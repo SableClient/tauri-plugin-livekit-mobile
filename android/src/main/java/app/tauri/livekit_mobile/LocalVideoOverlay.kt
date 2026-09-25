@@ -6,6 +6,8 @@ import android.view.View
 import android.view.ViewGroup
 import android.webkit.WebView
 import io.livekit.android.room.Room
+import io.livekit.android.room.track.CameraPosition
+import io.livekit.android.room.track.LocalVideoTrack
 import io.livekit.android.room.track.Track
 import io.livekit.android.room.track.VideoTrack
 import java.util.concurrent.CountDownLatch
@@ -99,6 +101,7 @@ internal class LocalVideoOverlay(
                             attachedTrack?.removeRenderer(view)
                             track.addRenderer(view)
                         }
+                        applyMirror(view, track)
                         place(view, webView, parent, rect)
 
                         if (generation != capturedGeneration) {
@@ -160,6 +163,7 @@ internal class LocalVideoOverlay(
                             resolved.addRenderer(view)
                             attachedTrack = resolved
                         }
+                        applyMirror(view, resolved)
                         if (view.visibility != View.VISIBLE) {
                             val webView =
                                 webViewProvider() ?: return@onMainThread false
@@ -227,8 +231,6 @@ internal class LocalVideoOverlay(
         rect: OverlayRect,
     ) {
         applyOverlaySize(view, rect.width, rect.height)
-        // Self-view only, matching iOS `.mirror` and the web `scaleX(-1)`.
-        view.setMirror(true)
         if (view.parent !== parent) {
             (view.parent as? ViewGroup)?.removeView(view)
             parent.addView(view)
@@ -304,6 +306,20 @@ internal class LocalVideoOverlay(
         renderer = null
         attachedTrack = null
         selectedSpec = null
+    }
+
+    fun refreshMirror() {
+        val view = renderer ?: return
+        runCatching {
+            onMainThread {
+                val track = attachedTrack
+                if (renderer === view && track != null) applyMirror(view, track)
+            }
+        }
+    }
+
+    private fun applyMirror(view: PassThroughVideoRenderer, track: VideoTrack) {
+        view.setMirror((track as? LocalVideoTrack)?.options?.position == CameraPosition.FRONT)
     }
 
     /** Resolves the local participant's published camera track, if any. */
