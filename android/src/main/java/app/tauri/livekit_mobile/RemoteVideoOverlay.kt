@@ -36,6 +36,20 @@ internal fun applyOverlaySize(view: View, width: Int, height: Int) {
     view.layoutParams = params
 }
 
+internal fun overlayTranslation(
+    hostOffset: Int,
+    hostTranslation: Float,
+    parentPadding: Int,
+    rectOffset: Int,
+): Float = hostOffset - parentPadding + hostTranslation + rectOffset
+
+internal fun translateOverlay(view: View, webView: View, parent: ViewGroup, rect: OverlayRect) {
+    view.translationX =
+        overlayTranslation(webView.left, webView.translationX, parent.paddingLeft, rect.left)
+    view.translationY =
+        overlayTranslation(webView.top, webView.translationY, parent.paddingTop, rect.top)
+}
+
 /** Physical-pixel rect for the overlay view: CSS rect converted and clipped. */
 internal data class OverlayRect(
     val left: Int,
@@ -464,8 +478,7 @@ internal class RemoteVideoOverlay(
         // The clipped rect is WebView viewport-relative; the view sits in the
         // WebView's parent, so translate by the parent-relative origin.
         // Translations survive parent re-layouts.
-        view.translationX = webView.left + webView.translationX + placed.left
-        view.translationY = webView.top + webView.translationY + placed.top
+        translateOverlay(view, webView, parent, placed)
         view.visibility = View.VISIBLE
         notifyVisibilityAfterLayout(view)
     }

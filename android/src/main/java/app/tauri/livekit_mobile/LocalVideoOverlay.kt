@@ -236,8 +236,7 @@ internal class LocalVideoOverlay(
         // The clipped rect is WebView viewport-relative; the view sits in the
         // WebView's parent, so translate by the parent-relative origin.
         // Translations survive parent re-layouts.
-        view.translationX = webView.left + webView.translationX + rect.left
-        view.translationY = webView.top + webView.translationY + rect.top
+        translateOverlay(view, webView, parent, rect)
         view.visibility = if (hidden) View.GONE else View.VISIBLE
     }
 

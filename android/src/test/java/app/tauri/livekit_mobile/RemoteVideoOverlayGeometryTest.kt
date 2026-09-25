@@ -107,4 +107,15 @@ class RemoteVideoOverlayGeometryTest {
             overlayRectFromCss(0.2, 0.2, 0.6, 0.6, 1.9, 100, 100),
         )
     }
+
+    @Test
+    fun `translation lands on the host rect without parent padding`() {
+        assertEquals(130f, overlayTranslation(0, 10f, 0, 120), 0f)
+    }
+
+    @Test
+    fun `parent padding already offsets the child and is not applied twice`() {
+        assertEquals(120f, overlayTranslation(96, 0f, 96, 120), 0f)
+        assertEquals(25f, overlayTranslation(80, -15f, 40, 0), 0f)
+    }
 }
