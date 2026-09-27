@@ -18,6 +18,7 @@ const COMMANDS: &[&str] = &[
     "end_system_call",
     "set_system_call_muted",
     "drain_pending_system_call_actions",
+    "get_voip_token",
     "fulfill_answer_call",
     "fulfill_end_call",
     "report_system_call_connected",

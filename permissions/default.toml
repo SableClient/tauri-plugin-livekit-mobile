@@ -20,6 +20,7 @@ permissions = [
     "allow-end-system-call",
     "allow-set-system-call-muted",
     "allow-drain-pending-system-call-actions",
+    "allow-get-voip-token",
     "allow-fulfill-answer-call",
     "allow-fulfill-end-call",
     "allow-report-system-call-connected",

@@ -23,6 +23,7 @@ Default permissions for the plugin
 - `allow-end-system-call`
 - `allow-set-system-call-muted`
 - `allow-drain-pending-system-call-actions`
+- `allow-get-voip-token`
 - `allow-fulfill-answer-call`
 - `allow-fulfill-end-call`
 - `allow-report-system-call-connected`
@@ -323,6 +324,32 @@ Enables the get_native_call_state command without any pre-configured scope.
 <td>
 
 Denies the get_native_call_state command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:allow-get-voip-token`
+
+</td>
+<td>
+
+Enables the get_voip_token command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:deny-get-voip-token`
+
+</td>
+<td>
+
+Denies the get_voip_token command without any pre-configured scope.
 
 </td>
 </tr>

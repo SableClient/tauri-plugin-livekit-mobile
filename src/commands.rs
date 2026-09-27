@@ -193,6 +193,11 @@ pub(crate) async fn set_system_call_muted<R: Runtime>(
 }
 
 #[tauri_command]
+pub(crate) async fn get_voip_token<R: Runtime>(app: AppHandle<R>) -> Result<Option<String>> {
+    app.native_call_bridge().get_voip_token().await
+}
+
+#[tauri_command]
 pub(crate) async fn drain_pending_system_call_actions<R: Runtime>(
     app: AppHandle<R>,
 ) -> Result<Vec<SystemCallAction>> {

@@ -922,7 +922,7 @@ final class CallKitController: NSObject {
   // MARK: - PushKit (VoIP push notifications)
 
   private var pushRegistry: PKPushRegistry?
-  private var voipToken: String?
+  private(set) var voipToken: String?
 
   func setupPushKit() {
     guard !chinaRegion else { return }

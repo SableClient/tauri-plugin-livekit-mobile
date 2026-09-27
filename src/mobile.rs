@@ -33,6 +33,13 @@ const PLUGIN_IDENTIFIER: &str = "app.tauri.livekit_mobile";
 #[cfg(target_os = "ios")]
 tauri::ios_plugin_binding!(init_plugin_livekit_mobile);
 
+#[cfg(target_os = "ios")]
+#[derive(serde::Deserialize)]
+struct VoipTokenWire {
+    #[serde(default)]
+    token: Option<String>,
+}
+
 #[cfg(target_os = "android")]
 mod platform_commands {
     pub(super) const CAPABILITIES: &str = "getNativeCallCapabilities";
@@ -87,6 +94,7 @@ mod platform_commands {
     pub(super) const END_SYSTEM_CALL: &str = "endSystemCall";
     pub(super) const SET_SYSTEM_CALL_MUTED: &str = "setSystemCallMuted";
     pub(super) const DRAIN_PENDING_ACTIONS: &str = "drainPendingSystemCallActions";
+    pub(super) const GET_VOIP_TOKEN: &str = "getVoipToken";
     pub(super) const FULFILL_ANSWER_CALL: &str = "fulfillAnswerCall";
     pub(super) const FULFILL_END_CALL: &str = "fulfillEndCall";
     pub(super) const REPORT_CONNECTED: &str = "reportConnected";
@@ -320,6 +328,18 @@ impl<R: Runtime> MobileBackend<R> {
     ) -> crate::Result<Vec<SystemCallAction>> {
         self.invoke(platform_commands::DRAIN_PENDING_ACTIONS, ())
             .await
+    }
+
+    #[cfg(target_os = "ios")]
+    pub(crate) async fn get_voip_token(&self) -> crate::Result<Option<String>> {
+        let wire: VoipTokenWire = self.invoke(platform_commands::GET_VOIP_TOKEN, ()).await?;
+        Ok(wire.token)
+    }
+
+    #[cfg(target_os = "android")]
+    #[allow(clippy::unused_async)]
+    pub(crate) async fn get_voip_token(&self) -> crate::Result<Option<String>> {
+        Ok(None)
     }
 
     pub(crate) async fn fulfill_answer_call(

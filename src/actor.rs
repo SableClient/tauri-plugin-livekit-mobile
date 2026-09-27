@@ -112,6 +112,7 @@ pub(crate) enum Command {
     ),
     GetNativeCallState(String, oneshot::Sender<Result<NativeCallSnapshot>>),
     DrainPendingSystemCallActions(oneshot::Sender<Result<Vec<SystemCallAction>>>),
+    GetVoipToken(oneshot::Sender<Result<Option<String>>>),
     Forwarded(Forwarded),
 }
 
@@ -342,6 +343,10 @@ impl<R: Runtime> NativeCallBridge<R> {
     pub async fn drain_pending_system_call_actions(&self) -> Result<Vec<SystemCallAction>> {
         self.send(Command::DrainPendingSystemCallActions).await
     }
+
+    pub async fn get_voip_token(&self) -> Result<Option<String>> {
+        self.send(Command::GetVoipToken).await
+    }
 }
 
 #[cfg(not(mobile))]
@@ -406,6 +411,7 @@ impl<R: Runtime> Actor<R> {
                 self.handle_drain_pending_system_call_actions(response)
                     .await
             }
+            Command::GetVoipToken(response) => self.handle_get_voip_token(response).await,
             Command::Forwarded(command) => self.handle_forwarded(command).await,
         }
     }
@@ -574,6 +580,17 @@ impl<R: Runtime> Actor<R> {
         response: oneshot::Sender<Result<Vec<SystemCallAction>>>,
     ) {
         let _ = response.send(unavailable());
+    }
+
+    #[cfg(mobile)]
+    async fn handle_get_voip_token(&mut self, response: oneshot::Sender<Result<Option<String>>>) {
+        let result = self.mobile.get_voip_token().await;
+        let _ = response.send(result);
+    }
+
+    #[cfg(not(mobile))]
+    async fn handle_get_voip_token(&mut self, response: oneshot::Sender<Result<Option<String>>>) {
+        let _ = response.send(Ok(None));
     }
 
     #[cfg(mobile)]

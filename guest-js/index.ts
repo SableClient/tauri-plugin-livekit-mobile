@@ -311,6 +311,13 @@ export const setSystemCallMuted = (request: SetSystemCallMutedRequest): Promise<
 export const drainPendingSystemCallActions = (): Promise<SystemCallAction[]> =>
   invoke<SystemCallAction[]>('plugin:livekit-mobile|drain_pending_system_call_actions');
 
+export const getVoipToken = (): Promise<string | null> =>
+  invoke<string | null>('plugin:livekit-mobile|get_voip_token');
+
+export const onVoipTokenUpdated = (
+  handler: (event: { token: string }) => void
+): Promise<PluginListener> => addPluginListener('livekit-mobile', 'voipTokenUpdated', handler);
+
 export const fulfillAnswerCall = (uuid: string): Promise<void> =>
   invoke<void>('plugin:livekit-mobile|fulfill_answer_call', { payload: { uuid } });
 

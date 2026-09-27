@@ -50,6 +50,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::end_system_call,
             commands::set_system_call_muted,
             commands::drain_pending_system_call_actions,
+            commands::get_voip_token,
             commands::fulfill_answer_call,
             commands::fulfill_end_call,
             commands::report_system_call_connected,

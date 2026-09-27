@@ -761,6 +761,16 @@ final class LivekitMobilePlugin: Plugin {
     }
   }
 
+  @objc public func getVoipToken(_ invoke: Invoke) throws {
+    Task { @MainActor [weak callKitController] in
+      if let token = callKitController?.voipToken {
+        invoke.resolve(["token": token])
+      } else {
+        invoke.resolve([:])
+      }
+    }
+  }
+
   @objc public func drainPendingSystemCallActions(_ invoke: Invoke) throws {
     Task { @MainActor [weak callKitController] in
       guard let callKitController else {
