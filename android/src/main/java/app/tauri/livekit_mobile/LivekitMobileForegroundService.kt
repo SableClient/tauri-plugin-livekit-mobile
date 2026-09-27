@@ -11,6 +11,7 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
 
 /**
@@ -25,7 +26,7 @@ import androidx.core.app.Person
 class LivekitMobileForegroundService : Service() {
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannels()
+        createNotificationChannels(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -38,7 +39,7 @@ class LivekitMobileForegroundService : Service() {
         val wantsScreenShare = intent?.getBooleanExtra(EXTRA_SCREEN_SHARE, false) ?: false
 
         val notification = when (callDirection) {
-            DIRECTION_INCOMING -> buildIncomingCallNotification(callerName, callId)
+            DIRECTION_INCOMING -> buildIncomingCallNotification(this, callerName, callId)
             DIRECTION_OUTGOING -> buildOutgoingCallNotification(callerName, callId)
             else -> buildOngoingCallNotification(callerName, callId)
         }
@@ -96,76 +97,6 @@ class LivekitMobileForegroundService : Service() {
             stopForeground(true)
         }
         super.onDestroy()
-    }
-
-    private fun createNotificationChannels() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_ID_ONGOING,
-                "Call in progress",
-                NotificationManager.IMPORTANCE_LOW,
-            ),
-        )
-        manager.createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_ID_INCOMING,
-                "Incoming call",
-                NotificationManager.IMPORTANCE_HIGH,
-            ),
-        )
-    }
-
-    // ── Incoming call notification (Android 12+ CallStyle) ─────────────────
-
-    private fun buildIncomingCallNotification(callerName: String, callId: String): Notification {
-        val appInfo = applicationInfo
-        val appLabel = appInfo.loadLabel(packageManager).toString()
-
-        val declineIntent = buildActionIntent(ACTION_DECLINE, callId)
-        val answerIntent = buildActionIntent(ACTION_ANSWER, callId)
-        val declinePending = PendingIntent.getBroadcast(
-            this, 0, declineIntent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
-        val answerPending = PendingIntent.getBroadcast(
-            this, 1, answerIntent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
-
-        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val person = Person.Builder()
-                .setName(callerName)
-                .build()
-            NotificationCompat.Builder(this, CHANNEL_ID_INCOMING)
-                .setSmallIcon(appInfo.icon)
-                .setContentTitle(appLabel)
-                .setContentText("Incoming call from $callerName")
-                .setCategory(Notification.CATEGORY_CALL)
-                .setOngoing(true)
-                .setOnlyAlertOnce(false)
-                .setStyle(
-                    NotificationCompat.CallStyle.forIncomingCall(
-                        person,
-                        declinePending,
-                        answerPending,
-                    ),
-                )
-                .setFullScreenIntent(buildFullScreenIntent(), true)
-        } else {
-            // Pre-Android 12: simple ongoing notification.
-            NotificationCompat.Builder(this, CHANNEL_ID_INCOMING)
-                .setSmallIcon(appInfo.icon)
-                .setContentTitle(appLabel)
-                .setContentText("Incoming call from $callerName")
-                .setCategory(Notification.CATEGORY_CALL)
-                .setOngoing(true)
-                .setOnlyAlertOnce(false)
-                .setFullScreenIntent(buildFullScreenIntent(), true)
-        }
-        buildContentIntent()?.let(builder::setContentIntent)
-        return builder.build()
     }
 
     // ── Outgoing call notification ─────────────────────────────────────────
@@ -268,18 +199,7 @@ class LivekitMobileForegroundService : Service() {
      * may not be the one that started this service.
      */
     private fun buildActionIntent(action: String, callId: String): Intent =
-        Intent(this, LivekitMobileCallActionReceiver::class.java)
-            .putExtra(EXTRA_ACTION, action)
-            .putExtra(EXTRA_CALL_ID, callId)
-
-    private fun buildFullScreenIntent(): PendingIntent {
-        val intent = packageManager.getLaunchIntentForPackage(packageName)
-            ?: Intent()
-        return PendingIntent.getActivity(
-            this, 0, intent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
-    }
+        buildActionIntent(this, action, callId)
 
     /**
      * Body tap on a call notification. CallStyle only wires the buttons it was
@@ -301,18 +221,7 @@ class LivekitMobileForegroundService : Service() {
      * keeps its working buttons instead of carrying an intent that resolves to
      * nothing.
      */
-    private fun buildContentIntent(): PendingIntent? {
-        val intent = packageManager.getLaunchIntentForPackage(packageName)
-            ?: return null
-        intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        // Its own request code: PendingIntent matching ignores Intent flags, so
-        // sharing the full-screen intent's would hand back that PendingIntent
-        // and silently drop SINGLE_TOP.
-        return PendingIntent.getActivity(
-            this, 4, intent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
-    }
+    private fun buildContentIntent(): PendingIntent? = buildContentIntent(this)
 
     companion object {
         // Extras from the plugin to the service.
@@ -339,5 +248,124 @@ class LivekitMobileForegroundService : Service() {
         private const val CHANNEL_ID_ONGOING = "livekit_mobile_ongoing"
         private const val CHANNEL_ID_INCOMING = "livekit_mobile_incoming"
         private const val NOTIFICATION_ID = 1396
+
+        internal fun createNotificationChannels(context: Context) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+            val manager = context.getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_ID_ONGOING,
+                    "Call in progress",
+                    NotificationManager.IMPORTANCE_LOW,
+                ),
+            )
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_ID_INCOMING,
+                    "Incoming call",
+                    NotificationManager.IMPORTANCE_HIGH,
+                ),
+            )
+        }
+
+        internal fun postIncomingCall(context: Context, callId: String, callerName: String): Boolean {
+            createNotificationChannels(context)
+            val manager = NotificationManagerCompat.from(context)
+            if (!manager.areNotificationsEnabled()) return false
+            return try {
+                manager.notify(NOTIFICATION_ID, buildIncomingCallNotification(context, callerName, callId))
+                true
+            } catch (_: SecurityException) {
+                false
+            } catch (_: IllegalArgumentException) {
+                false
+            }
+        }
+
+        internal fun cancelIncomingCall(context: Context) {
+            NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
+        }
+
+        private fun buildActionIntent(context: Context, action: String, callId: String): Intent =
+            Intent(context, LivekitMobileCallActionReceiver::class.java)
+                .putExtra(EXTRA_ACTION, action)
+                .putExtra(EXTRA_CALL_ID, callId)
+
+        private fun buildFullScreenIntent(context: Context): PendingIntent {
+            val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+                ?: Intent()
+            return PendingIntent.getActivity(
+                context, 0, intent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+        }
+
+        private fun buildContentIntent(context: Context): PendingIntent? {
+            val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+                ?: return null
+            intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            // Its own request code: PendingIntent matching ignores Intent flags, so
+            // sharing the full-screen intent's would hand back that PendingIntent
+            // and silently drop SINGLE_TOP.
+            return PendingIntent.getActivity(
+                context, 4, intent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+        }
+
+        // ── Incoming call notification (Android 12+ CallStyle) ─────────────────
+
+        internal fun buildIncomingCallNotification(
+            context: Context,
+            callerName: String,
+            callId: String,
+        ): Notification {
+            val appInfo = context.applicationInfo
+            val appLabel = appInfo.loadLabel(context.packageManager).toString()
+
+            val declineIntent = buildActionIntent(context, ACTION_DECLINE, callId)
+            val answerIntent = buildActionIntent(context, ACTION_ANSWER, callId)
+            val declinePending = PendingIntent.getBroadcast(
+                context, 0, declineIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            val answerPending = PendingIntent.getBroadcast(
+                context, 1, answerIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+
+            val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val person = Person.Builder()
+                    .setName(callerName)
+                    .build()
+                NotificationCompat.Builder(context, CHANNEL_ID_INCOMING)
+                    .setSmallIcon(appInfo.icon)
+                    .setContentTitle(appLabel)
+                    .setContentText("Incoming call from $callerName")
+                    .setCategory(Notification.CATEGORY_CALL)
+                    .setOngoing(true)
+                    .setOnlyAlertOnce(false)
+                    .setStyle(
+                        NotificationCompat.CallStyle.forIncomingCall(
+                            person,
+                            declinePending,
+                            answerPending,
+                        ),
+                    )
+                    .setFullScreenIntent(buildFullScreenIntent(context), true)
+            } else {
+                // Pre-Android 12: simple ongoing notification.
+                NotificationCompat.Builder(context, CHANNEL_ID_INCOMING)
+                    .setSmallIcon(appInfo.icon)
+                    .setContentTitle(appLabel)
+                    .setContentText("Incoming call from $callerName")
+                    .setCategory(Notification.CATEGORY_CALL)
+                    .setOngoing(true)
+                    .setOnlyAlertOnce(false)
+                    .setFullScreenIntent(buildFullScreenIntent(context), true)
+            }
+            buildContentIntent(context)?.let(builder::setContentIntent)
+            return builder.build()
+        }
     }
 }

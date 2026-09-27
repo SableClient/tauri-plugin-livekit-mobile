@@ -483,12 +483,31 @@ internal class NativeCallController(
         }
     }
 
+    fun presentIncomingCall(callId: String, callerName: String): Boolean {
+        if (snapshot.isActive) return false
+        if (!LivekitMobileForegroundService.postIncomingCall(appContext, callId, callerName)) {
+            return false
+        }
+        scope.launch {
+            if (snapshot.isActive) return@launch
+            presentation =
+                NativeCallPresentation.announcing(
+                    callId,
+                    LivekitMobileForegroundService.DIRECTION_INCOMING,
+                    callerName,
+                    connected = false,
+                )
+        }
+        return true
+    }
+
     /** Drops the notification of a presented call that never became a room
      * (declined, missed, answered on another device). A live room keeps its own
      * notification: only its own teardown may take that down. */
     fun dismissCallPresentation(callId: String) {
         scope.launch {
             if (presentation.callId != callId || snapshot.isActive) return@launch
+            LivekitMobileForegroundService.cancelIncomingCall(appContext)
             stopCallForegroundService()
         }
     }

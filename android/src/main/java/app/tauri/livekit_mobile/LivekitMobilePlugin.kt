@@ -730,15 +730,12 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
             reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
             return
         }
-        controller.presentCall(
-            args.callId,
-            LivekitMobileForegroundService.DIRECTION_INCOMING,
-            args.callerName,
-        )
-        callController.reportIncomingCall(
-            args.callId,
-            args.callerName.ifBlank { args.callId },
-        ) { added ->
+        val callerName = args.callerName.ifBlank { args.callId }
+        if (!controller.presentIncomingCall(args.callId, callerName)) {
+            rejectUnavailable(invoke)
+            return
+        }
+        callController.reportIncomingCall(args.callId, callerName) { added ->
             if (!added) controller.dismissCallPresentation(args.callId)
             settle(invoke, added)
         }
