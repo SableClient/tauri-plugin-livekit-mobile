@@ -1,5 +1,6 @@
 package app.tauri.livekit_mobile
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.os.Build
@@ -13,6 +14,7 @@ import io.livekit.android.AudioOptions
 import io.livekit.android.LiveKitOverrides
 import io.livekit.android.RoomOptions
 import io.livekit.android.audio.AudioSwitchHandler
+import io.livekit.android.audio.ScreenAudioCapturer
 import com.twilio.audioswitch.AudioDevice
 import io.livekit.android.e2ee.E2EEOptions
 import io.livekit.android.events.RoomEvent
@@ -40,6 +42,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import livekit.org.webrtc.audio.JavaAudioDeviceModule
 import org.json.JSONObject
 
 /**
@@ -96,6 +99,7 @@ internal class NativeCallController(
     /** LiveKit owns the output route for the whole call. */
     @Volatile
     private var audioHandler: AudioSwitchHandler? = null
+    private var screenAudio: ScreenAudioCapturer? = null
 
     fun audioRoutes(callId: String): List<SystemAudioRoute> {
         if (!isActiveCall(callId)) return emptyList()
@@ -555,7 +559,11 @@ internal class NativeCallController(
                 return@launch
             }
             try {
-                currentRoom.localParticipant.setMicrophoneEnabled(enabled)
+                if (screenAudio != null) {
+                    audioDeviceModule(currentRoom)?.setAudioRecordEnabled(enabled)
+                } else {
+                    currentRoom.localParticipant.setMicrophoneEnabled(enabled)
+                }
             } catch (_: Exception) {
                 transition { copy(lastErrorCode = NativeCallWire.ERR_MEDIA_FAILED) }
                 emitSnapshotChanged()
@@ -566,7 +574,7 @@ internal class NativeCallController(
             // The microphone service type follows the publication both ways: a
             // muted call must not keep claiming a microphone it is not using.
             startCallForegroundService(
-                preferMicrophone = enabled,
+                preferMicrophone = enabled || screenAudio != null,
                 preferCamera = snapshot.cameraEnabled,
             )
             emitSnapshotChanged()
@@ -689,13 +697,16 @@ internal class NativeCallController(
                 return@launch
             }
             transition { copy(screenShareEnabled = enabled) }
-            if (!enabled) {
-                startCallForegroundService(
-                    preferMicrophone = snapshot.microphoneEnabled,
-                    preferCamera = snapshot.cameraEnabled,
-                    preferScreenShare = false,
-                )
+            if (enabled) {
+                startScreenAudio(currentRoom)
+            } else {
+                stopScreenAudio(currentRoom)
             }
+            startCallForegroundService(
+                preferMicrophone = snapshot.microphoneEnabled || screenAudio != null,
+                preferCamera = snapshot.cameraEnabled,
+                preferScreenShare = enabled,
+            )
             emitSnapshotChanged()
             invoke.resolve(snapshotJson())
         }
@@ -706,6 +717,7 @@ internal class NativeCallController(
         scope.launch {
             if (snapshot.callId != callId || !snapshot.screenShareEnabled) return@launch
             transition { copy(screenShareEnabled = false) }
+            room?.let { stopScreenAudio(it) }
             startCallForegroundService(
                 preferMicrophone = snapshot.microphoneEnabled,
                 preferCamera = snapshot.cameraEnabled,
@@ -714,6 +726,53 @@ internal class NativeCallController(
             emitSnapshotChanged()
         }
     }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun startScreenAudio(currentRoom: Room) {
+        if (screenAudio != null) return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || !hasMicrophonePermission()) return
+        val screen =
+            currentRoom.localParticipant.getTrackPublication(Track.Source.SCREEN_SHARE)?.track
+                ?: return
+        val capturer =
+            runCatching { ScreenAudioCapturer.createFromScreenShareTrack(screen) }.getOrNull()
+                ?: return
+        try {
+            if (!snapshot.microphoneEnabled) {
+                audioDeviceModule(currentRoom)?.setAudioRecordEnabled(false)
+                currentRoom.localParticipant.setMicrophoneEnabled(true)
+            }
+            val microphone =
+                currentRoom.localParticipant.getTrackPublication(Track.Source.MICROPHONE)
+                    ?.track as? LocalAudioTrack
+                    ?: throw IllegalStateException("no microphone track")
+            microphone.setAudioBufferCallback(capturer)
+            screenAudio = capturer
+        } catch (_: Exception) {
+            capturer.releaseAudioResources()
+            restoreMicrophone(currentRoom)
+        }
+    }
+
+    private suspend fun stopScreenAudio(currentRoom: Room) {
+        val capturer = screenAudio ?: return
+        screenAudio = null
+        (currentRoom.localParticipant.getTrackPublication(Track.Source.MICROPHONE)?.track
+            as? LocalAudioTrack)
+            ?.setAudioBufferCallback(null)
+        capturer.releaseAudioResources()
+        restoreMicrophone(currentRoom)
+    }
+
+    private suspend fun restoreMicrophone(currentRoom: Room) {
+        audioDeviceModule(currentRoom)?.setAudioRecordEnabled(true)
+        if (!snapshot.microphoneEnabled) {
+            runCatching { currentRoom.localParticipant.setMicrophoneEnabled(false) }
+        }
+    }
+
+    private fun audioDeviceModule(currentRoom: Room): JavaAudioDeviceModule? =
+        currentRoom.lkObjects.audioDeviceModule as? JavaAudioDeviceModule
 
     fun switchCamera(callId: String, invoke: Invoke) {
         scope.launch {
@@ -1118,6 +1177,8 @@ internal class NativeCallController(
 
     private fun teardownRoom() {
         audioHandler = null
+        screenAudio?.releaseAudioResources()
+        screenAudio = null
         // The renderer's EGL context belongs to the room: drop it first.
         videoOverlay.clear()
         localVideoOverlay.clear()
