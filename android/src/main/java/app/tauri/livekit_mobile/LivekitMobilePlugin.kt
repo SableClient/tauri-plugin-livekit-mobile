@@ -234,7 +234,10 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
         // Telecom allows 5s for a system-initiated hangup (lock screen, headset
         // button, watch, Android Auto) and JS may be suspended, so the room and
         // the foreground service have to go down here, not when JS drains.
-        onSystemDisconnect = { controller.disconnectActiveCall() },
+        onSystemDisconnect = { callId ->
+            controller.disconnectActiveCall()
+            controller.dismissCallPresentation(callId)
+        },
         onSystemSetInactive = { controller.muteForSystemInactive() },
     )
 

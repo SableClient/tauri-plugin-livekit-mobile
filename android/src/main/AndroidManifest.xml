@@ -17,6 +17,11 @@
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <application>
+        <activity
+            android:name="app.tauri.livekit_mobile.IncomingCallActivity"
+            android:exported="false"
+            android:taskAffinity=""
+            android:excludeFromRecents="true" />
         <service
             android:name="app.tauri.livekit_mobile.LivekitMobileForegroundService"
             android:exported="false"

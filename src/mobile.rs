@@ -166,6 +166,16 @@ impl<R: Runtime> MobileBackend<R> {
             .await
     }
 
+    async fn invoke_for_acknowledgement(
+        &self,
+        command: &str,
+        payload: impl Serialize,
+    ) -> crate::Result<()> {
+        self.invoke::<serde::de::IgnoredAny>(command, payload)
+            .await
+            .map(|_| ())
+    }
+
     /// Unwraps the `receiver` key the CallKit commands wrap their snapshot in.
     async fn invoke_for_snapshot(
         &self,
@@ -298,7 +308,7 @@ impl<R: Runtime> MobileBackend<R> {
         &self,
         request: StartSystemCallRequest,
     ) -> crate::Result<()> {
-        self.invoke(platform_commands::START_SYSTEM_CALL, request)
+        self.invoke_for_acknowledgement(platform_commands::START_SYSTEM_CALL, request)
             .await
     }
 
@@ -306,12 +316,12 @@ impl<R: Runtime> MobileBackend<R> {
         &self,
         request: ReportIncomingCallRequest,
     ) -> crate::Result<()> {
-        self.invoke(platform_commands::REPORT_INCOMING_CALL, request)
+        self.invoke_for_acknowledgement(platform_commands::REPORT_INCOMING_CALL, request)
             .await
     }
 
     pub(crate) async fn end_system_call(&self, request: EndSystemCallRequest) -> crate::Result<()> {
-        self.invoke(platform_commands::END_SYSTEM_CALL, request)
+        self.invoke_for_acknowledgement(platform_commands::END_SYSTEM_CALL, request)
             .await
     }
 
@@ -319,7 +329,7 @@ impl<R: Runtime> MobileBackend<R> {
         &self,
         request: SetSystemCallMutedRequest,
     ) -> crate::Result<()> {
-        self.invoke(platform_commands::SET_SYSTEM_CALL_MUTED, request)
+        self.invoke_for_acknowledgement(platform_commands::SET_SYSTEM_CALL_MUTED, request)
             .await
     }
 
@@ -346,7 +356,7 @@ impl<R: Runtime> MobileBackend<R> {
         &self,
         request: FulfillAnswerCallRequest,
     ) -> crate::Result<()> {
-        self.invoke(platform_commands::FULFILL_ANSWER_CALL, request)
+        self.invoke_for_acknowledgement(platform_commands::FULFILL_ANSWER_CALL, request)
             .await
     }
 
@@ -354,7 +364,7 @@ impl<R: Runtime> MobileBackend<R> {
         &self,
         request: FulfillEndCallRequest,
     ) -> crate::Result<()> {
-        self.invoke(platform_commands::FULFILL_END_CALL, request)
+        self.invoke_for_acknowledgement(platform_commands::FULFILL_END_CALL, request)
             .await
     }
 
@@ -362,7 +372,7 @@ impl<R: Runtime> MobileBackend<R> {
         &self,
         request: ReportConnectedRequest,
     ) -> crate::Result<()> {
-        self.invoke(platform_commands::REPORT_CONNECTED, request)
+        self.invoke_for_acknowledgement(platform_commands::REPORT_CONNECTED, request)
             .await
     }
 

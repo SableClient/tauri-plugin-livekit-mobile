@@ -42,7 +42,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 internal class AndroidCallController(
     private val appContext: Context,
     private val plugin: Plugin,
-    private val onSystemDisconnect: () -> Unit = {},
+    private val onSystemDisconnect: (String) -> Unit = {},
     private val onSystemSetInactive: () -> Unit = {},
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -225,7 +225,7 @@ internal class AndroidCallController(
                         // suspended, so tear the call down here and queue the
                         // action for whenever JS wakes up.
                         enqueue(SystemCallAction.end(callId))
-                        onSystemDisconnect()
+                        onSystemDisconnect(callId)
                     },
                     // Nothing to restore: onSetInactive mutes into the snapshot,
                     // so the unmute is the user's, not Telecom's.
@@ -286,6 +286,9 @@ internal class AndroidCallController(
     // ── Pending action queue (JS-suspended path) ──────────────────────────
 
     private fun enqueue(action: SystemCallAction) {
+        if (action.action == "answer") {
+            LivekitMobileForegroundService.markIncomingCallAnswered(appContext, action.uuid)
+        }
         synchronized(pendingActions) { pendingActions.add(action) }
         triggerEvent("callkit_event", action.toJSObject())
     }

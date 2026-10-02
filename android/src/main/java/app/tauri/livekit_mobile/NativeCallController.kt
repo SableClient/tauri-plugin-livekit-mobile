@@ -95,6 +95,7 @@ internal class NativeCallController(
 
     /** What the foreground-service notification currently shows. */
     private var presentation = NativeCallPresentation.NONE
+    private var incomingCallId: String? = null
 
     /** LiveKit owns the output route for the whole call. */
     @Volatile
@@ -494,6 +495,10 @@ internal class NativeCallController(
         }
         scope.launch {
             if (snapshot.isActive) return@launch
+            incomingCallId?.takeIf { it != callId }?.let {
+                LivekitMobileForegroundService.closeIncomingCallScreen(appContext, it)
+            }
+            incomingCallId = callId
             presentation =
                 NativeCallPresentation.announcing(
                     callId,
@@ -510,8 +515,8 @@ internal class NativeCallController(
      * notification: only its own teardown may take that down. */
     fun dismissCallPresentation(callId: String) {
         scope.launch {
+            LivekitMobileForegroundService.closeIncomingCallScreen(appContext, callId)
             if (presentation.callId != callId || snapshot.isActive) return@launch
-            LivekitMobileForegroundService.cancelIncomingCall(appContext)
             stopCallForegroundService()
         }
     }
@@ -1232,6 +1237,7 @@ internal class NativeCallController(
                     preferCamera && hasCameraPermission(),
                 )
                 .putExtra(LivekitMobileForegroundService.EXTRA_CALL_ID, presentation.callId)
+                .putExtra(LivekitMobileForegroundService.EXTRA_INCOMING_CALL_ID, incomingCallId)
                 .putExtra(
                     LivekitMobileForegroundService.EXTRA_CALL_DIRECTION,
                     presentation.direction,
@@ -1264,6 +1270,8 @@ internal class NativeCallController(
     }
 
     private fun stopCallForegroundService() {
+        incomingCallId?.let { LivekitMobileForegroundService.cancelIncomingCall(appContext, it) }
+        incomingCallId = null
         presentation = NativeCallPresentation.NONE
         runCatching {
             appContext.stopService(Intent(appContext, LivekitMobileForegroundService::class.java))

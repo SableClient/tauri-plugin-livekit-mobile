@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.os.Bundle
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -43,6 +44,12 @@ class LivekitMobileForegroundService : Service() {
             DIRECTION_OUTGOING -> buildOutgoingCallNotification(callerName, callId)
             else -> buildOngoingCallNotification(callerName, callId)
         }
+        if (callDirection == DIRECTION_ONGOING) {
+            intent?.getStringExtra(EXTRA_INCOMING_CALL_ID)?.let {
+                notification.extras.putString(EXTRA_CALL_ID, it)
+                notification.extras.putBoolean(EXTRA_CONNECTED, true)
+            }
+        }
 
         val started = try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -73,6 +80,9 @@ class LivekitMobileForegroundService : Service() {
             false
         } catch (_: IllegalStateException) {
             false
+        }
+        if (started && callDirection == DIRECTION_ONGOING) {
+            intent?.getStringExtra(EXTRA_INCOMING_CALL_ID)?.let { markIncomingCallConnected(this, it) }
         }
         if (!started) {
             // A while-in-use type cannot start from the background and an
@@ -232,6 +242,8 @@ class LivekitMobileForegroundService : Service() {
         const val EXTRA_CALL_DIRECTION = "app.tauri.livekit_mobile.extra.CALL_DIRECTION"
         const val EXTRA_CALLER_NAME = "app.tauri.livekit_mobile.extra.CALLER_NAME"
         const val EXTRA_CALL_ID = "app.tauri.livekit_mobile.extra.CALL_ID"
+        internal const val EXTRA_INCOMING_CALL_ID = "incomingCallId"
+        internal const val EXTRA_CONNECTED = "connected"
 
         // Action values carried by the notification broadcasts.
         const val EXTRA_ACTION = "app.tauri.livekit_mobile.extra.CALL_ACTION"
@@ -282,8 +294,33 @@ class LivekitMobileForegroundService : Service() {
             }
         }
 
-        internal fun cancelIncomingCall(context: Context) {
+        internal fun cancelIncomingCall(context: Context, callId: String) {
             NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
+            closeIncomingCallScreen(context, callId)
+        }
+
+        internal fun closeIncomingCallScreen(context: Context, callId: String) {
+            context.sendBroadcast(
+                Intent(IncomingCallActivity.ACTION_ENDED)
+                    .setPackage(context.packageName)
+                    .putExtra(EXTRA_CALL_ID, callId),
+            )
+        }
+
+        internal fun markIncomingCallAnswered(context: Context, callId: String) {
+            context.sendBroadcast(
+                Intent(IncomingCallActivity.ACTION_ANSWERED)
+                    .setPackage(context.packageName)
+                    .putExtra(EXTRA_CALL_ID, callId),
+            )
+        }
+
+        internal fun markIncomingCallConnected(context: Context, callId: String) {
+            context.sendBroadcast(
+                Intent(IncomingCallActivity.ACTION_CONNECTED)
+                    .setPackage(context.packageName)
+                    .putExtra(EXTRA_CALL_ID, callId),
+            )
         }
 
         private fun buildActionIntent(context: Context, action: String, callId: String): Intent =
@@ -291,9 +328,14 @@ class LivekitMobileForegroundService : Service() {
                 .putExtra(EXTRA_ACTION, action)
                 .putExtra(EXTRA_CALL_ID, callId)
 
-        private fun buildFullScreenIntent(context: Context): PendingIntent {
-            val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
-                ?: Intent()
+        private fun buildFullScreenIntent(
+            context: Context,
+            callId: String,
+            callerName: String,
+        ): PendingIntent {
+            val intent = Intent(context, IncomingCallActivity::class.java)
+                .putExtra(EXTRA_CALL_ID, callId)
+                .putExtra(EXTRA_CALLER_NAME, callerName)
             return PendingIntent.getActivity(
                 context, 0, intent,
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
@@ -352,7 +394,7 @@ class LivekitMobileForegroundService : Service() {
                             answerPending,
                         ),
                     )
-                    .setFullScreenIntent(buildFullScreenIntent(context), true)
+                    .setFullScreenIntent(buildFullScreenIntent(context, callId, callerName), true)
             } else {
                 // Pre-Android 12: simple ongoing notification.
                 NotificationCompat.Builder(context, CHANNEL_ID_INCOMING)
@@ -362,8 +404,9 @@ class LivekitMobileForegroundService : Service() {
                     .setCategory(Notification.CATEGORY_CALL)
                     .setOngoing(true)
                     .setOnlyAlertOnce(false)
-                    .setFullScreenIntent(buildFullScreenIntent(context), true)
+                    .setFullScreenIntent(buildFullScreenIntent(context, callId, callerName), true)
             }
+            builder.addExtras(Bundle().apply { putString(EXTRA_CALL_ID, callId) })
             buildContentIntent(context)?.let(builder::setContentIntent)
             return builder.build()
         }
