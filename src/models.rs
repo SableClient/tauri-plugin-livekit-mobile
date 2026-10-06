@@ -579,6 +579,13 @@ pub struct SetAudioRouteRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SetAudioInputRequest {
+    pub call_id: String,
+    pub input_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateCallDisplayRequest {
     pub call_id: String,
     pub caller_name: String,
@@ -695,6 +702,8 @@ impl std::fmt::Debug for NativeConnectCallFields<'_> {
 #[serde(rename_all = "camelCase")]
 pub struct GetAudioRoutesResponse {
     pub routes: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inputs: Option<serde_json::Value>,
     pub receiver: NativeCallSnapshot,
 }
 
@@ -1354,6 +1363,17 @@ mod tests {
                 route_id: "speaker".into(),
             }),
             serde_json::json!({ "callId": "call-1", "routeId": "speaker" })
+        );
+    }
+
+    #[test]
+    fn native_audio_input_payload_pins_input_id() {
+        assert_eq!(
+            wire(SetAudioInputRequest {
+                call_id: "call-1".into(),
+                input_id: "7".into(),
+            }),
+            serde_json::json!({ "callId": "call-1", "inputId": "7" })
         );
     }
 

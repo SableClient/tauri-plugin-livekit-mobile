@@ -28,5 +28,6 @@ permissions = [
     "allow-get-native-call-state",
     "allow-get-audio-routes",
     "allow-set-audio-route",
+    "allow-set-audio-input",
     "allow-update-call-display",
 ]

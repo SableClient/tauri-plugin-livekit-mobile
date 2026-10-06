@@ -31,6 +31,7 @@ Default permissions for the plugin
 - `allow-get-native-call-state`
 - `allow-get-audio-routes`
 - `allow-set-audio-route`
+- `allow-set-audio-input`
 - `allow-update-call-display`
 
 ## Permission Table
@@ -402,6 +403,32 @@ Enables the report_system_call_connected command without any pre-configured scop
 <td>
 
 Denies the report_system_call_connected command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:allow-set-audio-input`
+
+</td>
+<td>
+
+Enables the set_audio_input command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:deny-set-audio-input`
+
+</td>
+<td>
+
+Denies the set_audio_input command without any pre-configured scope.
 
 </td>
 </tr>

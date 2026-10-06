@@ -22,7 +22,7 @@ use crate::models::{
     ConnectNativeCallRequest, DisconnectNativeCallRequest, EndSystemCallRequest,
     FulfillAnswerCallRequest, FulfillEndCallRequest, GetAudioRoutesRequest, GetAudioRoutesResponse,
     NativeCallCapabilities, NativeCallFailureCode, NativeCallSnapshot, ReportConnectedRequest,
-    ReportIncomingCallRequest, SetAudioRouteRequest, SetNativeCallAudioProcessingRequest,
+    ReportIncomingCallRequest, SetAudioInputRequest, SetAudioRouteRequest, SetNativeCallAudioProcessingRequest,
     SetNativeCallCameraEnabledRequest, SetNativeCallEncryptionKeyRequest,
     SetNativeCallLocalVideoOverlayRequest, SetNativeCallMicrophoneEnabledRequest,
     SetNativeCallParticipantVolumeRequest, SetNativeCallPiPEnabledRequest,
@@ -167,6 +167,9 @@ forwarded_commands! {
     SetAudioRoute(SetAudioRouteRequest) -> NativeCallSnapshot
         => set_audio_route, |r| call_id_is_valid(&r.call_id)
             && !r.route_id.trim().is_empty();
+    SetAudioInput(SetAudioInputRequest) -> NativeCallSnapshot
+        => set_audio_input, |r| call_id_is_valid(&r.call_id)
+            && !r.input_id.trim().is_empty();
     UpdateCallDisplay(UpdateCallDisplayRequest) -> NativeCallSnapshot
         => update_call_display, |r| call_id_is_valid(&r.call_id)
             && !r.caller_name.trim().is_empty();

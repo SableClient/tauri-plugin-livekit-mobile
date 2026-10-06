@@ -58,6 +58,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::get_native_call_state,
             commands::get_audio_routes,
             commands::set_audio_route,
+            commands::set_audio_input,
             commands::update_call_display,
         ])
         .setup(|app, api| {

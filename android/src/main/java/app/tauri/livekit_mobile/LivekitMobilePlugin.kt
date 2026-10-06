@@ -179,6 +179,12 @@ internal class SetAudioRouteArgs {
     var routeId: String = ""
 }
 
+@InvokeArg
+internal class SetAudioInputArgs {
+    var callId: String = ""
+    var inputId: String = ""
+}
+
 @TauriPlugin(
     permissions = [
         Permission(
@@ -777,9 +783,11 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
             return
         }
         val routes = controller.audioRoutes(args.callId)
+        val inputs = controller.audioInputs(args.callId)
         invoke.resolve(
             JSObject()
                 .put("routes", JSArray().apply { routes.forEach { put(it.toJSObject()) } })
+                .put("inputs", JSArray().apply { inputs.forEach { put(it.toJSObject()) } })
                 .put("receiver", controller.snapshotJson()),
         )
     }
@@ -792,6 +800,20 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
             return
         }
         if (controller.setAudioRoute(args.callId, args.routeId)) {
+            invoke.resolve(JSObject().put("receiver", controller.snapshotJson()))
+        } else {
+            rejectUnavailable(invoke)
+        }
+    }
+
+    @Command
+    fun setAudioInput(invoke: Invoke) {
+        val args = runCatching { invoke.parseArgs(SetAudioInputArgs::class.java) }.getOrNull()
+        if (args == null || args.callId.isBlank() || args.inputId.isBlank()) {
+            reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
+            return
+        }
+        if (controller.setAudioInput(args.callId, args.inputId)) {
             invoke.resolve(JSObject().put("receiver", controller.snapshotJson()))
         } else {
             rejectUnavailable(invoke)

@@ -17,7 +17,7 @@ use crate::{
         FulfillEndCallRequest, GetAudioRoutesRequest, GetAudioRoutesResponse,
         NativeCallCapabilities, NativeCallCapabilitiesWire, NativeCallChannelEvent,
         NativeCallFailureCode, NativeCallSnapshot, NativeConnectCallFields, ReportConnectedRequest,
-        ReportIncomingCallRequest, SetAudioRouteRequest, SetNativeCallAudioProcessingRequest,
+        ReportIncomingCallRequest, SetAudioInputRequest, SetAudioRouteRequest, SetNativeCallAudioProcessingRequest,
         SetNativeCallCameraEnabledRequest, SetNativeCallEncryptionKeyRequest,
         SetNativeCallLocalVideoOverlayRequest, SetNativeCallMicrophoneEnabledRequest,
         SetNativeCallParticipantVolumeRequest, SetNativeCallPiPEnabledRequest,
@@ -69,6 +69,7 @@ mod platform_commands {
     pub(super) const SET_ENCRYPTION_KEY: &str = "setNativeCallEncryptionKey";
     pub(super) const GET_AUDIO_ROUTES: &str = "getAudioRoutes";
     pub(super) const SET_AUDIO_ROUTE: &str = "setAudioRoute";
+    pub(super) const SET_AUDIO_INPUT: &str = "setAudioInput";
     pub(super) const UPDATE_CALL_DISPLAY: &str = "updateCallDisplay";
 }
 #[cfg(target_os = "ios")]
@@ -101,6 +102,7 @@ mod platform_commands {
     pub(super) const SET_ENCRYPTION_KEY: &str = "setEncryptionKey";
     pub(super) const GET_AUDIO_ROUTES: &str = "getAudioRoutes";
     pub(super) const SET_AUDIO_ROUTE: &str = "setAudioRoute";
+    pub(super) const SET_AUDIO_INPUT: &str = "setAudioInput";
     pub(super) const UPDATE_CALL_DISPLAY: &str = "updateCallDisplay";
 }
 
@@ -397,6 +399,14 @@ impl<R: Runtime> MobileBackend<R> {
         request: SetAudioRouteRequest,
     ) -> crate::Result<NativeCallSnapshot> {
         self.invoke_for_snapshot(platform_commands::SET_AUDIO_ROUTE, request)
+            .await
+    }
+
+    pub(crate) async fn set_audio_input(
+        &self,
+        request: SetAudioInputRequest,
+    ) -> crate::Result<NativeCallSnapshot> {
+        self.invoke_for_snapshot(platform_commands::SET_AUDIO_INPUT, request)
             .await
     }
 

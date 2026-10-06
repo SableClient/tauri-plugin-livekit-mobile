@@ -342,6 +342,20 @@ internal data class SystemAudioRoute(
             .put("current", current)
 }
 
+internal data class SystemAudioInput(
+    val id: String,
+    val name: String,
+    val type: String,
+    val current: Boolean,
+) {
+    fun toJSObject(): JSObject =
+        JSObject()
+            .put("id", id)
+            .put("name", name)
+            .put("type", type)
+            .put("current", current)
+}
+
 // ── SystemCallAction (trigger payload, mirrors Swift side) ────────────────
 
 internal data class SystemCallAction(

@@ -259,6 +259,14 @@ pub(crate) async fn set_audio_route<R: Runtime>(
 }
 
 #[tauri_command]
+pub(crate) async fn set_audio_input<R: Runtime>(
+    app: AppHandle<R>,
+    payload: SetAudioInputRequest,
+) -> Result<NativeCallSnapshot> {
+    app.native_call_bridge().set_audio_input(payload).await
+}
+
+#[tauri_command]
 pub(crate) async fn update_call_display<R: Runtime>(
     app: AppHandle<R>,
     payload: UpdateCallDisplayRequest,

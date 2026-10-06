@@ -26,6 +26,8 @@ internal object NativeCallWire {
     const val ROUTE_SPEAKER = "speaker"
     const val ROUTE_WIRED_HEADSET = "wired_headset"
     const val ROUTE_BLUETOOTH = "bluetooth"
+    const val INPUT_BUILTIN_MIC = "builtin_mic"
+    const val INPUT_USB = "usb"
 
     /** Single channel event protocol: full authoritative snapshot per emit. */
     const val EVENT_SNAPSHOT_CHANGED = "snapshot_changed"

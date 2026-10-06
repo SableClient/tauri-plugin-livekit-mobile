@@ -26,6 +26,7 @@ const COMMANDS: &[&str] = &[
     "get_native_call_state",
     "get_audio_routes",
     "set_audio_route",
+    "set_audio_input",
     "update_call_display",
 ];
 

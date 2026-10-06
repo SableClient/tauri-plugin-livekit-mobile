@@ -160,6 +160,11 @@ export type SetAudioRouteRequest = {
   routeId: string;
 };
 
+export type SetAudioInputRequest = {
+  callId: string;
+  inputId: string;
+};
+
 export type UpdateCallDisplayRequest = {
   callId: string;
   callerName: string;
@@ -173,8 +178,16 @@ export type NativeCallAudioRoute = {
   current: boolean;
 };
 
+export type NativeCallAudioInput = {
+  id: string;
+  name: string;
+  type: string;
+  current: boolean;
+};
+
 export type GetAudioRoutesResponse = {
   routes: NativeCallAudioRoute[];
+  inputs?: NativeCallAudioInput[];
   receiver: NativeCallSnapshot;
 };
 
@@ -332,6 +345,9 @@ export const getAudioRoutes = (request: GetAudioRoutesRequest): Promise<GetAudio
 
 export const setAudioRoute = (request: SetAudioRouteRequest): Promise<NativeCallSnapshot> =>
   invoke<NativeCallSnapshot>('plugin:livekit-mobile|set_audio_route', { payload: request });
+
+export const setAudioInput = (request: SetAudioInputRequest): Promise<NativeCallSnapshot> =>
+  invoke<NativeCallSnapshot>('plugin:livekit-mobile|set_audio_input', { payload: request });
 
 export const updateCallDisplay = (request: UpdateCallDisplayRequest): Promise<NativeCallSnapshot> =>
   invoke<NativeCallSnapshot>('plugin:livekit-mobile|update_call_display', { payload: request });

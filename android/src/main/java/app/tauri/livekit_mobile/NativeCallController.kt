@@ -3,6 +3,8 @@ package app.tauri.livekit_mobile
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.os.Build
 import androidx.core.content.ContextCompat
 import app.tauri.plugin.Channel
@@ -126,6 +128,57 @@ internal class NativeCallController(
         handler.selectDevice(device)
         return true
     }
+
+    /** The microphone the user picked; null means Android chooses. */
+    @Volatile
+    private var preferredInputId: Int? = null
+
+    fun audioInputs(callId: String): List<SystemAudioInput> {
+        if (!isActiveCall(callId) || Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return emptyList()
+        return inputDevices().mapNotNull { device ->
+            val type = audioInputType(device) ?: return@mapNotNull null
+            SystemAudioInput(
+                id = device.id.toString(),
+                name = device.productName?.toString().orEmpty().ifBlank { audioInputName(type) },
+                type = type,
+                current = device.id == preferredInputId,
+            )
+        }
+    }
+
+    fun setAudioInput(callId: String, inputId: String): Boolean {
+        if (!isActiveCall(callId) || Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return false
+        val currentRoom = room ?: return false
+        val module = audioDeviceModule(currentRoom) ?: return false
+        val device = inputDevices().firstOrNull { it.id.toString() == inputId } ?: return false
+        module.setPreferredInputDevice(device)
+        preferredInputId = device.id
+        return true
+    }
+
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.M)
+    private fun inputDevices(): List<AudioDeviceInfo> =
+        (appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager)
+            .getDevices(AudioManager.GET_DEVICES_INPUTS)
+            .toList()
+
+    private fun audioInputType(device: AudioDeviceInfo): String? =
+        when (device.type) {
+            AudioDeviceInfo.TYPE_BUILTIN_MIC -> NativeCallWire.INPUT_BUILTIN_MIC
+            AudioDeviceInfo.TYPE_WIRED_HEADSET -> NativeCallWire.ROUTE_WIRED_HEADSET
+            AudioDeviceInfo.TYPE_USB_DEVICE,
+            AudioDeviceInfo.TYPE_USB_HEADSET -> NativeCallWire.INPUT_USB
+            AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> NativeCallWire.ROUTE_BLUETOOTH
+            else -> null
+        }
+
+    private fun audioInputName(type: String): String =
+        when (type) {
+            NativeCallWire.INPUT_BUILTIN_MIC -> "Phone microphone"
+            NativeCallWire.ROUTE_WIRED_HEADSET -> "Headset microphone"
+            NativeCallWire.INPUT_USB -> "USB microphone"
+            else -> "Bluetooth microphone"
+        }
 
     private fun audioRouteType(device: AudioDevice): String? =
         when (device) {
@@ -1182,6 +1235,7 @@ internal class NativeCallController(
 
     private fun teardownRoom() {
         audioHandler = null
+        preferredInputId = null
         screenAudio?.releaseAudioResources()
         screenAudio = null
         // The renderer's EGL context belongs to the room: drop it first.
