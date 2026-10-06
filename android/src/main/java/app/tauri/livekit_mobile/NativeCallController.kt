@@ -6,6 +6,7 @@ import android.content.Intent
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Build
+import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
 import app.tauri.plugin.Channel
 import app.tauri.plugin.Invoke
@@ -129,7 +130,6 @@ internal class NativeCallController(
         return true
     }
 
-    /** The microphone the user picked; null means Android chooses. */
     @Volatile
     private var preferredInputId: Int? = null
 
@@ -156,7 +156,7 @@ internal class NativeCallController(
         return true
     }
 
-    @androidx.annotation.RequiresApi(Build.VERSION_CODES.M)
+    @RequiresApi(Build.VERSION_CODES.M)
     private fun inputDevices(): List<AudioDeviceInfo> =
         (appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager)
             .getDevices(AudioManager.GET_DEVICES_INPUTS)
