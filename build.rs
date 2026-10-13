@@ -121,7 +121,17 @@ fn link_ios_package() {
         .expect("failed to run `swift build`");
     assert!(status.success(), "failed to build the iOS Swift package");
 
-    let lib_dir = build_path.join(build_dir).join(configuration);
+    let legacy_dir = build_path.join(build_dir).join(configuration);
+    let lib_dir = if legacy_dir.join("libtauri-plugin-livekit-mobile.a").exists() {
+        legacy_dir
+    } else {
+        let product_config = if configuration == "release" {
+            "Release"
+        } else {
+            "Debug"
+        };
+        build_path.join(format!("out/Products/{product_config}-{sdk}"))
+    };
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
     // LiveKit's binary XCFrameworks land as .framework bundles next to the
     // static library; consumers link them from this directory.
