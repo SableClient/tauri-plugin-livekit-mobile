@@ -30,6 +30,10 @@ const COMMANDS: &[&str] = &[
     "update_call_display",
 ];
 
+/// The `@_cdecl` name in `ios/Sources/LivekitMobilePlugin.swift`, with its `_` prefix.
+#[cfg(target_os = "macos")]
+const PLUGIN_ENTRY: &str = "_init_plugin_livekit_mobile";
+
 /// Must match `platforms: [.iOS(...)]` in `ios/Package.swift`.
 #[cfg(target_os = "macos")]
 const IOS_DEPLOYMENT_TARGET: &str = "16.0";
@@ -132,6 +136,7 @@ fn link_ios_package() {
         };
         build_path.join(format!("out/Products/{product_config}-{sdk}"))
     };
+    globalize_plugin_entry(&lib_dir.join("libtauri-plugin-livekit-mobile.a"));
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
     // LiveKit's binary XCFrameworks land as .framework bundles next to the
     // static library; consumers link them from this directory.
@@ -147,6 +152,45 @@ fn link_ios_package() {
         "cargo:rerun-if-changed={}",
         package_dir.join("Package.swift").display()
     );
+}
+
+/// Xcode 27's SwiftPM leaves the `@_cdecl` entry point local in static
+/// products, so the app can't link it. Needs rustup's `llvm-tools`.
+#[cfg(target_os = "macos")]
+fn globalize_plugin_entry(archive: &std::path::Path) {
+    use std::process::Command;
+
+    let local = format!(" t {PLUGIN_ENTRY}");
+    let nm = Command::new("nm")
+        .arg(archive)
+        .output()
+        .expect("failed to run `nm`");
+    if !String::from_utf8_lossy(&nm.stdout)
+        .lines()
+        .any(|line| line.ends_with(&local))
+    {
+        return;
+    }
+
+    let sysroot = Command::new("rustc")
+        .args(["--print", "sysroot"])
+        .output()
+        .expect("failed to run `rustc --print sysroot`");
+    let objcopy = std::path::Path::new(String::from_utf8_lossy(&sysroot.stdout).trim())
+        .join("lib/rustlib")
+        .join(format!("{}-apple-darwin", std::env::consts::ARCH))
+        .join("bin/llvm-objcopy");
+    assert!(
+        objcopy.exists(),
+        "run `rustup component add llvm-tools` to export {PLUGIN_ENTRY}"
+    );
+
+    let status = Command::new(objcopy)
+        .arg(format!("--globalize-symbol={PLUGIN_ENTRY}"))
+        .arg(archive)
+        .status()
+        .expect("failed to run llvm-objcopy");
+    assert!(status.success(), "llvm-objcopy failed on {PLUGIN_ENTRY}");
 }
 
 #[cfg(target_os = "macos")]
