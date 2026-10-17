@@ -62,7 +62,7 @@ internal class NativeCallController(
     private val appContext: Context,
     private val hasMicrophonePermission: () -> Boolean,
     private val hasCameraPermission: () -> Boolean = { false },
-    private val videoOverlay: RemoteVideoOverlay = RemoteVideoOverlay { null },
+    private val videoOverlay: RemoteVideoOverlays = RemoteVideoOverlays { null },
     private val localVideoOverlay: LocalVideoOverlay = LocalVideoOverlay { null },
     private val onCallEnded: () -> Unit = {},
 ) {
@@ -919,13 +919,13 @@ internal class NativeCallController(
         }
     }
 
-    fun clearRemoteVideoOverlay(callId: String, invoke: Invoke) {
+    fun clearRemoteVideoOverlay(callId: String, trackSid: String?, invoke: Invoke) {
         scope.launch {
             if (snapshot.callId != callId) {
                 invoke.resolve(snapshotJson())
                 return@launch
             }
-            videoOverlay.clear()
+            if (trackSid == null) videoOverlay.clear() else videoOverlay.clear(trackSid)
             invoke.resolve(snapshotJson())
         }
     }

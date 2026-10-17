@@ -136,7 +136,7 @@ forwarded_commands! {
     SetNativeCallRemoteVideoOverlay(SetNativeCallRemoteVideoOverlayRequest) -> NativeCallSnapshot
         => set_native_call_remote_video_overlay, |r| remote_video_overlay_request_is_valid(r);
     ClearNativeCallRemoteVideoOverlay(ClearNativeCallRemoteVideoOverlayRequest) -> NativeCallSnapshot
-        => clear_native_call_remote_video_overlay, |r| call_id_is_valid(&r.call_id);
+        => clear_native_call_remote_video_overlay, |r| clear_remote_video_overlay_request_is_valid(r);
     SetNativeCallLocalVideoOverlay(SetNativeCallLocalVideoOverlayRequest) -> NativeCallSnapshot
         => set_native_call_local_video_overlay, |r| local_video_overlay_request_is_valid(r);
     ClearNativeCallLocalVideoOverlay(ClearNativeCallLocalVideoOverlayRequest) -> NativeCallSnapshot
@@ -218,6 +218,17 @@ fn remote_video_overlay_request_is_valid(request: &SetNativeCallRemoteVideoOverl
         && request.height > 0.0
         && request.device_pixel_ratio.is_finite()
         && request.device_pixel_ratio > 0.0
+}
+
+#[cfg(any(mobile, test))]
+fn clear_remote_video_overlay_request_is_valid(
+    request: &ClearNativeCallRemoteVideoOverlayRequest,
+) -> bool {
+    call_id_is_valid(&request.call_id)
+        && request
+            .track_id
+            .as_deref()
+            .is_none_or(|track_id| !track_id.trim().is_empty())
 }
 
 #[cfg(any(mobile, test))]
@@ -620,12 +631,13 @@ impl<R: Runtime> Actor<R> {
 #[cfg(test)]
 mod tests {
     use super::{
-        call_id_is_valid, connect_request_is_valid, encryption_key_material_is_valid,
-        local_video_overlay_request_is_valid, remote_video_overlay_request_is_valid,
+        call_id_is_valid, clear_remote_video_overlay_request_is_valid, connect_request_is_valid,
+        encryption_key_material_is_valid, local_video_overlay_request_is_valid,
+        remote_video_overlay_request_is_valid,
     };
     use crate::models::{
-        ConnectNativeCallRequest, EncryptionKey, SetNativeCallLocalVideoOverlayRequest,
-        SetNativeCallRemoteVideoOverlayRequest,
+        ClearNativeCallRemoteVideoOverlayRequest, ConnectNativeCallRequest, EncryptionKey,
+        SetNativeCallLocalVideoOverlayRequest, SetNativeCallRemoteVideoOverlayRequest,
     };
 
     fn connect_request(call_id: &str) -> ConnectNativeCallRequest {
@@ -737,6 +749,29 @@ mod tests {
         let mut blank_track = request;
         blank_track.track_id = " ".into();
         assert!(!remote_video_overlay_request_is_valid(&blank_track));
+    }
+
+    #[test]
+    fn remote_video_overlay_clear_accepts_one_track_or_all() {
+        let clear =
+            |call_id: &str, track_id: Option<&str>| ClearNativeCallRemoteVideoOverlayRequest {
+                call_id: call_id.into(),
+                track_id: track_id.map(Into::into),
+            };
+        assert!(clear_remote_video_overlay_request_is_valid(&clear(
+            "call", None
+        )));
+        assert!(clear_remote_video_overlay_request_is_valid(&clear(
+            "call",
+            Some("TR_abcdef")
+        )));
+        assert!(!clear_remote_video_overlay_request_is_valid(&clear(
+            "call",
+            Some(" ")
+        )));
+        assert!(!clear_remote_video_overlay_request_is_valid(&clear(
+            " ", None
+        )));
     }
 
     #[test]

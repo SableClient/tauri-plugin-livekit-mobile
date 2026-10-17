@@ -652,6 +652,13 @@ final class WireContractTests: XCTestCase {
     XCTAssertEqual(args.devicePixelRatio, 3.0)
   }
 
+  func testClearRemoteVideoOverlayArgsDecodeOptionalTrack() throws {
+    let (one, _) = makeInvoke(data: #"{"callId": "call-1", "trackId": "TR_VC1"}"#)
+    XCTAssertEqual(try one.parseArgs(ClearRemoteVideoOverlayArgs.self).trackId, "TR_VC1")
+    let (all, _) = makeInvoke(data: #"{"callId": "call-1"}"#)
+    XCTAssertNil(try all.parseArgs(ClearRemoteVideoOverlayArgs.self).trackId)
+  }
+
   // MARK: - Invoke settlement
 
   func testCapabilitiesResolves() async throws {
@@ -844,6 +851,16 @@ final class WireContractTests: XCTestCase {
     let payload = try jsonObject(try XCTUnwrap(response.payload))
     XCTAssertEqual(payload["connectionState"] as? String, "idle")
     XCTAssertTrue(payload["callId"] is NSNull)
+  }
+
+  func testBlankTrackClearRemoteVideoOverlayRejectsInvalidRequest() async throws {
+    let plugin = LivekitMobilePlugin()
+    let (invoke, recording) = makeInvoke(data: #"{"callId": "call-1", "trackId": " "}"#)
+    try plugin.clearRemoteVideoOverlay(invoke)
+    let response = await recording.wait()
+    XCTAssertEqual(response.id, Self.rejectId)
+    let payload = try jsonObject(try XCTUnwrap(response.payload))
+    XCTAssertEqual(payload["code"] as? String, "invalid_request")
   }
 
   func testMalformedSetRemoteVideoOverlayRejectsInvalidRequest() async throws {

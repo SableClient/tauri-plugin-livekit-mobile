@@ -122,6 +122,12 @@ internal class SetNativeCallRemoteVideoOverlayArgs {
 }
 
 @InvokeArg
+internal class ClearNativeCallRemoteVideoOverlayArgs {
+    var callId: String = ""
+    var trackId: String? = null
+}
+
+@InvokeArg
 internal class SetNativeCallLocalVideoOverlayArgs {
     var callId: String = ""
     var x: Double = 0.0
@@ -211,7 +217,7 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
     @Volatile
     private var hostWebView: WebView? = null
 
-    private val videoOverlay = RemoteVideoOverlay(webViewProvider = { hostWebView })
+    private val videoOverlay = RemoteVideoOverlays(webViewProvider = { hostWebView })
 
     private val localVideoOverlay = LocalVideoOverlay(webViewProvider = { hostWebView })
 
@@ -634,12 +640,14 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
 
     @Command
     fun clearNativeCallRemoteVideoOverlay(invoke: Invoke) {
-        val args = runCatching { invoke.parseArgs(CallIdArgs::class.java) }.getOrNull()
-        if (args == null || args.callId.isBlank()) {
+        val args =
+            runCatching { invoke.parseArgs(ClearNativeCallRemoteVideoOverlayArgs::class.java) }
+                .getOrNull()
+        if (args == null || args.callId.isBlank() || args.trackId?.isBlank() == true) {
             reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
             return
         }
-        controller.clearRemoteVideoOverlay(args.callId, invoke)
+        controller.clearRemoteVideoOverlay(args.callId, args.trackId, invoke)
     }
 
     @Command

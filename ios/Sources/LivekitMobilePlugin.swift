@@ -114,8 +114,8 @@ struct SetScreenShareEnabledArgs: Decodable {
   let enabled: Bool
 }
 
-// `cancelConnect`, `switchCamera`, `clearRemoteVideoOverlay` and
-// `clearLocalVideoOverlay` reuse the `{ callId }` payload of `DisconnectArgs`.
+// `cancelConnect`, `switchCamera` and `clearLocalVideoOverlay` reuse the
+// `{ callId }` payload of `DisconnectArgs`.
 
 struct SetLocalVideoOverlayArgs: Decodable {
   let callId: String
@@ -180,6 +180,11 @@ struct ReportConnectedArgs: Decodable {
 struct SetNativeCallPiPEnabledArgs: Decodable {
   let callId: String
   let enabled: Bool
+}
+
+struct ClearRemoteVideoOverlayArgs: Decodable {
+  let callId: String
+  let trackId: String?
 }
 
 struct SetRemoteVideoOverlayArgs: Decodable {
@@ -620,7 +625,9 @@ final class LivekitMobilePlugin: Plugin {
   }
 
   @objc public func clearRemoteVideoOverlay(_ invoke: Invoke) throws {
-    guard let args = try? invoke.parseArgs(DisconnectArgs.self) else {
+    guard let args = try? invoke.parseArgs(ClearRemoteVideoOverlayArgs.self),
+      args.trackId.map({ !$0.trimmingCharacters(in: .whitespaces).isEmpty }) ?? true
+    else {
       reject(invoke, .invalidRequest)
       return
     }
@@ -629,7 +636,8 @@ final class LivekitMobilePlugin: Plugin {
         reject(invoke, .unavailable)
         return
       }
-      controller.clearRemoteVideoOverlay(callId: args.callId, invoke: invoke)
+      controller.clearRemoteVideoOverlay(
+        callId: args.callId, trackSid: args.trackId, invoke: invoke)
     }
   }
 

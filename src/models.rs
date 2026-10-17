@@ -506,6 +506,8 @@ pub struct SetNativeCallRemoteVideoOverlayRequest {
 #[serde(rename_all = "camelCase")]
 pub struct ClearNativeCallRemoteVideoOverlayRequest {
     pub call_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1442,6 +1444,20 @@ mod tests {
                 "height": 180.5,
                 "devicePixelRatio": 3.0
             })
+        );
+        assert_eq!(
+            wire(ClearNativeCallRemoteVideoOverlayRequest {
+                call_id: "call-1".into(),
+                track_id: Some("TR_abcdef".into()),
+            }),
+            serde_json::json!({ "callId": "call-1", "trackId": "TR_abcdef" })
+        );
+        assert_eq!(
+            wire(ClearNativeCallRemoteVideoOverlayRequest {
+                call_id: "call-1".into(),
+                track_id: None,
+            }),
+            serde_json::json!({ "callId": "call-1" })
         );
         assert_eq!(
             wire(SetNativeCallLocalVideoOverlayRequest {

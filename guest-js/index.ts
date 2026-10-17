@@ -94,10 +94,10 @@ export type SetNativeCallEncryptionKeyRequest = {
 };
 
 /**
- * Pins the single native-rendered remote camera view over a DOM tile. `x`,
+ * Pins a native-rendered view of one remote video track over a DOM tile. `x`,
  * `y`, `width`, `height` are the tile's viewport-relative CSS rect; the
- * native side maps them into view coordinates. A repeated call with the same
- * track repositions the view; a new track rebinds it.
+ * native side maps them into view coordinates. Each track gets its own view;
+ * a repeated call with the same track repositions it.
  */
 export type SetNativeCallRemoteVideoOverlayRequest = {
   callId: string;
@@ -112,6 +112,7 @@ export type SetNativeCallRemoteVideoOverlayRequest = {
 
 export type ClearNativeCallRemoteVideoOverlayRequest = {
   callId: string;
+  trackId?: string;
 };
 
 export type SetNativeCallLocalVideoOverlayRequest = {

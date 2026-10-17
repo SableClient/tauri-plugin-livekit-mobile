@@ -93,14 +93,9 @@ final class RoomController: NSObject {
   /// Weak handle to the Tauri webview, retained from `Plugin.load(webview:)`.
   /// The overlay's frame is positioned in this view's superview.
   private weak var hostWebView: WKWebView?
-  /// The single non-interactive native renderer for one remote video track.
-  /// It exists only while the lane requests an overlay; clearing, disconnect
-  /// and teardown remove it from the view hierarchy.
-  private var overlayView: VideoView?
-  /// The participant/track the overlay is bound to. Stored so participant
-  /// and track lifecycle delegate events can re-resolve and rebind (or
-  /// clear) the attachment as publications come and go.
-  private var overlaySelection: OverlaySelection?
+  /// One non-interactive native renderer per remote video track, in
+  /// placement order.
+  private var remoteOverlays: [RemoteOverlay] = []
 
   /// How long a dropped socket may stay in `reconnecting` before the call is
   /// reported as terminally failed.
@@ -119,7 +114,7 @@ final class RoomController: NSObject {
   /// renderer.
   private var pipViewController: Any? = nil
   /// The track the PiP view controller is registered on as a renderer, bound
-  /// to the same track as `overlayView`. Apple's video-call PiP expects a
+  /// to the same track as the PiP source overlay. Apple's video-call PiP expects a
   /// separate content view controller with the on-screen view as the distinct
   /// `activeVideoCallSourceView`, so the in-app tile is never re-parented into
   /// the PiP window. Kept so a rebind can unregister from the previous track.
@@ -130,10 +125,15 @@ final class RoomController: NSObject {
     let trackSid: String
   }
 
+  private struct RemoteOverlay {
+    var selection: OverlaySelection
+    let view: VideoView
+  }
+
   // MARK: Local camera preview overlay state
 
   /// Second non-interactive native renderer for the local camera track.
-  /// Independent from `overlayView`; the two can coexist on-screen.
+  /// Independent from the remote overlays; they can coexist on-screen.
   private var localOverlayView: VideoView?
 
   // MARK: CallKit integration
@@ -204,7 +204,7 @@ final class RoomController: NSObject {
     if let staleRoom = room {
       room = nil
       keyProvider = nil
-      removeOverlayView()
+      removeOverlayViews()
       removeLocalOverlayView()
       await staleRoom.disconnect()
       guard attemptId == attempt else {
@@ -224,7 +224,7 @@ final class RoomController: NSObject {
     screenShareEnabled = false
     participantCount = 0
     remoteParticipants = []
-    removeOverlayView()
+    removeOverlayViews()
     removeLocalOverlayView()
     connectionState = .connecting
     emitSnapshotChanged()
@@ -708,8 +708,8 @@ final class RoomController: NSObject {
 
   // MARK: - Remote video overlay
 
-  /// Attaches the single non-interactive `VideoView` to the resolved remote
-  /// camera track and positions it over the matching DOM rect. `frame` is the
+  /// Attaches the track's non-interactive `VideoView` to the resolved remote
+  /// video track and positions it over the matching DOM rect. `frame` is the
   /// viewport-relative CSS rect: CSS pixels map 1:1 to iOS logical points, so
   /// it is converted into the webview's superview coordinate space via
   /// `UIView.convert` and clipped to the webview's bounds. `devicePixelRatio`
@@ -757,9 +757,9 @@ final class RoomController: NSObject {
       return
     }
 
-    let view = ensureOverlayView(in: container)
-    overlaySelection = OverlaySelection(
-      participantIdentity: participantIdentity, trackSid: trackSid)
+    let view = ensureOverlayView(
+      for: OverlaySelection(participantIdentity: participantIdentity, trackSid: trackSid),
+      above: webView, in: container)
 
     guard
       let track = Self.remoteVideoTrack(
@@ -767,6 +767,7 @@ final class RoomController: NSObject {
     else {
       // Clears safely: detach without failing the command.
       detachOverlay(from: view)
+      if #available(iOS 15.0, *) { refreshPiP() }
       invoke.resolve(snapshot())
       return
     }
@@ -788,35 +789,47 @@ final class RoomController: NSObject {
     track.source == .screenShareVideo ? .fit : .fill
   }
 
-  /// Removes the overlay view. A stale call id is a no-op resolve, matching
-  /// the other call-scoped commands.
-  func clearRemoteVideoOverlay(callId requestedCallId: String, invoke: Invoke) {
+  /// Removes the overlay view of `trackSid`, or all of them when nil. A stale
+  /// call id is a no-op resolve, matching the other call-scoped commands.
+  func clearRemoteVideoOverlay(
+    callId requestedCallId: String, trackSid: String?, invoke: Invoke
+  ) {
     guard callId == requestedCallId else {
       invoke.resolve(snapshot())
       return
     }
-    removeOverlayView()
+    if let trackSid {
+      removeOverlayView(trackSid: trackSid)
+    } else {
+      removeOverlayViews()
+    }
     if #available(iOS 15.0, *) { refreshPiP() }
     invoke.resolve(snapshot())
   }
 
-  /// Returns the single overlay view, creating it as a non-interactive
-  /// sibling of the host webview on first use.
-  private func ensureOverlayView(in container: UIView) -> VideoView {
-    if let overlayView {
-      if overlayView.superview !== container {
-        overlayView.removeFromSuperview()
-        container.addSubview(overlayView)
+  /// Returns the track's overlay view, creating it as a non-interactive
+  /// sibling directly above the host webview on first use.
+  private func ensureOverlayView(
+    for selection: OverlaySelection, above webView: UIView, in container: UIView
+  ) -> VideoView {
+    if let index = remoteOverlays.firstIndex(where: {
+      $0.selection.trackSid == selection.trackSid
+    }) {
+      remoteOverlays[index].selection = selection
+      let view = remoteOverlays[index].view
+      if view.superview !== container {
+        view.removeFromSuperview()
+        container.insertSubview(view, aboveSubview: webView)
       }
-      return overlayView
+      return view
     }
     let view = VideoView()
     // The web content keeps all interaction; the overlay must not intercept
     // touches meant for the WebView's controls.
     view.isUserInteractionEnabled = false
     view.isHidden = true
-    container.addSubview(view)
-    overlayView = view
+    container.insertSubview(view, aboveSubview: webView)
+    remoteOverlays.append(RemoteOverlay(selection: selection, view: view))
     return view
   }
 
@@ -826,42 +839,50 @@ final class RoomController: NSObject {
     view.isHidden = true
   }
 
-  /// Fully releases the overlay (clear, disconnect, teardown, attempt
+  /// Fully releases an overlay (clear, disconnect, teardown, attempt
   /// replacement): detach the track first so `VideoView` drops its renderer
-  /// subscriptions, then hide, remove from the hierarchy, drop the reference
-  /// and forget the selection. A later set recreates the view cleanly.
-  private func removeOverlayView() {
-    guard let view = overlayView else {
-      overlaySelection = nil
-      return
-    }
+  /// subscriptions, then hide and remove from the hierarchy. A later set
+  /// recreates the view cleanly.
+  private func releaseOverlay(_ view: VideoView) {
     view.track = nil
     view.isHidden = true
     view.removeFromSuperview()
-    overlayView = nil
-    overlaySelection = nil
   }
 
-  /// Re-resolves the selected overlay track after participant/track
+  private func removeOverlayView(trackSid: String) {
+    guard let index = remoteOverlays.firstIndex(where: { $0.selection.trackSid == trackSid })
+    else { return }
+    releaseOverlay(remoteOverlays.remove(at: index).view)
+  }
+
+  private func removeOverlayViews() {
+    let removed = remoteOverlays
+    remoteOverlays = []
+    removed.forEach { releaseOverlay($0.view) }
+  }
+
+  /// Re-resolves every selected overlay track after participant/track
   /// lifecycle events: rebinds to the (possibly replaced) live track, or
   /// clears the attachment when the track is gone (unpublish, unsubscribe, or
   /// the participant left). Never recreates a removed view.
   private func reconcileOverlay(in room: Room) {
-    guard let selection = overlaySelection, let view = overlayView else { return }
-    guard
-      let track = Self.remoteVideoTrack(
-        participantIdentity: selection.participantIdentity,
-        trackSid: selection.trackSid, in: room)
-    else {
-      detachOverlay(from: view)
-      if #available(iOS 15.0, *) { refreshPiP() }
-      return
+    guard !remoteOverlays.isEmpty else { return }
+    for overlay in remoteOverlays {
+      let view = overlay.view
+      guard
+        let track = Self.remoteVideoTrack(
+          participantIdentity: overlay.selection.participantIdentity,
+          trackSid: overlay.selection.trackSid, in: room)
+      else {
+        detachOverlay(from: view)
+        continue
+      }
+      if view.track !== track {
+        view.track = track
+      }
+      view.layoutMode = Self.overlayLayoutMode(for: track)
+      view.isHidden = false
     }
-    if view.track !== track {
-      view.track = track
-    }
-    view.layoutMode = Self.overlayLayoutMode(for: track)
-    view.isHidden = false
     if #available(iOS 15.0, *) { refreshPiP() }
   }
 
@@ -1053,7 +1074,7 @@ final class RoomController: NSObject {
     keyProvider = nil
     lastError = nil
     localConnectionQuality = nil
-    removeOverlayView()
+    removeOverlayViews()
     removeLocalOverlayView()
     if #available(iOS 15.0, *) { stopPiP() }
     if let roomToClose {
@@ -1094,18 +1115,29 @@ final class RoomController: NSObject {
 
   // MARK: PiP controller lifecycle (private)
 
+  private var pipSourceView: VideoView? {
+    let bound = remoteOverlays.map(\.view).filter { $0.track != nil }
+    return bound.first { $0.track?.source == .screenShareVideo } ?? bound.first
+  }
+
   /// Arms, rebinds or releases PiP against the current overlay binding. Called
-  /// whenever `pipEnabled` or the overlay's track changes.
+  /// whenever `pipEnabled` or an overlay's track changes.
   @available(iOS 15.0, *)
   private func refreshPiP() {
-    guard pipEnabled, let sourceView = overlayView, let track = sourceView.track
+    guard pipEnabled, let sourceView = pipSourceView, let track = sourceView.track
     else {
       stopPiP()
       return
     }
-    guard let vc = pipViewController as? PiPVideoCallViewController else {
+    guard let vc = pipViewController as? PiPVideoCallViewController,
+      let controller = pipController as? AVPictureInPictureController
+    else {
       armPiP(sourceView: sourceView, track: track)
       return
+    }
+    if controller.contentSource?.activeVideoCallSourceView !== sourceView {
+      controller.contentSource = AVPictureInPictureController.ContentSource(
+        activeVideoCallSourceView: sourceView, contentViewController: vc)
     }
     guard pipTrack !== track else { return }
     pipTrack?.remove(videoRenderer: vc)
@@ -1214,7 +1246,7 @@ final class RoomController: NSObject {
       callKitController?.endCall(callId: callId, remoteEnded: false)
     }
     callId = nil
-    removeOverlayView()
+    removeOverlayViews()
     removeLocalOverlayView()
     if #available(iOS 15.0, *) { stopPiP() }
     emitSnapshotChanged()
@@ -1702,7 +1734,7 @@ extension RoomController: RoomDelegate {
     lastError = BridgeError(.disconnected)
     localConnectionQuality = nil
     connectionState = .failed
-    removeOverlayView()
+    removeOverlayViews()
     removeLocalOverlayView()
     if #available(iOS 15.0, *) { stopPiP() }
     emitSnapshotChanged()

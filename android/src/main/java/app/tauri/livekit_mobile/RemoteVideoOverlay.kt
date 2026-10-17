@@ -150,7 +150,7 @@ internal fun overlayRectFromCss(
 }
 
 /**
- * Owns the single remote-camera overlay: one [PassThroughVideoRenderer]
+ * Owns the overlay of one remote video track: one [PassThroughVideoRenderer]
  * sibling placed directly above the host WebView.
  *
  * Callers stay on the controller's bridge thread, so the fields are
@@ -194,6 +194,12 @@ internal class RemoteVideoOverlay(
     /** True while the tile owns the whole host window for picture-in-picture
      * and the geometry the JS lane reports no longer applies. */
     @Volatile private var fullWindow = false
+
+    @Volatile var screenShare = false
+        private set
+
+    val bound: Boolean
+        get() = attachedTrack != null
 
     /** A takeover has to follow the host window through the resize the PiP
      * transition causes: the mode change lands before the new layout does, so
@@ -428,6 +434,7 @@ internal class RemoteVideoOverlay(
                         // reported rect only lines up again on the next layout.
                         webView?.doOnLayout { refreshPlacement() }
                     }
+                    renderer?.translationZ = if (enabled) 1f else 0f
                     refreshPlacement()
                 }
             }
@@ -592,8 +599,9 @@ internal class RemoteVideoOverlay(
         trackSid: String,
     ) {
         val source = resolveSubscribedPublication(room, participantIdentity, trackSid)?.source
+        screenShare = source == Track.Source.SCREEN_SHARE
         view.setScalingType(
-            if (source == Track.Source.SCREEN_SHARE) {
+            if (screenShare) {
                 ScalingType.SCALE_ASPECT_FIT
             } else {
                 ScalingType.SCALE_ASPECT_BALANCED
