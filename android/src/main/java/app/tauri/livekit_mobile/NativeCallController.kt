@@ -353,6 +353,8 @@ internal class NativeCallController(
                         e2ee = keys
                         encryptionKeys.forEach(keys::install)
                         newRoom.e2eeOptions = E2EEOptions(keyProvider = keys)
+                        newRoom.audioTrackPublishDefaults =
+                            newRoom.audioTrackPublishDefaults.copy(red = false)
                     } catch (_: Exception) {
                         failConnect(
                             currentAttempt,

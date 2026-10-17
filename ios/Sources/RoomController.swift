@@ -673,6 +673,7 @@ final class RoomController: NSObject {
   ) -> RoomOptions {
     RoomOptions(
       defaultAudioCaptureOptions: audioProcessing,
+      defaultAudioPublishOptions: AudioPublishOptions(red: e2eeOptions == nil),
       adaptiveStream: true, dynacast: true,
       suspendLocalVideoTracksInBackground: false,
       e2eeOptions: e2eeOptions,
