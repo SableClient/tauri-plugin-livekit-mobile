@@ -260,13 +260,6 @@ pub struct NativeCallRemoteMicrophone {
     pub subscribed: bool,
 }
 
-/// Remote-only participant projection; `identity` is the opaque backend
-/// identity. `camera` exists only while the participant has a remote camera
-/// publication. `screen_share` exists only while the participant has a
-/// remote screen-share publication. `microphone` exists only while the
-/// participant has a remote audio publication. `connection_quality` is the
-/// bounded LiveKit ``ConnectionQuality`` vocabulary ("lost"/"poor"/"good"/
-/// "excellent"); omitted when unknown.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NativeCallRemoteParticipant {
@@ -275,6 +268,8 @@ pub struct NativeCallRemoteParticipant {
     pub camera: Option<NativeCallRemoteCamera>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub screen_share: Option<NativeCallScreenShare>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub screen_share_audio: Option<NativeCallRemoteMicrophone>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub microphone: Option<NativeCallRemoteMicrophone>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -447,6 +442,8 @@ pub struct SetNativeCallParticipantVolumeRequest {
     pub call_id: String,
     pub identity: String,
     pub volume: f64,
+    #[serde(default)]
+    pub screen_share: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -722,6 +719,40 @@ mod tests {
     use super::*;
 
     #[test]
+    fn participant_volume_defaults_to_microphone_and_can_select_screen_audio() {
+        for screen in [false, true] {
+            let mut payload = serde_json::json!({
+                "callId": "7", "identity": "alice", "volume": 0.6
+            });
+            if screen {
+                payload["screenShare"] = serde_json::json!(true);
+            }
+            let request: SetNativeCallParticipantVolumeRequest =
+                serde_json::from_value(payload).unwrap();
+            assert_eq!(request.screen_share, screen);
+            assert_eq!(
+                serde_json::to_value(request).unwrap()["screenShare"],
+                screen
+            );
+        }
+    }
+
+    #[test]
+    fn screen_audio_publication_survives_snapshot_roundtrip() {
+        let payload = serde_json::json!({
+            "identity": "alice",
+            "screenShareAudio": { "sid": "audio", "muted": false, "subscribed": true }
+        });
+        let participant: NativeCallRemoteParticipant =
+            serde_json::from_value(payload.clone()).unwrap();
+        assert_eq!(
+            participant.screen_share_audio.as_ref().unwrap().sid,
+            "audio"
+        );
+        assert_eq!(serde_json::to_value(participant).unwrap(), payload);
+    }
+
+    #[test]
     fn connection_states_are_bounded_wire_values() {
         for (state, wire) in [
             (NativeCallConnectionState::Idle, "idle"),
@@ -927,6 +958,7 @@ mod tests {
                         subscribed: true,
                     }),
                     screen_share: None,
+                    screen_share_audio: None,
                     microphone: None,
                     connection_quality: None,
                 },
@@ -934,6 +966,7 @@ mod tests {
                     identity: "@bob:example.org".into(),
                     camera: None,
                     screen_share: None,
+                    screen_share_audio: None,
                     microphone: None,
                     connection_quality: None,
                 },

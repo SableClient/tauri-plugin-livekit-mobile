@@ -78,10 +78,9 @@ final class RoomController: NSObject {
   /// Capture processing for this call's microphone. The room is built with it
   /// and a later change is pushed to the live track.
   private var audioProcessing = AudioCaptureOptions()
-  /// Playout gains by remote identity. Kept across subscriptions: a track
-  /// arrives at unity gain, so a gain set before it publishes — or before a
-  /// reconnect resubscribes it — is lost unless it is re-applied.
+  // Reapply volumes when LiveKit replaces tracks.
   private var participantVolumes: [String: Double] = [:]
+  private var screenShareVolumes: [String: Double] = [:]
   /// Local connection quality from the last
   /// `room(_:participant:didUpdateConnectionQuality:)` delegate event for the
   /// local participant. Nil until the first such event arrives.
@@ -221,6 +220,7 @@ final class RoomController: NSObject {
     cameraMutedByInterruption = false
     audioProcessing = args.audioProcessing?.captureOptions ?? AudioCaptureOptions()
     participantVolumes.removeAll()
+    screenShareVolumes.removeAll()
     screenShareEnabled = false
     participantCount = 0
     remoteParticipants = []
@@ -410,13 +410,18 @@ final class RoomController: NSObject {
   }
 
   func setParticipantVolume(
-    callId requestedCallId: String, identity: String, volume: Double, invoke: Invoke
+    callId requestedCallId: String, identity: String, volume: Double,
+    screenShare: Bool, invoke: Invoke
   ) async {
     guard callId == requestedCallId else {
       invoke.resolve(snapshot())
       return
     }
-    participantVolumes[identity] = volume
+    if screenShare {
+      screenShareVolumes[identity] = volume
+    } else {
+      participantVolumes[identity] = volume
+    }
     applyParticipantVolumes()
     invoke.resolve(snapshot())
   }
@@ -424,9 +429,12 @@ final class RoomController: NSObject {
   private func applyParticipantVolumes() {
     guard let room else { return }
     for (identity, participant) in room.remoteParticipants {
-      guard let volume = participantVolumes[identity.stringValue] else { continue }
       for publication in participant.trackPublications.values
-      where publication.source == .microphone {
+      where publication.source == .microphone || publication.source == .screenShareAudio {
+        let screen = publication.source == .screenShareAudio
+        let volume = screen
+          ? (screenShareVolumes[identity.stringValue] ?? 0)
+          : (participantVolumes[identity.stringValue] ?? 1)
         (publication.track as? RemoteAudioTrack)?.volume = volume
       }
     }
@@ -1336,9 +1344,20 @@ final class RoomController: NSObject {
               sid: $0.sid.stringValue, muted: $0.isMuted,
               subscribed: $0.isSubscribed)
           }
+        let screenShareAudio =
+          participant.trackPublications.values
+          .filter { $0.source == .screenShareAudio }
+          .sorted { $0.sid.stringValue < $1.sid.stringValue }
+          .first
+          .map {
+            BridgeRemoteMicrophone(
+              sid: $0.sid.stringValue, muted: $0.isMuted,
+              subscribed: $0.isSubscribed)
+          }
         return BridgeRemoteParticipant(
           identity: identity.stringValue, camera: camera,
           screenShare: screenShare,
+          screenShareAudio: screenShareAudio,
           microphone: microphone,
           connectionQuality: Self.connectionQualityWire(participant.connectionQuality))
       }
@@ -1624,6 +1643,10 @@ extension RoomController: RoomDelegate {
     _ room: Room, participantDidDisconnect participant: RemoteParticipant
   ) {
     Task { @MainActor [weak self] in
+      if let identity = participant.identity?.stringValue {
+        self?.participantVolumes.removeValue(forKey: identity)
+        self?.screenShareVolumes.removeValue(forKey: identity)
+      }
       self?.updateRemoteParticipants(from: room)
     }
   }
@@ -1645,6 +1668,12 @@ extension RoomController: RoomDelegate {
     didUnpublishTrack publication: RemoteTrackPublication
   ) {
     Task { @MainActor [weak self] in
+      if publication.source == .screenShareVideo || publication.source == .screenShareAudio,
+        let identity = participant.identity?.stringValue
+      {
+        self?.screenShareVolumes.removeValue(forKey: identity)
+        self?.applyParticipantVolumes()
+      }
       self?.updateRemoteParticipants(from: room)
     }
   }

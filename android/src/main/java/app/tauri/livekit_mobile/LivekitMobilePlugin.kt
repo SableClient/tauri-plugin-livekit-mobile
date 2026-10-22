@@ -70,6 +70,7 @@ internal class SetNativeCallParticipantVolumeArgs {
     var callId: String = ""
     var identity: String = ""
     var volume: Double = 1.0
+    var screenShare: Boolean = false
 }
 
 @InvokeArg
@@ -468,6 +469,7 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
             args.callId,
             args.identity,
             args.volume.coerceIn(0.0, MAX_PARTICIPANT_VOLUME),
+            args.screenShare,
             invoke,
         )
     }

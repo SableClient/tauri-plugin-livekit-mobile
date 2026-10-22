@@ -50,6 +50,7 @@ export type NativeCallRemoteParticipant = {
   identity: string;
   camera?: NativeCallRemoteCamera;
   screenShare?: NativeCallRemoteCamera;
+  screenShareAudio?: NativeCallRemoteCamera;
   microphone?: NativeCallRemoteCamera;
   connectionQuality?: string;
 };
@@ -236,11 +237,13 @@ export const setNativeCallAudioProcessing = (
     payload: request,
   });
 
-/** `volume` is a gain: `0` mutes, `1` is unity and the platforms clamp at `10`. */
+/** `volume` is a gain: `0` mutes, `1` is unity and the platforms clamp at `10`.
+ * Screen-share audio starts muted and is controlled with `screenShare: true`. */
 export const setNativeCallParticipantVolume = (request: {
   callId: string;
   identity: string;
   volume: number;
+  screenShare?: boolean;
 }): Promise<NativeCallSnapshot> =>
   invoke<NativeCallSnapshot>('plugin:livekit-mobile|set_native_call_participant_volume', {
     payload: request,

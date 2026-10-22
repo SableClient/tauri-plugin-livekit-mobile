@@ -313,6 +313,15 @@ final class WireContractTests: XCTestCase {
     XCTAssertEqual(args.callId, "call-1")
     XCTAssertEqual(args.identity, "@alice:example.org")
     XCTAssertEqual(args.volume, 0.4, accuracy: 0.0001)
+    XCTAssertNil(args.screenShare)
+  }
+
+  func testScreenShareVolumeArgsDecode() throws {
+    let (invoke, _) = makeInvoke(
+      data: #"{"callId": "call-1", "identity": "alice", "volume": 0.6, "screenShare": true}"#)
+    let args = try invoke.parseArgs(SetParticipantVolumeArgs.self)
+    XCTAssertEqual(args.screenShare, true)
+    XCTAssertEqual(args.volume, 0.6, accuracy: 0.0001)
   }
 
   func testCallIdOnlyArgsDecode() throws {

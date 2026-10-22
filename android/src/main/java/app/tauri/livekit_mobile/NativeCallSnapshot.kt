@@ -1,12 +1,10 @@
 package app.tauri.livekit_mobile
 
-/** Remote-participant projection inside the snapshot. Audio-only participants
- * simply omit the camera entry; no metadata, names, or audio tracks cross.
- * Unknown connection quality is omitted rather than sent as a wire string. */
 internal data class NativeRemoteParticipant(
     val identity: String,
     val camera: Camera? = null,
     val screenShare: ScreenShare? = null,
+    val screenShareAudio: Microphone? = null,
     val microphone: Microphone? = null,
     val connectionQuality: String? = null,
 ) {

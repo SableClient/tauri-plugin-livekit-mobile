@@ -64,6 +64,7 @@ struct SetParticipantVolumeArgs: Decodable {
   let callId: String
   let identity: String
   let volume: Double
+  let screenShare: Bool?
 }
 
 struct ConnectArgs: Decodable {
@@ -283,6 +284,7 @@ struct BridgeRemoteParticipant: Encodable, Equatable {
   let camera: BridgeRemoteCamera?
   /// Present only while the participant has a screen-share publication.
   let screenShare: BridgeRemoteScreenShare?
+  var screenShareAudio: BridgeRemoteMicrophone? = nil
   /// Present only while the participant has an audio publication.
   let microphone: BridgeRemoteMicrophone?
   /// Omitted when the SDK reports `.unknown`.
@@ -524,7 +526,8 @@ final class LivekitMobilePlugin: Plugin {
       }
       await controller.setParticipantVolume(
         callId: args.callId, identity: args.identity,
-        volume: min(max(args.volume, 0), maxParticipantVolume), invoke: invoke)
+        volume: min(max(args.volume, 0), maxParticipantVolume),
+        screenShare: args.screenShare ?? false, invoke: invoke)
     }
   }
 

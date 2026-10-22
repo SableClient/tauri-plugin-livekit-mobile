@@ -90,11 +90,8 @@ internal class NativeCallController(
      * and a later change is applied to the live track. */
     private var audioProcessing = LocalAudioTrackOptions()
 
-    /** Playout gains by remote identity. Kept across subscriptions: a track
-     * arrives at unity gain, so a volume set before it publishes — or before a
-     * reconnect resubscribes it — is lost unless it is re-applied on every
-     * projection. */
-    private val participantVolumes = mutableMapOf<String, Double>()
+    // Reapply volumes when LiveKit replaces tracks.
+    private val participantVolumes = mutableMapOf<Pair<String, Boolean>, Double>()
 
     /** What the foreground-service notification currently shows. */
     private var presentation = NativeCallPresentation.NONE
@@ -244,6 +241,15 @@ internal class NativeCallController(
                                             .put("sid", microphone.sid)
                                             .put("muted", microphone.muted)
                                             .put("subscribed", microphone.subscribed),
+                                    )
+                                }
+                                participant.screenShareAudio?.let { audio ->
+                                    put(
+                                        "screenShareAudio",
+                                        JSObject()
+                                            .put("sid", audio.sid)
+                                            .put("muted", audio.muted)
+                                            .put("subscribed", audio.subscribed),
                                     )
                                 }
                                 participant.connectionQuality?.let { quality ->
@@ -482,13 +488,19 @@ internal class NativeCallController(
         }
     }
 
-    fun setParticipantVolume(callId: String, identity: String, volume: Double, invoke: Invoke) {
+    fun setParticipantVolume(
+        callId: String,
+        identity: String,
+        volume: Double,
+        screenShare: Boolean,
+        invoke: Invoke,
+    ) {
         scope.launch {
             if (snapshot.callId != callId) {
                 invoke.resolve(snapshotJson())
                 return@launch
             }
-            participantVolumes[identity] = volume
+            participantVolumes[identity to screenShare] = volume
             applyParticipantVolumes()
             invoke.resolve(snapshotJson())
         }
@@ -497,10 +509,16 @@ internal class NativeCallController(
     private fun applyParticipantVolumes() {
         val participants = room?.remoteParticipants ?: return
         participants.forEach { (identity, participant) ->
-            val volume = participantVolumes[identity.value] ?: return@forEach
             participant.trackPublications.values
-                .filter { it.source == Track.Source.MICROPHONE }
-                .forEach { (it.track as? RemoteAudioTrack)?.setVolume(volume) }
+                .filter {
+                    it.source == Track.Source.MICROPHONE || it.source == Track.Source.SCREEN_SHARE_AUDIO
+                }
+                .forEach {
+                    val screen = it.source == Track.Source.SCREEN_SHARE_AUDIO
+                    val volume =
+                        participantVolumes[identity.value to screen] ?: if (screen) 0.0 else 1.0
+                    (it.track as? RemoteAudioTrack)?.setVolume(volume)
+                }
         }
     }
 
@@ -1101,6 +1119,7 @@ internal class NativeCallController(
                 emitSnapshotChanged()
             }
             is RoomEvent.ParticipantDisconnected -> {
+                participantVolumes.keys.removeAll { it.first == event.participant.identity?.value }
                 transition {
                     copy(
                         participantCount = room?.remoteParticipants?.size ?: 0,
@@ -1120,6 +1139,12 @@ internal class NativeCallController(
                 localVideoOverlay.reconcile(room)
             }
             is RoomEvent.TrackUnpublished -> {
+                if (event.publication.source == Track.Source.SCREEN_SHARE ||
+                    event.publication.source == Track.Source.SCREEN_SHARE_AUDIO
+                ) {
+                    participantVolumes.remove(event.participant.identity?.value to true)
+                    applyParticipantVolumes()
+                }
                 applyRemoteProjectionIfChanged(event.participant)
                 videoOverlay.reconcile(room)
                 localVideoOverlay.reconcile(room)
@@ -1147,12 +1172,6 @@ internal class NativeCallController(
         }
     }
 
-    /**
-     * Smallest authoritative remote-only projection: identity, connection
-     * quality, plus the remote CAMERA, SCREEN_SHARE and MICROPHONE
-     * publications (sid, muted, remote-aware subscribed) when one exists.
-     * Sorted so identical room state always projects to an equal list.
-     */
     private fun remoteParticipantsProjection(
         currentRoom: Room?,
     ): List<NativeRemoteParticipant> {
@@ -1191,10 +1210,19 @@ internal class NativeCallController(
                             subscribed = publication.subscribed,
                         )
                     }
+                val screenShareAudio =
+                    publicationFor(Track.Source.SCREEN_SHARE_AUDIO)?.let { publication ->
+                        NativeRemoteParticipant.Microphone(
+                            sid = publication.sid,
+                            muted = publication.muted,
+                            subscribed = publication.subscribed,
+                        )
+                    }
                 NativeRemoteParticipant(
                     identity = identity.value,
                     camera = camera,
                     screenShare = screenShare,
+                    screenShareAudio = screenShareAudio,
                     microphone = microphone,
                     connectionQuality = connectionQualityWire(participant.connectionQuality),
                 )
