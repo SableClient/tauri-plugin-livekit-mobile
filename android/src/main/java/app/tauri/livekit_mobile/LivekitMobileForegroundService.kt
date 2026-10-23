@@ -8,9 +8,12 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.media.AudioAttributes
+import android.media.RingtoneManager
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
+import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
@@ -258,7 +261,7 @@ class LivekitMobileForegroundService : Service() {
         const val DIRECTION_ONGOING = "ongoing"
 
         private const val CHANNEL_ID_ONGOING = "livekit_mobile_ongoing"
-        private const val CHANNEL_ID_INCOMING = "livekit_mobile_incoming"
+        private const val CHANNEL_ID_INCOMING = "livekit_mobile_incoming.v2"
         private const val NOTIFICATION_ID = 1396
 
         internal fun createNotificationChannels(context: Context) {
@@ -271,12 +274,40 @@ class LivekitMobileForegroundService : Service() {
                     NotificationManager.IMPORTANCE_LOW,
                 ),
             )
+            if (manager.getNotificationChannel(CHANNEL_ID_INCOMING) != null) return
+            // Channel audio attributes are immutable; migrate existing sound settings.
+            val previous = manager.getNotificationChannel("livekit_mobile_incoming")
+            val ringtone = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+            val sound = when {
+                previous == null -> ringtone
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && previous.hasUserSetSound() -> previous.sound
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                    previous.sound == Settings.System.DEFAULT_NOTIFICATION_URI -> ringtone
+                else -> previous.sound
+            }
             manager.createNotificationChannel(
                 NotificationChannel(
                     CHANNEL_ID_INCOMING,
                     "Incoming call",
-                    NotificationManager.IMPORTANCE_HIGH,
-                ),
+                    previous?.importance ?: NotificationManager.IMPORTANCE_HIGH,
+                ).apply {
+                    setSound(
+                        sound,
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                            .build(),
+                    )
+                    previous?.let {
+                        vibrationPattern = it.vibrationPattern
+                        lockscreenVisibility = it.lockscreenVisibility
+                        setShowBadge(it.canShowBadge())
+                        enableLights(it.shouldShowLights())
+                        lightColor = it.lightColor
+                        setBypassDnd(it.canBypassDnd())
+                    }
+                    enableVibration(previous?.shouldVibrate() ?: true)
+                },
             )
         }
 
@@ -308,6 +339,12 @@ class LivekitMobileForegroundService : Service() {
         }
 
         internal fun markIncomingCallAnswered(context: Context, callId: String) {
+            val manager = context.getSystemService(NotificationManager::class.java)
+            manager.activeNotifications.firstOrNull {
+                it.id == NOTIFICATION_ID &&
+                    it.notification.extras.getString(EXTRA_CALL_ID) == callId &&
+                    it.notification.flags and Notification.FLAG_INSISTENT != 0
+            }?.let { manager.cancel(it.id) }
             context.sendBroadcast(
                 Intent(IncomingCallActivity.ACTION_ANSWERED)
                     .setPackage(context.packageName)
@@ -406,9 +443,13 @@ class LivekitMobileForegroundService : Service() {
                     .setOnlyAlertOnce(false)
                     .setFullScreenIntent(buildFullScreenIntent(context, callId, callerName), true)
             }
+            // JS timers may be suspended while the app is in the background.
+            builder.setTimeoutAfter(30_000L)
             builder.addExtras(Bundle().apply { putString(EXTRA_CALL_ID, callId) })
             buildContentIntent(context)?.let(builder::setContentIntent)
-            return builder.build()
+            return builder.build().apply {
+                flags = flags or Notification.FLAG_INSISTENT
+            }
         }
     }
 }
