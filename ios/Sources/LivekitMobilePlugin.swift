@@ -413,7 +413,7 @@ final class LivekitMobilePlugin: Plugin {
   @objc public override func load(webview: WKWebView) {
     forceLinkLiveKitObjCSurface()
     Task { @MainActor [weak controller, weak callKitController] in
-      callKitController?.applyAudioSessionOwnership()
+      callKitController?.start()
       controller?.attachHostWebView(webview)
       controller?.callKitController = callKitController
       callKitController?.plugin = self
@@ -431,11 +431,14 @@ final class LivekitMobilePlugin: Plugin {
     } else {
       piPAvailable = false
     }
-    invoke.resolve(
-      BridgeCapabilities(
-        microphone: true, backgroundAudio: true, camera: true, nativeVideoOverlay: true,
-        screenShare: true, audioRoutes: true, systemCalls: true,
-        callKit: callKitController.isCallKitAvailable, nativePiP: piPAvailable))
+    Task { @MainActor [callKitController] in
+      let callKit = callKitController.isCallKitAvailable
+      invoke.resolve(
+        BridgeCapabilities(
+          microphone: true, backgroundAudio: true, camera: true, nativeVideoOverlay: true,
+          screenShare: true, audioRoutes: true, systemCalls: callKit,
+          callKit: callKit, nativePiP: piPAvailable))
+    }
   }
 
   @objc public func connect(_ invoke: Invoke) throws {

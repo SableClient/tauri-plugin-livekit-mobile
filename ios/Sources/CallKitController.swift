@@ -2,6 +2,7 @@ import AVFoundation
 import CallKit
 import LiveKit
 import PushKit
+import StoreKit
 import UIKit
 
 /// Owns the system call UI (CallKit) and the audio-session arbitration
@@ -22,8 +23,8 @@ final class CallKitController: NSObject {
 
   // MARK: - Core
 
-  private var provider: CXProvider
-  private let controller = CXCallController()
+  private var provider: CXProvider?
+  private var controller: CXCallController?
 
   /// Whether CallKit's provider has signaled readiness via providerDidBegin.
   /// All call-start/answer/end requests check this flag and enqueue pending
@@ -91,13 +92,13 @@ final class CallKitController: NSObject {
   ///
   /// - CallKit present: the SDK must not touch AVAudioSession and the engine
   ///   stays unavailable until `provider(_:didActivate:)` grants a window.
-  /// - No CallKit (China region): nothing will ever grant that window, so
+  /// - No CallKit (restricted or unknown storefront): nothing will ever grant that window, so
   ///   LiveKit keeps its own automatic session management.
   ///
   /// Set from `Plugin.load()` before any Room connects.
   func applyAudioSessionOwnership() {
     AudioManager.shared.audioSession.isAutomaticConfigurationEnabled = !ownsAudioSession
-    // The China branch is the one place outside `provider(_:didActivate:)`
+    // The no-CallKit branch is the one place outside `provider(_:didActivate:)`
     // that may enable the engine: there is no CXProvider to grant an audio
     // window, so nothing else would ever turn it on.
     setEngine(
@@ -128,18 +129,91 @@ final class CallKitController: NSObject {
 
   // MARK: - Init
 
-  /// If true the current locale is China, so all CallKit setup is skipped:
-  /// Apple prohibits CallKit usage in that region. Every public method
-  /// early-returns safely when this flag is set.
-  private nonisolated let chinaRegion: Bool
+  private var storefrontCountry: String?
+  private var storefrontTask: Task<Void, Never>?
+  private var localeObserver: NSObjectProtocol?
 
-  /// Whether the system call UI is actually usable, so `capabilities` reports
-  /// the truth instead of an unconditional `true`.
-  nonisolated var isCallKitAvailable: Bool { !chinaRegion }
+  private var regionAllowsCallKit: Bool {
+    CallKitRegion.isAllowed(
+      deviceRegion: Locale.autoupdatingCurrent.region?.identifier,
+      storefrontCountry: storefrontCountry)
+  }
 
-  /// True when a CXProvider exists and therefore owns audio-session
-  /// activation.
-  private var ownsAudioSession: Bool { !chinaRegion }
+  var isCallKitAvailable: Bool { regionAllowsCallKit && provider != nil }
+  private var callKitDisabled: Bool { !isCallKitAvailable }
+  private var ownsAudioSession: Bool { isCallKitAvailable }
+
+  /// No CallKit or PushKit objects exist until StoreKit confirms an allowed storefront.
+  func start() {
+    guard storefrontTask == nil else { return }
+    applyAudioSessionOwnership()
+    localeObserver = NotificationCenter.default.addObserver(
+      forName: NSLocale.currentLocaleDidChangeNotification, object: nil, queue: .main
+    ) { [weak self] _ in
+      Task { @MainActor [weak self] in self?.refreshRegion() }
+    }
+    storefrontTask = Task { @MainActor [weak self] in
+      let storefront = await Storefront.current
+      self?.updateStorefront(storefront?.countryCode)
+      for await storefront in Storefront.updates {
+        guard !Task.isCancelled else { return }
+        self?.updateStorefront(storefront.countryCode)
+      }
+    }
+  }
+
+  deinit {
+    storefrontTask?.cancel()
+    if let localeObserver { NotificationCenter.default.removeObserver(localeObserver) }
+  }
+
+  private func updateStorefront(_ country: String?) {
+    storefrontCountry = country
+    refreshRegion()
+  }
+
+  func refreshRegion() {
+    if !regionAllowsCallKit {
+      guard provider != nil else { return }
+      // Stop system integration while leaving the LiveKit room running.
+      provider?.setDelegate(nil, queue: nil)
+      for uuid in callByUUID.keys {
+        provider?.reportCall(with: uuid, endedAt: nil, reason: .remoteEnded)
+      }
+      for pending in pendingAnswerActions.values { pending.action.fail() }
+      for pending in pendingEndActions.values { pending.action.fail() }
+      let startupActions = pendingStartupActions
+      discardCallState()
+      provider?.invalidate()
+      provider = nil
+      controller = nil
+      providerReady = false
+      pushRegistry?.desiredPushTypes = []
+      pushRegistry?.delegate = nil
+      pushRegistry = nil
+      voipToken = nil
+      UIApplication.shared.isIdleTimerDisabled = false
+      applyAudioSessionOwnership()
+      for action in startupActions { action() }
+      return
+    }
+    guard provider == nil else { return }
+    // A storefront becoming available must not interrupt an ongoing VoIP call.
+    guard roomController?.snapshot().callId == nil else { return }
+    controller = CXCallController()
+    provider = CXProvider(configuration: Self.makeProviderConfiguration())
+    provider?.setDelegate(self, queue: nil)
+    providerRebuilds = 0
+    let observer = CXCallObserver()
+    for call in observer.calls {
+      let action = CXEndCallAction(call: call.uuid)
+      controller?.request(CXTransaction(action: action)) { error in
+        if let error { log("Orphan call cleanup failed: \(error.localizedDescription)") }
+      }
+    }
+    applyAudioSessionOwnership()
+    setupPushKit()
+  }
 
   /// One configuration source so the provider can be rebuilt identically after
   /// `providerDidReset`.
@@ -166,38 +240,7 @@ final class CallKitController: NSObject {
   }
 
   nonisolated override init() {
-    // China region block: Apple does not allow CallKit in China (enforced
-    // by region code). Skip all provider/controller setup so we never hit
-    // the system's region-block rejections.
-    let isChina = Locale.current.regionCode?.lowercased() == "cn"
-    chinaRegion = isChina
-    if isChina {
-      log("CallKit disabled: China region detected")
-      // Create a minimal provider only so stored-property init compiles;
-      // it will never be used.
-      let dummyConfig = CXProviderConfiguration()
-      provider = CXProvider(configuration: dummyConfig)
-      super.init()
-      return
-    }
-
-    provider = CXProvider(configuration: Self.makeProviderConfiguration())
     super.init()
-    provider.setDelegate(self, queue: nil)
-
-    // Clear stale calls from previous app launches. Failed builds can leave
-    // orphaned CX calls in the system; each one occupies a call group, so
-    // enough of them reject new calls with
-    // CXErrorCodeRequestTransactionError.maximumCallGroupsReached (7).
-    let observer = CXCallObserver()
-    for call in observer.calls {
-      let action = CXEndCallAction(call: call.uuid)
-      controller.request(CXTransaction(action: action)) { error in
-        if let error {
-          log("Orphan call cleanup failed for \(call.uuid): \(error.localizedDescription)")
-        }
-      }
-    }
 
     // Observe audio session interruptions (cellular call, Siri, hardware
     // mic-mute, route disconnect) and route changes (Bluetooth connect/
@@ -321,7 +364,7 @@ final class CallKitController: NSObject {
   /// Returns true if there is already an active CallKit call. Used by the
   /// app to reject new calls when one is already in progress.
   func hasRegisteredCall() -> Bool {
-    guard !chinaRegion else { return false }
+    guard !callKitDisabled else { return false }
     return !callByUUID.isEmpty
   }
 
@@ -332,7 +375,7 @@ final class CallKitController: NSObject {
     uuid: UUID, callerName: String, roomId: String? = nil, hasVideo: Bool = false,
     outcome: @escaping (BridgeFailureCode?) -> Void = { _ in }
   ) {
-    guard !chinaRegion else {
+    guard !callKitDisabled else {
       outcome(.unavailable)
       return
     }
@@ -363,7 +406,7 @@ final class CallKitController: NSObject {
       }
     }
 
-    provider.reportNewIncomingCall(with: uuid, update: update) { [weak self] error in
+    provider?.reportNewIncomingCall(with: uuid, update: update) { [weak self] error in
       var code: BridgeFailureCode?
       defer {
         if bgTaskId != .invalid {
@@ -386,7 +429,7 @@ final class CallKitController: NSObject {
           switch CXErrorCodeIncomingCallError.Code(rawValue: nsError.code) {
           case .filteredByDoNotDisturb, .filteredByBlockList,
             .filteredBySensitiveParticipants:
-            provider.reportCall(with: uuid, endedAt: nil, reason: .declinedElsewhere)
+            provider?.reportCall(with: uuid, endedAt: nil, reason: .declinedElsewhere)
             forget(uuid: uuid)
             triggerToJS("callkit_event", data: .end(uuid: uuid.uuidString))
             log("Incoming call filtered by the system for \(uuid)")
@@ -409,11 +452,11 @@ final class CallKitController: NSObject {
   func reportImmediatelyEndedCall(
     uuid: UUID, reason: CXCallEndedReason, outcome: @escaping () -> Void = {}
   ) {
-    guard !chinaRegion else {
+    guard !callKitDisabled else {
       outcome()
       return
     }
-    provider.reportNewIncomingCall(
+    provider?.reportNewIncomingCall(
       with: uuid,
       update: CXCallUpdate()) { [weak self] error in
         defer { outcome() }
@@ -421,7 +464,7 @@ final class CallKitController: NSObject {
         if let error {
           log("reportImmediatelyEndedCall report failed: \(error.localizedDescription)")
         } else {
-          provider.reportCall(with: uuid, endedAt: nil, reason: reason)
+          provider?.reportCall(with: uuid, endedAt: nil, reason: reason)
         }
         forget(uuid: uuid)
       }
@@ -433,7 +476,7 @@ final class CallKitController: NSObject {
     uuid: UUID, callId: String, callerName: String,
     outcome: @escaping (BridgeFailureCode?) -> Void = { _ in }
   ) {
-    guard !chinaRegion else {
+    guard !callKitDisabled else {
       outcome(.unavailable)
       return
     }
@@ -452,7 +495,7 @@ final class CallKitController: NSObject {
     let handle = CXHandle(type: .generic, value: callerName)
     let action = CXStartCallAction(call: uuid, handle: handle)
     action.isVideo = false  // video starts off; user toggles in-app
-    controller.request(
+    controller?.request(
       CXTransaction(action: action)
     ) { [weak self] error in
       if let error {
@@ -471,7 +514,7 @@ final class CallKitController: NSObject {
     uuid: UUID, callId: String,
     outcome: @escaping (BridgeFailureCode?) -> Void = { _ in }
   ) {
-    guard !chinaRegion else {
+    guard !callKitDisabled else {
       outcome(.unavailable)
       return
     }
@@ -486,7 +529,7 @@ final class CallKitController: NSObject {
 
     appRequestedActions.insert(uuid)
     let action = CXAnswerCallAction(call: uuid)
-    controller.request(
+    controller?.request(
       CXTransaction(action: action)
     ) { error in
       if let error {
@@ -535,7 +578,7 @@ final class CallKitController: NSObject {
   /// Fulfills a pending system-initiated answer action. Called by JS after
   /// the LiveKit room connects. Auto-fails after 30s if JS never responds.
   func fulfillAnswerCall(uuid: UUID, didFail: Bool = false) {
-    guard !chinaRegion else { return }
+    guard !callKitDisabled else { return }
     guard let pending = pendingAnswerActions.removeValue(forKey: uuid) else { return }
     if didFail {
       pending.action.fail()
@@ -549,7 +592,7 @@ final class CallKitController: NSObject {
   /// Fulfills a pending system-initiated end action. Called by JS after
   /// cleanup completes.
   func fulfillEndCall(uuid: UUID, didFail: Bool = false) {
-    guard !chinaRegion else { return }
+    guard !callKitDisabled else { return }
     guard let pending = pendingEndActions.removeValue(forKey: uuid) else { return }
     if didFail {
       pending.action.fail()
@@ -597,7 +640,8 @@ final class CallKitController: NSObject {
   /// Reports the outgoing call as connected to CallKit. Call after the
   /// LiveKit room transitions to .connected.
   func reportConnected(uuid: UUID) {
-    provider.reportOutgoingCall(with: uuid, connectedAt: Date())
+    guard !callKitDisabled else { return }
+    provider?.reportOutgoingCall(with: uuid, connectedAt: Date())
     log("Reported outgoing call connected for \(uuid)")
   }
 
@@ -608,7 +652,7 @@ final class CallKitController: NSObject {
     callId: String, remoteEnded: Bool = false, reason: CXCallEndedReason? = nil,
     outcome: @escaping (BridgeFailureCode?) -> Void = { _ in }
   ) {
-    guard !chinaRegion else {
+    guard !callKitDisabled else {
       outcome(.unavailable)
       return
     }
@@ -626,14 +670,14 @@ final class CallKitController: NSObject {
       if !remoteEnded {
         let tempUuid = UUID()
         let action = CXEndCallAction(call: tempUuid)
-        controller.request(
+        controller?.request(
           CXTransaction(action: action)
         ) { error in
           if let error {
             log("CXEndCallAction temp error: \(error.localizedDescription)")
           }
         }
-        provider.reportCall(with: tempUuid, endedAt: nil, reason: .remoteEnded)
+        provider?.reportCall(with: tempUuid, endedAt: nil, reason: .remoteEnded)
       }
       // Nothing is tracked under this call id, so there is nothing left to end.
       outcome(nil)
@@ -667,14 +711,14 @@ final class CallKitController: NSObject {
         }
         log("Retrying endCall for \(uuid): still pending")
         // Force-end by reporting directly.
-        self.provider.reportCall(with: uuid, endedAt: nil, reason: reason ?? .remoteEnded)
+        self.provider?.reportCall(with: uuid, endedAt: nil, reason: reason ?? .remoteEnded)
         self.forget(uuid: uuid)
         outcome(nil)
       }
       return
     case .notReported:
       // Never reported: end immediately via direct report.
-      provider.reportCall(with: uuid, endedAt: nil, reason: reason ?? .remoteEnded)
+      provider?.reportCall(with: uuid, endedAt: nil, reason: reason ?? .remoteEnded)
       forget(uuid: uuid)
       outcome(nil)
       return
@@ -687,7 +731,7 @@ final class CallKitController: NSObject {
     }
 
     if remoteEnded {
-      provider.reportCall(with: uuid, endedAt: nil, reason: reason ?? .remoteEnded)
+      provider?.reportCall(with: uuid, endedAt: nil, reason: reason ?? .remoteEnded)
       forget(uuid: uuid)
       outcome(nil)
       return
@@ -698,7 +742,7 @@ final class CallKitController: NSObject {
     // from a system-initiated one.
     appRequestedActions.insert(uuid)
     let action = CXEndCallAction(call: uuid)
-    controller.request(
+    controller?.request(
       CXTransaction(action: action)
     ) { [weak self] error in
       if let error {
@@ -717,7 +761,7 @@ final class CallKitController: NSObject {
     _ muted: Bool, for callId: String,
     outcome: @escaping (BridgeFailureCode?) -> Void = { _ in }
   ) {
-    guard !chinaRegion else {
+    guard !callKitDisabled else {
       outcome(.unavailable)
       return
     }
@@ -728,7 +772,7 @@ final class CallKitController: NSObject {
     let action = CXSetMutedCallAction(call: uuid, muted: muted)
     appInitiatedMuteActionIds.insert(action.uuid)
     lastAppRequestedMute = muted
-    controller.request(
+    controller?.request(
       CXTransaction(action: action)
     ) { error in
       if let error {
@@ -743,12 +787,12 @@ final class CallKitController: NSObject {
   /// Updates the CallKit display (caller name, video indicator) for an
   /// active call.
   func updateCallDisplay(callId: String, callerName: String, hasVideo: Bool? = nil) {
-    guard !chinaRegion else { return }
+    guard !callKitDisabled else { return }
     guard let uuid = uuid(forCallId: callId) else { return }
     let update = CXCallUpdate()
     update.localizedCallerName = callerName
     if let hasVideo { update.hasVideo = hasVideo }
-    provider.reportCall(with: uuid, updated: update)
+    provider?.reportCall(with: uuid, updated: update)
   }
 
   /// Selectable audio outputs for the route picker. iOS has no output
@@ -759,7 +803,7 @@ final class CallKitController: NSObject {
   /// with a wired output attached, `overrideOutputAudioPort(.none)` lands on
   /// the wired port, so an earpiece entry would be a no-op.
   func getAudioRoutes(callId: String) -> [AudioRoute] {
-    guard !chinaRegion else { return [] }
+    guard !callKitDisabled else { return [] }
     let session = AVAudioSession.sharedInstance()
     let outputs = session.currentRoute.outputs
     let inputs = session.availableInputs ?? []
@@ -796,7 +840,7 @@ final class CallKitController: NSObject {
   /// selected through their HFP input, and the built-in mic has to be restored
   /// explicitly or that preference keeps the output on the headset.
   func setAudioRoute(callId: String, routeId: String) {
-    guard !chinaRegion else { return }
+    guard !callKitDisabled else { return }
     // callId is unused aside from guard; the route change is session-wide.
     let session = AVAudioSession.sharedInstance()
     switch routeId {
@@ -890,9 +934,9 @@ final class CallKitController: NSObject {
   // MARK: - Cleanup
 
   func reset() {
-    guard !chinaRegion else { return }
+    guard !callKitDisabled else { return }
     for (uuid, _) in callByUUID {
-      provider.reportCall(with: uuid, endedAt: nil, reason: .remoteEnded)
+      provider?.reportCall(with: uuid, endedAt: nil, reason: .remoteEnded)
     }
     // Fail all pending actions so they don't hang.
     for (_, pending) in pendingAnswerActions { pending.action.fail() }
@@ -925,7 +969,7 @@ final class CallKitController: NSObject {
   private(set) var voipToken: String?
 
   func setupPushKit() {
-    guard !chinaRegion else { return }
+    guard !callKitDisabled, pushRegistry == nil else { return }
     pushRegistry = PKPushRegistry(queue: nil)
     pushRegistry?.delegate = self
     pushRegistry?.desiredPushTypes = [.voIP]
@@ -942,6 +986,7 @@ extension CallKitController: PKPushRegistryDelegate {
     didUpdate credentials: PKPushCredentials,
     for type: PKPushType
   ) {
+    guard !callKitDisabled, registry === pushRegistry else { return }
     let token = credentials.token.map { String(format: "%02x", $0) }.joined()
     voipToken = token
     log("VoIP push token updated")
@@ -983,7 +1028,7 @@ extension CallKitController: PKPushRegistryDelegate {
       completion()
       return
     }
-    guard !chinaRegion else {
+    guard !callKitDisabled else {
       // PushKit is never registered in this region, so a push cannot arrive;
       // settle the handler rather than leaving PushKit waiting if it does.
       completion()
@@ -1025,6 +1070,7 @@ extension CallKitController: PKPushRegistryDelegate {
 extension CallKitController: CXProviderDelegate {
 
   func providerDidReset(_ provider: CXProvider) {
+    guard !callKitDisabled, provider === self.provider else { return }
     // CXProvider.h on providerDidReset: "Delegates must respond to this
     // callback by cleaning up all internal call state (disconnecting
     // communication channels, releasing network resources, etc.). This
@@ -1061,7 +1107,7 @@ extension CallKitController: CXProviderDelegate {
       providerRebuilds += 1
       provider.invalidate()
       self.provider = CXProvider(configuration: Self.makeProviderConfiguration())
-      self.provider.setDelegate(self, queue: nil)
+      self.provider?.setDelegate(self, queue: nil)
       log("providerDidReset: state cleared, provider rebuilt (\(providerRebuilds))")
     } else {
       log("providerDidReset: rebuild limit reached, CallKit stays unavailable")
@@ -1072,6 +1118,7 @@ extension CallKitController: CXProviderDelegate {
   }
 
   func providerDidBegin(_ provider: CXProvider) {
+    guard !callKitDisabled, provider === self.provider else { return }
     providerReady = true
     log("CXProvider did begin: ready to process Calls")
 
@@ -1088,6 +1135,10 @@ extension CallKitController: CXProviderDelegate {
   }
 
   func provider(_ provider: CXProvider, perform action: CXStartCallAction) {
+    guard !callKitDisabled, provider === self.provider else {
+      action.fail()
+      return
+    }
     // Re-gate audio engine before the call starts (prevents wrong-timing activation).
     setEngine(.none, reason: "outgoing call starting")
 
@@ -1106,6 +1157,10 @@ extension CallKitController: CXProviderDelegate {
   }
 
   func provider(_ provider: CXProvider, perform action: CXAnswerCallAction) {
+    guard !callKitDisabled, provider === self.provider else {
+      action.fail()
+      return
+    }
     let uuid = action.callUUID
 
     // Re-gate audio engine before activation.
@@ -1142,6 +1197,10 @@ extension CallKitController: CXProviderDelegate {
   }
 
   func provider(_ provider: CXProvider, perform action: CXEndCallAction) {
+    guard !callKitDisabled, provider === self.provider else {
+      action.fail()
+      return
+    }
     let uuid = action.callUUID
 
     if appRequestedActions.remove(uuid) != nil {
@@ -1172,6 +1231,10 @@ extension CallKitController: CXProviderDelegate {
   }
 
   func provider(_ provider: CXProvider, perform action: CXSetMutedCallAction) {
+    guard !callKitDisabled, provider === self.provider else {
+      action.fail()
+      return
+    }
     let uuid = action.callUUID
 
     // ignoreFirstUnmuteAfterRemoteAnswer: skip the first unmute arriving
@@ -1206,6 +1269,10 @@ extension CallKitController: CXProviderDelegate {
   /// Dropping this handler would leave such a call held with nothing to resume
   /// it.
   func provider(_ provider: CXProvider, perform action: CXSetHeldCallAction) {
+    guard !callKitDisabled, provider === self.provider else {
+      action.fail()
+      return
+    }
     let uuid = action.callUUID
     if action.isOnHold {
       // The engine is suspended rather than left running into an audio session
@@ -1224,6 +1291,7 @@ extension CallKitController: CXProviderDelegate {
   }
 
   func provider(_ provider: CXProvider, timedOutPerforming action: CXAction) {
+    guard !callKitDisabled, provider === self.provider else { return }
     // CXProvider.h: "Called when an action was not performed in time and has
     // been inherently failed. [...] An action that has already timed out should
     // not be fulfilled or failed by the provider delegate." So this only drops
@@ -1238,6 +1306,7 @@ extension CallKitController: CXProviderDelegate {
   // MARK: Audio session arbitration (the critical LiveKit recipe)
 
   func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
+    guard !callKitDisabled, provider === self.provider else { return }
     // CallKit activated the system audio session, so this is the only place
     // that may start LiveKit's engine (capture/playback), inside the
     // system-managed window. The engine only starts once the category has
@@ -1254,6 +1323,7 @@ extension CallKitController: CXProviderDelegate {
   }
 
   func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {
+    guard !callKitDisabled, provider === self.provider else { return }
     // CallKit ended the audio window: suspend the LiveKit engine immediately.
     setEngine(.none, reason: "CallKit deactivated the audio session")
     DispatchQueue.main.async { UIApplication.shared.isIdleTimerDisabled = false }

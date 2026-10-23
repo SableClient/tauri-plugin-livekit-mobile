@@ -1263,6 +1263,7 @@ final class RoomController: NSObject {
     if let roomToClose {
       await roomToClose.disconnect()
     }
+    callKitController?.refreshRegion()
   }
 
   private func applyConnectionState(
