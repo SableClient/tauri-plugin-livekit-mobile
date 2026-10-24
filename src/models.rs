@@ -380,6 +380,9 @@ pub struct ConnectNativeCallRequest {
     /// Omitted means every effect on, which is both SDKs' own default.
     #[serde(default)]
     pub audio_processing: AudioProcessingOptions,
+    /// iOS only: the name shown in CallKit.
+    #[serde(default)]
+    pub caller_name: Option<String>,
 }
 
 // Token and key material must never land in logs: redact them in `Debug`.
@@ -394,6 +397,7 @@ impl std::fmt::Debug for ConnectNativeCallRequest {
             .field("ice_servers", &self.ice_servers)
             .field("reconnect_attempts", &self.reconnect_attempts)
             .field("audio_processing", &self.audio_processing)
+            .field("caller_name", &self.caller_name)
             .finish()
     }
 }
@@ -677,6 +681,8 @@ pub struct NativeConnectCallFields<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reconnect_attempts: Option<u32>,
     pub audio_processing: AudioProcessingOptions,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caller_name: Option<&'a str>,
 }
 
 // Token and key material must never land in logs: redact them in `Debug`.
@@ -691,6 +697,7 @@ impl std::fmt::Debug for NativeConnectCallFields<'_> {
             .field("ice_servers", &self.ice_servers)
             .field("reconnect_attempts", &self.reconnect_attempts)
             .field("audio_processing", &self.audio_processing)
+            .field("caller_name", &self.caller_name)
             .finish()
     }
 }
@@ -1022,6 +1029,7 @@ mod tests {
         assert_eq!(request.call_id, "call-1");
         // Omitted `encryptionKeys`: ordinary unencrypted call.
         assert!(request.encryption_keys.is_empty());
+        assert!(request.caller_name.is_none());
         let debug = format!("{request:?}");
         assert!(debug.contains("[redacted]"));
         assert!(!debug.contains("secret-jwt"));
@@ -1094,6 +1102,7 @@ mod tests {
             ice_servers: None,
             reconnect_attempts: None,
             audio_processing: AudioProcessingOptions::default(),
+            caller_name: None,
         };
         // No E2EE keys: the `encryptionKeys` key is omitted entirely, so
         // natives that predate the field see an unchanged payload.
@@ -1265,6 +1274,7 @@ mod tests {
                     noise_suppression: false,
                     auto_gain_control: true,
                 },
+                caller_name: Some("Room A"),
             }),
             serde_json::json!({
                 "callId": "call-1",
@@ -1286,7 +1296,8 @@ mod tests {
                     "echoCancellation": false,
                     "noiseSuppression": false,
                     "autoGainControl": true
-                }
+                },
+                "callerName": "Room A"
             })
         );
     }

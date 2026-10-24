@@ -251,6 +251,28 @@ final class RoomController: NSObject {
     // CallKit grants its audio window.
     callKitController?.suspendEngineUntilActivation()
 
+    // CallKit has to accept the call before connecting; answered calls already did.
+    var outgoingCall: UUID?
+    if let callerName = args.callerName, let callKitController,
+      callKitController.isCallKitAvailable, !callKitController.hasAnsweredCall
+    {
+      let uuid = UUID()
+      let failure = await withCheckedContinuation { continuation in
+        callKitController.startOutgoingCall(
+          uuid: uuid, callId: args.callId, callerName: callerName
+        ) { continuation.resume(returning: $0) }
+      }
+      guard attemptId == attempt else {
+        rejectCancelled(invoke)
+        return
+      }
+      if let failure {
+        failConnect(invoke, error: BridgeError(failure))
+        return
+      }
+      outgoingCall = uuid
+    }
+
     // Frame-only E2EE via the legacy options: the newer EncryptionOptions
     // also encrypts data channels, which the web peers do not support.
     let e2eeOptions = keyProvider.map { E2EEOptions(keyProvider: $0) }
@@ -275,6 +297,9 @@ final class RoomController: NSObject {
       }
       await newRoom.disconnect()
       if room === newRoom { room = nil }
+      if outgoingCall != nil {
+        callKitController?.endCall(callId: args.callId, remoteEnded: true, reason: .failed)
+      }
       failConnect(invoke, error: BridgeError(.connectFailed))
       return
     }
@@ -287,6 +312,7 @@ final class RoomController: NSObject {
     // The delegate hop for the connected transition may still be queued; sync
     // from the room so the resolved snapshot is exact (the hop deduplicates).
     applyConnectionState(.connected, from: newRoom)
+    if let outgoingCall { callKitController?.reportConnected(uuid: outgoingCall) }
 
     if args.microphoneEnabled {
       do {

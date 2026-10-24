@@ -85,6 +85,7 @@ export type ConnectNativeCallRequest = {
   microphoneEnabled: boolean;
   encryptionKeys?: NativeCallEncryptionKeyPayload[];
   audioProcessing?: NativeCallAudioProcessing;
+  callerName?: string;
 };
 
 export type SetNativeCallEncryptionKeyRequest = {

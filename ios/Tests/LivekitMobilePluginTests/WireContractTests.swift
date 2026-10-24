@@ -260,6 +260,22 @@ final class WireContractTests: XCTestCase {
     XCTAssertEqual(args.token, "T0K3N")
     XCTAssertTrue(args.microphoneEnabled)
     XCTAssertEqual(try XCTUnwrap(args.channel).id, 7)
+    XCTAssertNil(args.callerName)
+  }
+
+  func testConnectArgsDecodeCallerName() throws {
+    let (invoke, _) = makeInvoke(data: """
+      {
+        "callId": "call-1",
+        "url": "wss://example.test",
+        "token": "T0K3N",
+        "microphoneEnabled": true,
+        "channel": "__CHANNEL__:7",
+        "callerName": "Room A"
+      }
+      """)
+    let args = try invoke.parseArgs(ConnectArgs.self)
+    XCTAssertEqual(args.callerName, "Room A")
   }
 
   func testConnectArgsDecodeOptionalAudioProcessing() throws {

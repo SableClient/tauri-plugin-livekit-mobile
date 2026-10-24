@@ -77,6 +77,9 @@ final class CallKitController: NSObject {
   /// system UI and is deferred until JS confirms.
   private var appRequestedActions: Set<UUID> = []
 
+  private var answeredCalls: Set<UUID> = []
+  var hasAnsweredCall: Bool { !answeredCalls.isEmpty }
+
   /// Actions deferred until providerDidBegin fires.
   private var pendingStartupActions: [() -> Void] = []
 
@@ -339,6 +342,7 @@ final class CallKitController: NSObject {
       endedCallIds.insert(callId)
     }
     appRequestedActions.remove(uuid)
+    answeredCalls.remove(uuid)
     incomingPayloads.removeValue(forKey: uuid)
     systemState[uuid] = .removed
   }
@@ -500,6 +504,7 @@ final class CallKitController: NSObject {
     ) { [weak self] error in
       if let error {
         log("CXStartCallAction error: \(error.localizedDescription)")
+        self?.forget(uuid: uuid)
         outcome(Self.bridgeCode(for: error))
       } else {
         self?.systemState[uuid] = .reported
@@ -1162,6 +1167,7 @@ extension CallKitController: CXProviderDelegate {
       return
     }
     let uuid = action.callUUID
+    answeredCalls.insert(uuid)
 
     // Re-gate audio engine before activation.
     setEngine(.none, reason: "answering call")

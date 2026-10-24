@@ -469,6 +469,7 @@ impl<R: Runtime> Actor<R> {
                     ice_servers: request.ice_servers.as_deref(),
                     reconnect_attempts: request.reconnect_attempts,
                     audio_processing: request.audio_processing,
+                    caller_name: request.caller_name.as_deref(),
                 },
                 channel,
             })
@@ -650,6 +651,7 @@ mod tests {
             encryption_keys: Vec::new(),
             ice_servers: None,
             reconnect_attempts: None,
+            caller_name: None,
         }
     }
 

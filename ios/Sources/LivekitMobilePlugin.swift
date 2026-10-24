@@ -79,6 +79,7 @@ struct ConnectArgs: Decodable {
   let channel: Channel?
   let iceServers: [BridgeIceServer]?
   let reconnectAttempts: Int?
+  let callerName: String?
 }
 
 struct EncryptionKeyPayload: Decodable {

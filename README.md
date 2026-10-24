@@ -207,6 +207,8 @@ const state = await connectNativeCall({
   microphoneEnabled: true,
   // Omitted means every effect on, which is both SDKs' own default.
   audioProcessing: { noiseSuppression: false },
+  // iOS only: the name shown in CallKit.
+  callerName: 'Room name',
 });
 
 await setNativeCallMicrophoneEnabled({ callId: 'mxc-call-id', enabled: false });
