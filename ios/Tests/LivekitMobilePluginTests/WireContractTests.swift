@@ -114,6 +114,22 @@ final class WireContractTests: XCTestCase {
     return (invoke, recording)
   }
 
+  func testPushedInvitationIdentitySurvivesSystemActions() throws {
+    let answer = try jsonObject(
+      SystemCallAction.answer(
+        uuid: "system-uuid", roomId: "!room:example.org", callerName: "Caller",
+        notificationEventId: "$invite", hasVideo: true))
+    XCTAssertEqual(answer["notificationEventId"] as? String, "$invite")
+    XCTAssertEqual(answer["hasVideo"] as? Bool, true)
+    let decline = try jsonObject(
+      SystemCallAction.end(
+        uuid: "system-uuid", roomId: "!room:example.org", notificationEventId: "$invite"))
+    XCTAssertEqual(decline["roomId"] as? String, "!room:example.org")
+    XCTAssertEqual(decline["notificationEventId"] as? String, "$invite")
+    let end = try jsonObject(SystemCallAction.end(uuid: "system-uuid"))
+    XCTAssertNil(end["notificationEventId"])
+  }
+
   // MARK: - Bounded wire values
 
   func testConnectionStateWireValues() throws {

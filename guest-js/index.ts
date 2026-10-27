@@ -202,6 +202,8 @@ export type SystemCallAction = {
   muted?: boolean;
   roomId?: string;
   callerName?: string;
+  notificationEventId?: string;
+  hasVideo?: boolean;
 };
 
 const NATIVE_CALL_EVENT = 'plugin:livekit-mobile://native-call-event';

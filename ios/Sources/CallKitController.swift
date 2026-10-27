@@ -360,6 +360,8 @@ final class CallKitController: NSObject {
   struct IncomingCallPayload {
     let roomId: String
     let callerName: String
+    let notificationEventId: String?
+    let hasVideo: Bool
   }
   private var incomingPayloads: [UUID: IncomingCallPayload] = [:]
 
@@ -377,10 +379,15 @@ final class CallKitController: NSObject {
   /// completion handler and the JS invoke both hang off it.
   func reportIncomingCall(
     uuid: UUID, callerName: String, roomId: String? = nil, hasVideo: Bool = false,
+    notificationEventId: String? = nil,
     outcome: @escaping (BridgeFailureCode?) -> Void = { _ in }
   ) {
     guard !callKitDisabled else {
       outcome(.unavailable)
+      return
+    }
+    if callByUUID[uuid] != nil {
+      outcome(nil)
       return
     }
     // Registered under the UUID string until `answerCall` binds the real
@@ -388,12 +395,14 @@ final class CallKitController: NSObject {
     bind(uuid: uuid, callId: uuid.uuidString)
     systemState[uuid] = .pending
     if let roomId {
-      incomingPayloads[uuid] = IncomingCallPayload(roomId: roomId, callerName: callerName)
+      incomingPayloads[uuid] = IncomingCallPayload(
+        roomId: roomId, callerName: callerName, notificationEventId: notificationEventId,
+        hasVideo: hasVideo)
     }
 
     let update = CXCallUpdate()
     update.localizedCallerName = callerName
-    update.hasVideo = hasVideo  // a VoIP push carries no intent, so it stays off there
+    update.hasVideo = hasVideo
     update.supportsGrouping = false
     update.supportsUngrouping = false
     update.supportsDTMF = false
@@ -1064,8 +1073,22 @@ extension CallKitController: PKPushRegistryDelegate {
     }
 
     log("VoIP push received for room \(roomId)")
-    reportIncomingCall(uuid: uuid, callerName: callerName, roomId: roomId) { _ in
+    let expiresAt = dict["expires_at"] as? TimeInterval
+    reportIncomingCall(
+      uuid: uuid, callerName: callerName, roomId: roomId,
+      hasVideo: dict["has_video"] as? Bool ?? false,
+      notificationEventId: dict["notification_event_id"] as? String
+    ) { [weak self] error in
       completion()
+      guard error == nil, let expiresAt else { return }
+      DispatchQueue.main.asyncAfter(
+        deadline: .now() + max(0, expiresAt - Date().timeIntervalSince1970)
+      ) {
+        guard let self, self.incomingPayloads[uuid] != nil,
+          !self.answeredCalls.contains(uuid)
+        else { return }
+        self.endCall(callId: uuid.uuidString, remoteEnded: true, reason: .unanswered)
+      }
     }
   }
 }
@@ -1187,7 +1210,8 @@ extension CallKitController: CXProviderDelegate {
       pendingAnswerActions[uuid] = (action: action, enqueuedAt: .now())
       let payload = incomingPayloads[uuid]
       let answerAction = SystemCallAction.answer(
-        uuid: uuid.uuidString, roomId: payload?.roomId, callerName: payload?.callerName)
+        uuid: uuid.uuidString, roomId: payload?.roomId, callerName: payload?.callerName,
+        notificationEventId: payload?.notificationEventId, hasVideo: payload?.hasVideo)
       enqueue(answerAction)
       triggerToJS("callkit_event", data: answerAction)
       // Safety timer: auto-fail if JS never responds within 30s.
@@ -1222,8 +1246,12 @@ extension CallKitController: CXProviderDelegate {
       // that may never arrive. The action is still published so JS can
       // reconcile whenever it resumes.
       let endedCallId = callByUUID[uuid]
-      enqueue(.end(uuid: uuid.uuidString))
-      triggerToJS("callkit_event", data: .end(uuid: uuid.uuidString))
+      let payload = incomingPayloads[uuid]
+      let endAction = SystemCallAction.end(
+        uuid: uuid.uuidString, roomId: payload?.roomId,
+        notificationEventId: answeredCalls.contains(uuid) ? nil : payload?.notificationEventId)
+      enqueue(endAction)
+      triggerToJS("callkit_event", data: endAction)
       setEngine(.none, reason: "system-initiated end")
       forget(uuid: uuid)
       Task { @MainActor [weak self] in
@@ -1350,21 +1378,32 @@ struct SystemCallAction: Codable {
   let action: SystemCallActionKind
   let uuid: String
   let muted: Bool?  // only meaningful for .mute
-  /// Invitation identity from the VoIP push that reported the call. Only ever
-  /// present on `.answer`, and only when the call arrived through PushKit.
   let roomId: String?
   let callerName: String?
+  let notificationEventId: String?
+  let hasVideo: Bool?
 
-  static func answer(uuid: String, roomId: String? = nil, callerName: String? = nil) -> Self {
-    Self(action: .answer, uuid: uuid, muted: nil, roomId: roomId, callerName: callerName)
+  static func answer(
+    uuid: String, roomId: String? = nil, callerName: String? = nil,
+    notificationEventId: String? = nil, hasVideo: Bool? = nil
+  ) -> Self {
+    Self(
+      action: .answer, uuid: uuid, muted: nil, roomId: roomId, callerName: callerName,
+      notificationEventId: notificationEventId, hasVideo: hasVideo)
   }
 
-  static func end(uuid: String) -> Self {
-    Self(action: .end, uuid: uuid, muted: nil, roomId: nil, callerName: nil)
+  static func end(
+    uuid: String, roomId: String? = nil, notificationEventId: String? = nil
+  ) -> Self {
+    Self(
+      action: .end, uuid: uuid, muted: nil, roomId: roomId, callerName: nil,
+      notificationEventId: notificationEventId, hasVideo: nil)
   }
 
   static func mute(uuid: String, muted: Bool) -> Self {
-    Self(action: .mute, uuid: uuid, muted: muted, roomId: nil, callerName: nil)
+    Self(
+      action: .mute, uuid: uuid, muted: muted, roomId: nil, callerName: nil,
+      notificationEventId: nil, hasVideo: nil)
   }
 }
 
