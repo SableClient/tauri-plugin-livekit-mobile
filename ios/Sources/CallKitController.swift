@@ -138,7 +138,7 @@ final class CallKitController: NSObject {
 
   private var regionAllowsCallKit: Bool {
     CallKitRegion.isAllowed(
-      deviceRegion: Locale.autoupdatingCurrent.region?.identifier,
+      deviceRegion: Locale.autoupdatingCurrent.regionCode,
       storefrontCountry: storefrontCountry)
   }
 

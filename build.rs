@@ -36,7 +36,7 @@ const PLUGIN_ENTRY: &str = "_init_plugin_livekit_mobile";
 
 /// Must match `platforms: [.iOS(...)]` in `ios/Package.swift`.
 #[cfg(target_os = "macos")]
-const IOS_DEPLOYMENT_TARGET: &str = "16.0";
+const IOS_DEPLOYMENT_TARGET: &str = "15.4";
 
 fn main() {
     // `ios_path` is deliberately unset: it links via swift-rs, which builds for

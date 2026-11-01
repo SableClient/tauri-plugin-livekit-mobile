@@ -10,7 +10,7 @@ import PackageDescription
 let package = Package(
   name: "tauri-plugin-livekit-mobile",
   platforms: [
-    .iOS(.v16),
+    .iOS("15.4"),
     // LiveKit declares macOS support, so this package must declare it too.
     .macOS(.v12),
   ],
