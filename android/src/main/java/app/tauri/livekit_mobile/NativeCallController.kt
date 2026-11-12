@@ -1382,8 +1382,6 @@ internal class NativeCallController(
     }
 }
 
-/** The source is fixed when the room's audio module is built, so a change made
- * during a call applies from the next one. */
 internal fun captureAudioSource(noiseSuppression: Boolean, unprocessedSupported: Boolean): Int =
     when {
         noiseSuppression -> MediaRecorder.AudioSource.VOICE_COMMUNICATION
