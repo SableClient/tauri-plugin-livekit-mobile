@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
+import android.media.MediaRecorder
 import android.os.Build
 import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
@@ -152,6 +153,11 @@ internal class NativeCallController(
         preferredInputId = device.id
         return true
     }
+
+    private fun supportsUnprocessedAudio(): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.N &&
+            (appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager)
+                .getProperty(AudioManager.PROPERTY_SUPPORT_AUDIO_SOURCE_UNPROCESSED) == "true"
 
     @RequiresApi(Build.VERSION_CODES.M)
     private fun inputDevices(): List<AudioDeviceInfo> =
@@ -331,6 +337,14 @@ internal class NativeCallController(
                                 audioOptions = AudioOptions(
                                     audioHandler = AudioSwitchHandler(appContext).also {
                                         audioHandler = it
+                                    },
+                                    javaAudioDeviceModuleCustomizer = { builder ->
+                                        builder.setAudioSource(
+                                            captureAudioSource(
+                                                processing.noiseSuppression,
+                                                supportsUnprocessedAudio(),
+                                            ),
+                                        )
                                     },
                                 ),
                             ),
@@ -1367,3 +1381,12 @@ internal class NativeCallController(
         const val CAMERA_SWITCH_TIMEOUT_MS = 5_000L
     }
 }
+
+/** The source is fixed when the room's audio module is built, so a change made
+ * during a call applies from the next one. */
+internal fun captureAudioSource(noiseSuppression: Boolean, unprocessedSupported: Boolean): Int =
+    when {
+        noiseSuppression -> MediaRecorder.AudioSource.VOICE_COMMUNICATION
+        unprocessedSupported -> MediaRecorder.AudioSource.UNPROCESSED
+        else -> MediaRecorder.AudioSource.VOICE_RECOGNITION
+    }
