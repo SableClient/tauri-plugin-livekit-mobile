@@ -67,6 +67,23 @@ internal data class OverlaySpec(
     val devicePixelRatio: Double,
 )
 
+/**
+ * Shrinks a slot to the largest centred box with the frame's aspect ratio.
+ * The renderer crops every frame to its own bounds whatever its scaling type,
+ * so a screen share only shows whole when the view itself is letterboxed.
+ * Fits against the unclipped slot; clipping to the viewport happens after.
+ */
+internal fun letterboxSpec(spec: OverlaySpec, frameWidth: Int, frameHeight: Int): OverlaySpec {
+    if (frameWidth <= 0 || frameHeight <= 0) return spec
+    val frameAspect = frameWidth.toDouble() / frameHeight
+    if (spec.width / spec.height > frameAspect) {
+        val width = spec.height * frameAspect
+        return spec.copy(x = spec.x + (spec.width - width) / 2, width = width)
+    }
+    val height = spec.width / frameAspect
+    return spec.copy(y = spec.y + (spec.height - height) / 2, height = height)
+}
+
 /** Outcome of pinning an overlay view over a reported rect. */
 internal sealed interface OverlayAttachResult {
     data object Attached : OverlayAttachResult
@@ -267,14 +284,20 @@ internal class RemoteVideoOverlay(
                     try {
                         if (previous == null) {
                             room.initVideoRenderer(view)
+                            view.onFrameSizeChanged = {
+                                if (renderer === view && attachedTrack != null && screenShare) {
+                                    refreshPlacement()
+                                }
+                            }
                         }
                         if (attachedTrack !== track) {
                             attachedTrack?.removeRenderer(view)
+                            view.resetFrameSize()
                             track.addRenderer(view)
                             applyScalingType(view, room, participantIdentity, trackSid)
                         }
 
-                        place(view, webView, parent, rect)
+                        place(view, webView, parent, slotRect(view, webView, spec) ?: rect)
 
                         if (generation != capturedGeneration) {
                             // The marshal timed out / a teardown landed while
@@ -343,6 +366,7 @@ internal class RemoteVideoOverlay(
                         }
                         if (attachedTrack !== resolved) {
                             attachedTrack?.removeRenderer(view)
+                            view.resetFrameSize()
                             resolved.addRenderer(view)
                             attachedTrack = resolved
                             room?.let { applyScalingType(view, it, identity, trackSid) }
@@ -355,16 +379,7 @@ internal class RemoteVideoOverlay(
                                 webViewProvider() ?: return@onMainThread false
                             val parent = webView.parent as? ViewGroup
                                 ?: return@onMainThread false
-                            val rect =
-                                overlayRectFromCss(
-                                    spec.x,
-                                    spec.y,
-                                    spec.width,
-                                    spec.height,
-                                    spec.devicePixelRatio,
-                                    webView.width,
-                                    webView.height,
-                                )
+                            val rect = slotRect(view, webView, spec)
                             // A degenerate viewport keeps the tile hidden; the
                             // sink stays bound so video resumes after layout.
                             if (rect != null) place(view, webView, parent, rect)
@@ -447,17 +462,26 @@ internal class RemoteVideoOverlay(
         val webView = webViewProvider() ?: return
         val parent = webView.parent as? ViewGroup ?: return
         val spec = selectedSpec ?: return
-        val rect =
-            overlayRectFromCss(
-                spec.x,
-                spec.y,
-                spec.width,
-                spec.height,
-                spec.devicePixelRatio,
-                webView.width,
-                webView.height,
-            )
-        place(view, webView, parent, rect)
+        place(view, webView, parent, slotRect(view, webView, spec))
+    }
+
+    /** The spec's physical rect, letterboxed to the frame for a screen share. */
+    private fun slotRect(
+        view: PassThroughVideoRenderer,
+        webView: WebView,
+        spec: OverlaySpec,
+    ): OverlayRect? {
+        val fitted =
+            if (screenShare) letterboxSpec(spec, view.frameWidth, view.frameHeight) else spec
+        return overlayRectFromCss(
+            fitted.x,
+            fitted.y,
+            fitted.width,
+            fitted.height,
+            fitted.devicePixelRatio,
+            webView.width,
+            webView.height,
+        )
     }
 
     /**
@@ -474,7 +498,13 @@ internal class RemoteVideoOverlay(
         rect: OverlayRect?,
     ) {
         val placed =
-            if (fullWindow) OverlayRect(0, 0, webView.width, webView.height) else rect ?: return
+            if (fullWindow) {
+                val window =
+                    OverlaySpec(0.0, 0.0, webView.width.toDouble(), webView.height.toDouble(), 1.0)
+                slotRect(view, webView, window) ?: return
+            } else {
+                rect ?: return
+            }
         applyOverlaySize(view, placed.width, placed.height)
         if (view.parent !== parent) {
             (view.parent as? ViewGroup)?.removeView(view)
@@ -586,11 +616,11 @@ internal class RemoteVideoOverlay(
     }
 
     /**
-     * A shared screen is letterboxed: VideoLayoutMeasure defaults to
-     * SCALE_ASPECT_BALANCED, which crops to fill the tile and cuts the sides
-     * off a desktop shown in a portrait slot. Cameras keep that default, where
-     * filling the tile is what you want. Called only on a rebind: the scaling
-     * follows the bound track, and setScalingType always requests a layout.
+     * Records whether the bound track is a screen share, which [slotRect]
+     * letterboxes. The scaling type only matters to a view measured without
+     * an exact size, so it does not stop the overlay cropping on its own.
+     * Called only on a rebind: the scaling follows the bound track, and
+     * setScalingType always requests a layout.
      */
     private fun applyScalingType(
         view: PassThroughVideoRenderer,

@@ -118,4 +118,26 @@ class RemoteVideoOverlayGeometryTest {
         assertEquals(120f, overlayTranslation(96, 0f, 96, 120), 0f)
         assertEquals(25f, overlayTranslation(80, -15f, 40, 0), 0f)
     }
+
+    @Test
+    fun `a wide frame in a portrait slot is letterboxed top and bottom`() {
+        assertEquals(
+            OverlaySpec(x = 10.0, y = 155.0, width = 160.0, height = 90.0, devicePixelRatio = 2.0),
+            letterboxSpec(OverlaySpec(10.0, 20.0, 160.0, 360.0, 2.0), 1920, 1080),
+        )
+    }
+
+    @Test
+    fun `a tall frame in a landscape slot is pillarboxed left and right`() {
+        assertEquals(
+            OverlaySpec(x = 270.0, y = 0.0, width = 180.0, height = 320.0, devicePixelRatio = 1.0),
+            letterboxSpec(OverlaySpec(0.0, 0.0, 720.0, 320.0, 1.0), 1080, 1920),
+        )
+    }
+
+    @Test
+    fun `an unknown frame size leaves the slot alone`() {
+        val slot = OverlaySpec(0.0, 0.0, 100.0, 50.0, 1.0)
+        assertEquals(slot, letterboxSpec(slot, 0, 0))
+    }
 }
