@@ -1,12 +1,16 @@
 package app.tauri.livekit_mobile
 
+import app.tauri.plugin.JSObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
+@RunWith(RobolectricTestRunner::class)
 class NativeCallSnapshotTest {
     @Test
     fun `default snapshot is the idle snapshot`() {
@@ -204,5 +208,30 @@ class NativeCallSnapshotTest {
             base.copy(remoteParticipants = listOf(NativeRemoteParticipant(identity = "alice")))
         assertNotEquals(base, audioOnly)
         assertNotEquals(muted, audioOnly)
+    }
+
+    @Test
+    fun `toIdle clears the subscriber backends`() {
+        val active =
+            NativeCallSnapshot(
+                callId = "a",
+                connectionState = NativeCallWire.STATE_CONNECTED,
+                subscriberBackends = listOf("b"),
+            )
+        assertTrue(active.toIdle().subscriberBackends.isEmpty())
+    }
+
+    @Test
+    fun `subscriber backends are omitted from the json when empty`() {
+        val json = JSObject().apply { putSubscriberBackends(emptyList()) }
+        assertFalse(json.has("subscriberBackends"))
+    }
+
+    @Test
+    fun `subscriber backends are listed in the json`() {
+        val json = JSObject().apply { putSubscriberBackends(listOf("a", "b")) }
+        assertEquals(listOf("a", "b"), json.getJSONArray("subscriberBackends").let { array ->
+            (0 until array.length()).map { array.getString(it) }
+        })
     }
 }

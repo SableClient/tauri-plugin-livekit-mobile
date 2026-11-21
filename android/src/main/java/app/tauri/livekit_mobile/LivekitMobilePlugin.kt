@@ -105,6 +105,20 @@ internal class SetNativeCallEncryptionKeyArgs {
 }
 
 @InvokeArg
+internal class NativeCallBackendEntry {
+    var id: String = ""
+    var url: String = ""
+    var token: String = ""
+}
+
+@InvokeArg
+internal class ReconcileNativeCallBackendsArgs {
+    var callId: String = ""
+    var publisherId: String = ""
+    var backends: List<NativeCallBackendEntry> = emptyList()
+}
+
+@InvokeArg
 internal class SetNativeCallPiPEnabledArgs {
     var callId: String = ""
     var enabled: Boolean = false
@@ -700,6 +714,23 @@ class LivekitMobilePlugin(private val activity: Activity) : Plugin(activity) {
             return
         }
         controller.setEncryptionKey(args.callId, material, invoke)
+    }
+
+    @Command
+    fun reconcileNativeCallBackends(invoke: Invoke) {
+        val args =
+            runCatching { invoke.parseArgs(ReconcileNativeCallBackendsArgs::class.java) }
+                .getOrNull()
+        val backends = args?.backends?.map { NativeCallBackend(it.id, it.url, it.token) }
+        if (args == null ||
+            args.callId.isBlank() ||
+            backends == null ||
+            !isValidBackendSet(args.publisherId, backends)
+        ) {
+            reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
+            return
+        }
+        controller.reconcileBackends(args.callId, args.publisherId, backends, invoke)
     }
 
     @Command

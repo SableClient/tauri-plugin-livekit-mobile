@@ -235,7 +235,7 @@ internal class RemoteVideoOverlay(
      * selection-less state.
      */
     fun attach(
-        room: Room,
+        rooms: List<Room>,
         participantIdentity: String,
         trackSid: String,
         x: Double,
@@ -245,8 +245,9 @@ internal class RemoteVideoOverlay(
         devicePixelRatio: Double,
     ): OverlayAttachResult {
         val spec = OverlaySpec(x, y, width, height, devicePixelRatio)
-        val track = resolveSubscribedVideoTrack(room, participantIdentity, trackSid)
-        if (track == null) {
+        val room = owningRoom(rooms, participantIdentity, trackSid)
+        val track = room?.let { resolveSubscribedVideoTrack(it, participantIdentity, trackSid) }
+        if (room == null || track == null) {
             // Record the selection so a later publish rebinds automatically;
             // hide any current tile without forgetting it.
             selectedIdentity = participantIdentity
@@ -334,16 +335,17 @@ internal class RemoteVideoOverlay(
      * - DETACHED + selection back (publish/subscribe) → rebind + show.
      * Any failure clears fully. No-op while nothing is selected.
      */
-    fun reconcile(room: Room?) {
+    fun reconcile(rooms: List<Room>) {
         val identity = selectedIdentity ?: return
         val trackSid = selectedTrackSid ?: return
         val spec = selectedSpec ?: return
+        val room = owningRoom(rooms, identity, trackSid)
         val resolved = room?.let { resolveSubscribedVideoTrack(it, identity, trackSid) }
         val view = renderer
         if (view == null) {
             // Nothing to detach; reattach from scratch once the track exists.
             if (room != null && resolved != null) {
-                attach(room, identity, trackSid, spec.x, spec.y, spec.width, spec.height,
+                attach(rooms, identity, trackSid, spec.x, spec.y, spec.width, spec.height,
                     spec.devicePixelRatio)
             }
             return
@@ -596,6 +598,13 @@ internal class RemoteVideoOverlay(
         trackSid: String,
     ): VideoTrack? =
         resolveSubscribedPublication(room, participantIdentity, trackSid)?.track as? VideoTrack
+
+    private fun owningRoom(
+        rooms: List<Room>,
+        participantIdentity: String,
+        trackSid: String,
+    ): Room? =
+        rooms.firstOrNull { resolveSubscribedVideoTrack(it, participantIdentity, trackSid) != null }
 
     private fun resolveSubscribedPublication(
         room: Room,

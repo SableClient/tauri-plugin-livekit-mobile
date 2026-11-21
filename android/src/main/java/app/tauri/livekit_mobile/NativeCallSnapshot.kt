@@ -1,5 +1,8 @@
 package app.tauri.livekit_mobile
 
+import app.tauri.plugin.JSArray
+import app.tauri.plugin.JSObject
+
 internal data class NativeRemoteParticipant(
     val identity: String,
     val camera: Camera? = null,
@@ -8,6 +11,9 @@ internal data class NativeRemoteParticipant(
     val microphone: Microphone? = null,
     val connectionQuality: String? = null,
 ) {
+    val publishes: Boolean
+        get() = camera != null || screenShare != null || screenShareAudio != null || microphone != null
+
     internal data class Camera(
         val sid: String,
         val muted: Boolean,
@@ -42,6 +48,7 @@ internal data class NativeCallSnapshot(
     val remoteParticipants: List<NativeRemoteParticipant> = emptyList(),
     val lastErrorCode: String? = null,
     val localConnectionQuality: String? = null,
+    val subscriberBackends: List<String> = emptyList(),
 ) {
     /** True while a connect is in flight or a room is up. */
     val isActive: Boolean
@@ -59,6 +66,7 @@ internal data class NativeCallSnapshot(
             remoteParticipants = emptyList(),
             lastErrorCode = null,
             localConnectionQuality = null,
+            subscriberBackends = emptyList(),
         )
 
     companion object {
@@ -69,4 +77,22 @@ internal data class NativeCallSnapshot(
                 NativeCallWire.STATE_RECONNECTING,
             )
     }
+}
+
+/** A participant can be in several rooms of a call and publishes in one, so
+ * the entry with publications wins; the earlier room wins a tie. */
+internal fun mergeRemoteParticipants(
+    rooms: List<List<NativeRemoteParticipant>>,
+): List<NativeRemoteParticipant> {
+    val merged = mutableMapOf<String, NativeRemoteParticipant>()
+    for (participant in rooms.flatten()) {
+        val seen = merged[participant.identity]
+        if (seen != null && (seen.publishes || !participant.publishes)) continue
+        merged[participant.identity] = participant
+    }
+    return merged.values.sortedBy { it.identity }
+}
+
+internal fun JSObject.putSubscriberBackends(ids: List<String>) {
+    if (ids.isNotEmpty()) put("subscriberBackends", JSArray(ids))
 }

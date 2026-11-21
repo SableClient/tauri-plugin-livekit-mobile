@@ -11,7 +11,7 @@ internal class RemoteVideoOverlays(
     @Volatile private var takeover: RemoteVideoOverlay? = null
 
     fun attach(
-        room: Room,
+        rooms: List<Room>,
         participantIdentity: String,
         trackSid: String,
         x: Double,
@@ -24,7 +24,7 @@ internal class RemoteVideoOverlays(
             tiles.getOrPut(trackSid) { RemoteVideoOverlay(webViewProvider) }
         }
         return tile.attach(
-            room,
+            rooms,
             participantIdentity,
             trackSid,
             x,
@@ -35,8 +35,8 @@ internal class RemoteVideoOverlays(
         )
     }
 
-    fun reconcile(room: Room?) {
-        all().forEach { it.reconcile(room) }
+    fun reconcile(rooms: List<Room>) {
+        all().forEach { it.reconcile(rooms) }
     }
 
     fun clear(trackSid: String) {

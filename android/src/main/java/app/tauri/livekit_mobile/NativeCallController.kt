@@ -17,7 +17,9 @@ import io.livekit.android.LiveKit
 import io.livekit.android.AudioOptions
 import io.livekit.android.LiveKitOverrides
 import io.livekit.android.RoomOptions
+import io.livekit.android.audio.AudioHandler
 import io.livekit.android.audio.AudioSwitchHandler
+import io.livekit.android.audio.NoAudioHandler
 import io.livekit.android.audio.ScreenAudioCapturer
 import com.twilio.audioswitch.AudioDevice
 import io.livekit.android.e2ee.E2EEOptions
@@ -45,7 +47,10 @@ import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.job
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.coroutines.coroutineContext
+import livekit.org.webrtc.EglBase
 import livekit.org.webrtc.audio.JavaAudioDeviceModule
 import org.json.JSONObject
 
@@ -80,7 +85,17 @@ internal class NativeCallController(
     private var channel: Channel? = null
     private var room: Room? = null
 
-    /** Per-call E2EE state; set before room.connect, destroyed with the room. */
+    private val subscribers = mutableMapOf<String, SubscriberRoom>()
+
+    private var publisherUrl: String? = null
+
+    /** Shared by every room of the call so a renderer stays valid when its
+     * track moves to another room. */
+    private var eglBase: EglBase? = null
+
+    /** Per-call E2EE state; set before room.connect, destroyed with the rooms.
+     * One provider serves every room of the call: the SDK only reads it and
+     * never disposes it. */
     private var e2ee: NativeCallE2EEKeys? = null
     private var eventJob: Job? = null
     private var connectJob: Job? = null
@@ -277,6 +292,7 @@ internal class NativeCallController(
             current.localConnectionQuality?.let { quality ->
                 put("localConnectionQuality", quality)
             }
+            putSubscriberBackends(current.subscriberBackends)
         }
     }
 
@@ -320,35 +336,11 @@ internal class NativeCallController(
 
                 val newRoom =
                     try {
-                        // Both default to false in the SDK; iOS enables both, and
-                        // Android is the platform that can least afford to send
-                        // and decode layers nobody is displaying.
-                        LiveKit.create(
-                            appContext,
-                            RoomOptions(
-                                adaptiveStream = true,
-                                dynacast = true,
-                                audioTrackCaptureDefaults = audioProcessing,
-                            ),
-                            // Owning the handler is what makes the route picker
-                            // work; a Telecom endpoint change is overridden
-                            // before it can be confirmed.
-                            LiveKitOverrides(
-                                audioOptions = AudioOptions(
-                                    audioHandler = AudioSwitchHandler(appContext).also {
-                                        audioHandler = it
-                                    },
-                                    javaAudioDeviceModuleCustomizer = { builder ->
-                                        builder.setAudioSource(
-                                            captureAudioSource(
-                                                processing.noiseSuppression,
-                                                supportsUnprocessedAudio(),
-                                            ),
-                                        )
-                                    },
-                                ),
-                            ),
-                        )
+                        eglBase = EglBase.create()
+                        // Owning the handler is what makes the route picker
+                        // work; a Telecom endpoint change is overridden
+                        // before it can be confirmed.
+                        createRoom(AudioSwitchHandler(appContext).also { audioHandler = it })
                     } catch (_: Exception) {
                         failConnect(currentAttempt, null, invoke, NativeCallWire.ERR_CONNECT_FAILED)
                         return@launch
@@ -372,9 +364,7 @@ internal class NativeCallController(
                         val keys = NativeCallE2EEKeys()
                         e2ee = keys
                         encryptionKeys.forEach(keys::install)
-                        newRoom.e2eeOptions = E2EEOptions(keyProvider = keys)
-                        newRoom.audioTrackPublishDefaults =
-                            newRoom.audioTrackPublishDefaults.copy(red = false)
+                        enableE2EE(newRoom, keys)
                     } catch (_: Exception) {
                         failConnect(
                             currentAttempt,
@@ -428,6 +418,7 @@ internal class NativeCallController(
                     return@launch
                 }
 
+                publisherUrl = url
                 transition {
                     copy(
                         connectionState = NativeCallWire.STATE_CONNECTED,
@@ -521,8 +512,7 @@ internal class NativeCallController(
     }
 
     private fun applyParticipantVolumes() {
-        val participants = room?.remoteParticipants ?: return
-        participants.forEach { (identity, participant) ->
+        callRooms().flatMap { it.remoteParticipants.entries }.forEach { (identity, participant) ->
             participant.trackPublications.values
                 .filter {
                     it.source == Track.Source.MICROPHONE || it.source == Track.Source.SCREEN_SHARE_AUDIO
@@ -928,7 +918,7 @@ internal class NativeCallController(
             }
             when (
                 videoOverlay.attach(
-                    currentRoom,
+                    callRooms(),
                     participantIdentity,
                     trackSid,
                     x,
@@ -1038,6 +1028,229 @@ internal class NativeCallController(
         }
     }
 
+    fun reconcileBackends(
+        callId: String,
+        publisherId: String,
+        backends: List<NativeCallBackend>,
+        invoke: Invoke,
+    ) {
+        scope.launch {
+            if (!isActiveCall(callId)) {
+                invoke.resolve(snapshotJson())
+                return@launch
+            }
+            val publisher = backends.firstOrNull { it.id == publisherId }
+            if (snapshot.connectionState != NativeCallWire.STATE_CONNECTED || publisher == null) {
+                reject(invoke, NativeCallWire.ERR_INVALID_REQUEST)
+                return@launch
+            }
+            val wanted = backends.filter { it.id != publisherId }
+            subscribers.keys
+                .filter { id -> wanted.none { it.id == id } }
+                .forEach { id -> subscribers.remove(id)?.let(::closeSubscriber) }
+            if (publisherUrl != publisher.url && !movePublisher(publisher, invoke)) return@launch
+            wanted.filter { it.id !in subscribers }.forEach(::connectSubscriber)
+            refreshCallParticipants()
+            invoke.resolve(snapshotJson())
+        }
+    }
+
+    private fun connectSubscriber(backend: NativeCallBackend) {
+        val subscriber =
+            try {
+                SubscriberRoom(createRoom(NoAudioHandler()))
+            } catch (_: Exception) {
+                return
+            }
+        subscribers[backend.id] = subscriber
+        subscriber.job =
+            scope.launch {
+                launch {
+                    subscriber.room.events.collect { event ->
+                        if (subscribers[backend.id] === subscriber && subscriber.connected) {
+                            handleSubscriberEvent(backend.id, subscriber, event)
+                        }
+                    }
+                }
+                try {
+                    subscriber.room.connect(backend.url, backend.token)
+                } catch (_: Exception) {
+                    if (subscribers[backend.id] === subscriber) {
+                        subscribers.remove(backend.id)
+                        closeSubscriber(subscriber)
+                    }
+                    return@launch
+                }
+                subscriber.connected = true
+                applyParticipantVolumes()
+                refreshCallParticipants()
+            }
+    }
+
+    /** Subscriber rooms only feed the merged remote participants: the call's
+     * state, media flags and local quality belong to the publisher room. */
+    private fun handleSubscriberEvent(id: String, subscriber: SubscriberRoom, event: RoomEvent) {
+        when (event) {
+            is RoomEvent.Disconnected -> {
+                subscribers.remove(id)
+                closeSubscriber(subscriber)
+                refreshCallParticipants()
+            }
+            is RoomEvent.Connected,
+            is RoomEvent.Reconnecting,
+            is RoomEvent.Reconnected -> Unit
+            is RoomEvent.ConnectionQualityChanged ->
+                if (event.participant is RemoteParticipant) handleRoomEvent(event)
+            else -> handleRoomEvent(event)
+        }
+    }
+
+    private fun closeSubscriber(subscriber: SubscriberRoom) {
+        subscriber.job?.cancel()
+        runCatching { subscriber.room.disconnect() }
+        runCatching { subscriber.room.release() }
+    }
+
+    private suspend fun movePublisher(backend: NativeCallBackend, invoke: Invoke): Boolean {
+        val oldRoom = room
+        if (oldRoom == null) {
+            reject(invoke, NativeCallWire.ERR_UNAVAILABLE)
+            return false
+        }
+        val currentAttempt = ++attempt
+        connectJob = coroutineContext.job
+        val microphoneWasEnabled = snapshot.microphoneEnabled
+        val cameraWasEnabled = snapshot.cameraEnabled
+        eventJob?.cancel()
+        // The screen share dies with the old room.
+        screenAudio?.releaseAudioResources()
+        screenAudio = null
+        transition {
+            copy(connectionState = NativeCallWire.STATE_RECONNECTING, screenShareEnabled = false)
+        }
+        emitSnapshotChanged()
+
+        val newRoom =
+            try {
+                createRoom(AudioSwitchHandler(appContext).also { audioHandler = it })
+            } catch (_: Exception) {
+                failCall()
+                reject(invoke, NativeCallWire.ERR_CONNECT_FAILED)
+                return false
+            }
+        room = newRoom
+        eventJob =
+            scope.launch {
+                newRoom.events.collect { event ->
+                    if (currentAttempt == attempt && room === newRoom) {
+                        handleRoomEvent(event)
+                    }
+                }
+            }
+        runCatching { oldRoom.disconnect() }
+        runCatching { oldRoom.release() }
+        try {
+            newRoom.connect(backend.url, backend.token)
+        } catch (_: Exception) {
+            if (currentAttempt != attempt) {
+                reject(invoke, NativeCallWire.ERR_CANCELLED)
+            } else {
+                failCall()
+                reject(invoke, NativeCallWire.ERR_CONNECT_FAILED)
+            }
+            return false
+        }
+        if (currentAttempt != attempt || room !== newRoom) {
+            reject(invoke, NativeCallWire.ERR_CANCELLED)
+            return false
+        }
+        publisherUrl = backend.url
+        val microphoneActive =
+            microphoneWasEnabled &&
+                runCatching { newRoom.localParticipant.setMicrophoneEnabled(true) }.isSuccess
+        val cameraActive =
+            cameraWasEnabled &&
+                runCatching { newRoom.localParticipant.setCameraEnabled(true) }.isSuccess
+        if (currentAttempt != attempt || room !== newRoom) {
+            reject(invoke, NativeCallWire.ERR_CANCELLED)
+            return false
+        }
+        transition {
+            copy(
+                connectionState = NativeCallWire.STATE_CONNECTED,
+                microphoneEnabled = microphoneActive,
+                cameraEnabled = cameraActive,
+            ).withCallParticipants()
+        }
+        startCallForegroundService(preferMicrophone = microphoneActive, preferCamera = cameraActive)
+        emitSnapshotChanged()
+        return true
+    }
+
+    private fun createRoom(handler: AudioHandler): Room {
+        val processing = audioProcessing
+        return LiveKit.create(
+            appContext,
+            // Both default to false in the SDK; iOS enables both, and
+            // Android is the platform that can least afford to send
+            // and decode layers nobody is displaying.
+            RoomOptions(
+                adaptiveStream = true,
+                dynacast = true,
+                audioTrackCaptureDefaults = processing,
+            ),
+            LiveKitOverrides(
+                eglBase = eglBase,
+                audioOptions = AudioOptions(
+                    audioHandler = handler,
+                    javaAudioDeviceModuleCustomizer = { builder ->
+                        builder.setAudioSource(
+                            captureAudioSource(
+                                processing.noiseSuppression,
+                                supportsUnprocessedAudio(),
+                            ),
+                        )
+                    },
+                ),
+            ),
+        ).also { created -> e2ee?.let { enableE2EE(created, it) } }
+    }
+
+    private fun enableE2EE(target: Room, keys: NativeCallE2EEKeys) {
+        target.e2eeOptions = E2EEOptions(keyProvider = keys)
+        target.audioTrackPublishDefaults = target.audioTrackPublishDefaults.copy(red = false)
+    }
+
+    private fun callRooms(): List<Room> =
+        listOfNotNull(room) + subscribers.values.filter { it.connected }.map { it.room }
+
+    private fun callParticipantsProjection(): List<NativeRemoteParticipant> =
+        mergeRemoteParticipants(callRooms().map { remoteParticipantsProjection(it) })
+
+    private fun NativeCallSnapshot.withCallParticipants(): NativeCallSnapshot {
+        val participants = callParticipantsProjection()
+        return copy(
+            participantCount = participants.size,
+            remoteParticipants = participants,
+            subscriberBackends = subscribers.filterValues { it.connected }.keys.sorted(),
+        )
+    }
+
+    private fun refreshCallParticipants() {
+        videoOverlay.reconcile(callRooms())
+        val next = snapshot.withCallParticipants()
+        if (next == snapshot) return
+        transition { next }
+        emitSnapshotChanged()
+    }
+
+    private fun forgetVolumesIfGone(identity: String?) {
+        if (identity == null) return
+        val present =
+            callRooms().any { call -> call.remoteParticipants.keys.any { it.value == identity } }
+        if (!present) participantVolumes.keys.removeAll { it.first == identity }
+    }
+
     /** Queues teardown on the bridge thread and blocks the caller briefly so
      * onDestroy guarantees the room is released before the scope is cancelled. */
     fun dispose() {
@@ -1082,16 +1295,22 @@ internal class NativeCallController(
         reject(invoke, code)
     }
 
+    private fun failCall() {
+        transition {
+            copy(
+                connectionState = NativeCallWire.STATE_FAILED,
+                lastErrorCode = NativeCallWire.ERR_DISCONNECTED,
+            )
+        }
+        teardownRoom()
+        stopCallForegroundService()
+        emitSnapshotChanged()
+    }
+
     private fun handleRoomEvent(event: RoomEvent) {
         when (event) {
             is RoomEvent.Connected -> {
-                transition {
-                    copy(
-                        connectionState = NativeCallWire.STATE_CONNECTED,
-                        participantCount = room?.remoteParticipants?.size ?: 0,
-                        remoteParticipants = remoteParticipantsProjection(room),
-                    )
-                }
+                transition { copy(connectionState = NativeCallWire.STATE_CONNECTED).withCallParticipants() }
                 presentOngoing()
                 emitSnapshotChanged()
             }
@@ -1101,46 +1320,22 @@ internal class NativeCallController(
                 emitSnapshotChanged()
             }
             is RoomEvent.Reconnected -> {
-                transition {
-                    copy(
-                        connectionState = NativeCallWire.STATE_CONNECTED,
-                        participantCount = room?.remoteParticipants?.size ?: 0,
-                        remoteParticipants = remoteParticipantsProjection(room),
-                    )
-                }
+                transition { copy(connectionState = NativeCallWire.STATE_CONNECTED).withCallParticipants() }
                 emitSnapshotChanged()
             }
             is RoomEvent.Disconnected -> {
                 if (intentionalDisconnect) return
-                transition {
-                    copy(
-                        connectionState = NativeCallWire.STATE_FAILED,
-                        lastErrorCode = NativeCallWire.ERR_DISCONNECTED,
-                    )
-                }
-                teardownRoom()
-                stopCallForegroundService()
-                emitSnapshotChanged()
+                failCall()
             }
             is RoomEvent.ParticipantConnected -> {
-                transition {
-                    copy(
-                        participantCount = room?.remoteParticipants?.size ?: 0,
-                        remoteParticipants = remoteParticipantsProjection(room),
-                    )
-                }
-                videoOverlay.reconcile(room)
+                transition { withCallParticipants() }
+                videoOverlay.reconcile(callRooms())
                 emitSnapshotChanged()
             }
             is RoomEvent.ParticipantDisconnected -> {
-                participantVolumes.keys.removeAll { it.first == event.participant.identity?.value }
-                transition {
-                    copy(
-                        participantCount = room?.remoteParticipants?.size ?: 0,
-                        remoteParticipants = remoteParticipantsProjection(room),
-                    )
-                }
-                videoOverlay.reconcile(room)
+                forgetVolumesIfGone(event.participant.identity?.value)
+                transition { withCallParticipants() }
+                videoOverlay.reconcile(callRooms())
                 emitSnapshotChanged()
             }
             // Remote publication lifecycle only affects the remote projection;
@@ -1149,7 +1344,7 @@ internal class NativeCallController(
             // retains an unpublished/unsubscribed/replaced track.
             is RoomEvent.TrackPublished -> {
                 applyRemoteProjectionIfChanged(event.participant)
-                videoOverlay.reconcile(room)
+                videoOverlay.reconcile(callRooms())
                 localVideoOverlay.reconcile(room)
             }
             is RoomEvent.TrackUnpublished -> {
@@ -1160,7 +1355,7 @@ internal class NativeCallController(
                     applyParticipantVolumes()
                 }
                 applyRemoteProjectionIfChanged(event.participant)
-                videoOverlay.reconcile(room)
+                videoOverlay.reconcile(callRooms())
                 localVideoOverlay.reconcile(room)
             }
             is RoomEvent.TrackMuted ->
@@ -1170,11 +1365,11 @@ internal class NativeCallController(
             is RoomEvent.TrackSubscribed -> {
                 applyParticipantVolumes()
                 applyRemoteProjectionIfChanged()
-                videoOverlay.reconcile(room)
+                videoOverlay.reconcile(callRooms())
             }
             is RoomEvent.TrackUnsubscribed -> {
                 applyRemoteProjectionIfChanged()
-                videoOverlay.reconcile(room)
+                videoOverlay.reconcile(callRooms())
             }
             is RoomEvent.ConnectionQualityChanged ->
                 if (event.participant is RemoteParticipant) {
@@ -1257,7 +1452,7 @@ internal class NativeCallController(
      * local participants and no-op changes (no revision bump, no emit). */
     private fun applyRemoteProjectionIfChanged(participant: Participant? = null) {
         if (participant != null && participant !is RemoteParticipant) return
-        val projection = remoteParticipantsProjection(room)
+        val projection = callParticipantsProjection()
         if (snapshot.remoteParticipants == projection) return
         transition { copy(remoteParticipants = projection) }
         emitSnapshotChanged()
@@ -1293,11 +1488,16 @@ internal class NativeCallController(
             runCatching { endingRoom.disconnect() }
             runCatching { endingRoom.release() }
         }
-        // Destroy key material and the native provider after the room (and its
-        // frame cryptors) are fully released.
+        subscribers.values.forEach(::closeSubscriber)
+        subscribers.clear()
+        publisherUrl = null
+        // Destroy key material and the native provider after every room (and its
+        // frame cryptors) is fully released.
         val endingKeys = e2ee
         e2ee = null
         endingKeys?.destroy()
+        eglBase?.release()
+        eglBase = null
         onCallEnded()
     }
 
@@ -1374,6 +1574,11 @@ internal class NativeCallController(
         runCatching {
             appContext.stopService(Intent(appContext, LivekitMobileForegroundService::class.java))
         }
+    }
+
+    private class SubscriberRoom(val room: Room) {
+        var job: Job? = null
+        var connected = false
     }
 
     private companion object {
