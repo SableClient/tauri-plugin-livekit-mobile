@@ -22,7 +22,8 @@ use crate::models::{
     ConnectNativeCallRequest, DisconnectNativeCallRequest, EndSystemCallRequest,
     FulfillAnswerCallRequest, FulfillEndCallRequest, GetAudioRoutesRequest, GetAudioRoutesResponse,
     NativeCallCapabilities, NativeCallFailureCode, NativeCallSnapshot,
-    ReconcileNativeCallBackendsRequest, ReportConnectedRequest, ReportIncomingCallRequest, SetAudioInputRequest, SetAudioRouteRequest, SetNativeCallAudioProcessingRequest,
+    ReconcileNativeCallBackendsRequest, ReportConnectedRequest, ReportIncomingCallRequest,
+    SetAudioInputRequest, SetAudioRouteRequest, SetNativeCallAudioProcessingRequest,
     SetNativeCallCameraEnabledRequest, SetNativeCallEncryptionKeyRequest,
     SetNativeCallLocalVideoOverlayRequest, SetNativeCallMicrophoneEnabledRequest,
     SetNativeCallParticipantVolumeRequest, SetNativeCallPiPEnabledRequest,
@@ -680,7 +681,10 @@ mod tests {
         }
     }
 
-    fn reconcile_request(publisher_id: &str, backends: Vec<NativeCallBackend>) -> ReconcileNativeCallBackendsRequest {
+    fn reconcile_request(
+        publisher_id: &str,
+        backends: Vec<NativeCallBackend>,
+    ) -> ReconcileNativeCallBackendsRequest {
         ReconcileNativeCallBackendsRequest {
             call_id: "call".into(),
             publisher_id: publisher_id.into(),
