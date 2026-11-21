@@ -23,6 +23,7 @@ const COMMANDS: &[&str] = &[
     "fulfill_end_call",
     "report_system_call_connected",
     "set_native_call_encryption_key",
+    "reconcile_native_call_backends",
     "get_native_call_state",
     "get_audio_routes",
     "set_audio_route",

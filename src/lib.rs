@@ -55,6 +55,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::fulfill_end_call,
             commands::report_system_call_connected,
             commands::set_native_call_encryption_key,
+            commands::reconcile_native_call_backends,
             commands::get_native_call_state,
             commands::get_audio_routes,
             commands::set_audio_route,

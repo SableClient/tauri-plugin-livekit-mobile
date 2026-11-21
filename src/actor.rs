@@ -21,8 +21,8 @@ use crate::models::{
     ClearNativeCallLocalVideoOverlayRequest, ClearNativeCallRemoteVideoOverlayRequest,
     ConnectNativeCallRequest, DisconnectNativeCallRequest, EndSystemCallRequest,
     FulfillAnswerCallRequest, FulfillEndCallRequest, GetAudioRoutesRequest, GetAudioRoutesResponse,
-    NativeCallCapabilities, NativeCallFailureCode, NativeCallSnapshot, ReportConnectedRequest,
-    ReportIncomingCallRequest, SetAudioInputRequest, SetAudioRouteRequest, SetNativeCallAudioProcessingRequest,
+    NativeCallCapabilities, NativeCallFailureCode, NativeCallSnapshot,
+    ReconcileNativeCallBackendsRequest, ReportConnectedRequest, ReportIncomingCallRequest, SetAudioInputRequest, SetAudioRouteRequest, SetNativeCallAudioProcessingRequest,
     SetNativeCallCameraEnabledRequest, SetNativeCallEncryptionKeyRequest,
     SetNativeCallLocalVideoOverlayRequest, SetNativeCallMicrophoneEnabledRequest,
     SetNativeCallParticipantVolumeRequest, SetNativeCallPiPEnabledRequest,
@@ -144,6 +144,8 @@ forwarded_commands! {
     SetNativeCallEncryptionKey(SetNativeCallEncryptionKeyRequest) -> NativeCallSnapshot
         => set_native_call_encryption_key, |r| call_id_is_valid(&r.call_id)
             && encryption_key_material_is_valid(&r.identity, &r.key);
+    ReconcileNativeCallBackends(ReconcileNativeCallBackendsRequest) -> NativeCallSnapshot
+        => reconcile_native_call_backends, |r| reconcile_backends_request_is_valid(r);
     StartSystemCall(StartSystemCallRequest) -> ()
         => start_system_call, |r| !r.call_id.trim().is_empty()
             && !r.uuid.trim().is_empty()
@@ -198,6 +200,19 @@ fn encryption_key_material_is_valid(identity: &str, key: &str) -> bool {
             .decode(key)
             .map(|bytes| !bytes.is_empty())
             .unwrap_or(false)
+}
+
+#[cfg(any(mobile, test))]
+fn reconcile_backends_request_is_valid(request: &ReconcileNativeCallBackendsRequest) -> bool {
+    let mut ids = std::collections::HashSet::new();
+    call_id_is_valid(&request.call_id)
+        && request.backends.iter().all(|backend| {
+            !backend.id.trim().is_empty()
+                && !backend.url.trim().is_empty()
+                && !backend.token.trim().is_empty()
+                && ids.insert(backend.id.as_str())
+        })
+        && ids.contains(request.publisher_id.as_str())
 }
 
 #[cfg(any(mobile, test))]
@@ -267,6 +282,7 @@ fn idle_snapshot() -> NativeCallSnapshot {
         remote_participants: Vec::new(),
         last_error: None,
         local_connection_quality: None,
+        subscriber_backends: Vec::new(),
     }
 }
 
@@ -634,10 +650,11 @@ mod tests {
     use super::{
         call_id_is_valid, clear_remote_video_overlay_request_is_valid, connect_request_is_valid,
         encryption_key_material_is_valid, local_video_overlay_request_is_valid,
-        remote_video_overlay_request_is_valid,
+        reconcile_backends_request_is_valid, remote_video_overlay_request_is_valid,
     };
     use crate::models::{
         ClearNativeCallRemoteVideoOverlayRequest, ConnectNativeCallRequest, EncryptionKey,
+        NativeCallBackend, ReconcileNativeCallBackendsRequest,
         SetNativeCallLocalVideoOverlayRequest, SetNativeCallRemoteVideoOverlayRequest,
     };
 
@@ -653,6 +670,45 @@ mod tests {
             reconnect_attempts: None,
             caller_name: None,
         }
+    }
+
+    fn backend(id: &str) -> NativeCallBackend {
+        NativeCallBackend {
+            id: id.into(),
+            url: "wss://livekit.example".into(),
+            token: "jwt".into(),
+        }
+    }
+
+    fn reconcile_request(publisher_id: &str, backends: Vec<NativeCallBackend>) -> ReconcileNativeCallBackendsRequest {
+        ReconcileNativeCallBackendsRequest {
+            call_id: "call".into(),
+            publisher_id: publisher_id.into(),
+            backends,
+        }
+    }
+
+    #[test]
+    fn reconcile_validation_requires_complete_distinct_backends_with_the_publisher() {
+        assert!(reconcile_backends_request_is_valid(&reconcile_request(
+            "a",
+            vec![backend("a"), backend("b")]
+        )));
+
+        assert!(!reconcile_backends_request_is_valid(&reconcile_request(
+            "c",
+            vec![backend("a"), backend("b")]
+        )));
+        assert!(!reconcile_backends_request_is_valid(&reconcile_request(
+            "a",
+            vec![backend("a"), backend("a")]
+        )));
+        let mut blank_token = backend("b");
+        blank_token.token = " ".into();
+        assert!(!reconcile_backends_request_is_valid(&reconcile_request(
+            "a",
+            vec![backend("a"), blank_token]
+        )));
     }
 
     #[test]

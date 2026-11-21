@@ -25,6 +25,7 @@ permissions = [
     "allow-fulfill-end-call",
     "allow-report-system-call-connected",
     "allow-set-native-call-encryption-key",
+    "allow-reconcile-native-call-backends",
     "allow-get-native-call-state",
     "allow-get-audio-routes",
     "allow-set-audio-route",

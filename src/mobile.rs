@@ -16,8 +16,8 @@ use crate::{
         DisconnectNativeCallRequest, EndSystemCallRequest, FulfillAnswerCallRequest,
         FulfillEndCallRequest, GetAudioRoutesRequest, GetAudioRoutesResponse,
         NativeCallCapabilities, NativeCallCapabilitiesWire, NativeCallChannelEvent,
-        NativeCallFailureCode, NativeCallSnapshot, NativeConnectCallFields, ReportConnectedRequest,
-        ReportIncomingCallRequest, SetAudioInputRequest, SetAudioRouteRequest, SetNativeCallAudioProcessingRequest,
+        NativeCallFailureCode, NativeCallSnapshot, NativeConnectCallFields,
+        ReconcileNativeCallBackendsRequest, ReportConnectedRequest, ReportIncomingCallRequest, SetAudioInputRequest, SetAudioRouteRequest, SetNativeCallAudioProcessingRequest,
         SetNativeCallCameraEnabledRequest, SetNativeCallEncryptionKeyRequest,
         SetNativeCallLocalVideoOverlayRequest, SetNativeCallMicrophoneEnabledRequest,
         SetNativeCallParticipantVolumeRequest, SetNativeCallPiPEnabledRequest,
@@ -67,6 +67,7 @@ mod platform_commands {
     pub(super) const FULFILL_END_CALL: &str = "fulfillEndCall";
     pub(super) const REPORT_CONNECTED: &str = "reportSystemCallConnected";
     pub(super) const SET_ENCRYPTION_KEY: &str = "setNativeCallEncryptionKey";
+    pub(super) const RECONCILE_BACKENDS: &str = "reconcileNativeCallBackends";
     pub(super) const GET_AUDIO_ROUTES: &str = "getAudioRoutes";
     pub(super) const SET_AUDIO_ROUTE: &str = "setAudioRoute";
     pub(super) const SET_AUDIO_INPUT: &str = "setAudioInput";
@@ -100,6 +101,7 @@ mod platform_commands {
     pub(super) const FULFILL_END_CALL: &str = "fulfillEndCall";
     pub(super) const REPORT_CONNECTED: &str = "reportConnected";
     pub(super) const SET_ENCRYPTION_KEY: &str = "setEncryptionKey";
+    pub(super) const RECONCILE_BACKENDS: &str = "reconcileBackends";
     pub(super) const GET_AUDIO_ROUTES: &str = "getAudioRoutes";
     pub(super) const SET_AUDIO_ROUTE: &str = "setAudioRoute";
     pub(super) const SET_AUDIO_INPUT: &str = "setAudioInput";
@@ -303,6 +305,14 @@ impl<R: Runtime> MobileBackend<R> {
         request: ClearNativeCallLocalVideoOverlayRequest,
     ) -> crate::Result<NativeCallSnapshot> {
         self.invoke(platform_commands::CLEAR_LOCAL_VIDEO_OVERLAY, request)
+            .await
+    }
+
+    pub(crate) async fn reconcile_native_call_backends(
+        &self,
+        request: ReconcileNativeCallBackendsRequest,
+    ) -> crate::Result<NativeCallSnapshot> {
+        self.invoke(platform_commands::RECONCILE_BACKENDS, request)
             .await
     }
 

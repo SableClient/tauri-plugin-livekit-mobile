@@ -159,6 +159,16 @@ pub(crate) async fn set_native_call_encryption_key<R: Runtime>(
 }
 
 #[tauri_command]
+pub(crate) async fn reconcile_native_call_backends<R: Runtime>(
+    app: AppHandle<R>,
+    payload: ReconcileNativeCallBackendsRequest,
+) -> Result<NativeCallSnapshot> {
+    app.native_call_bridge()
+        .reconcile_native_call_backends(payload)
+        .await
+}
+
+#[tauri_command]
 pub(crate) async fn start_system_call<R: Runtime>(
     app: AppHandle<R>,
     payload: StartSystemCallRequest,

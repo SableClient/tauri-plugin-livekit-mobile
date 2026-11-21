@@ -28,6 +28,7 @@ Default permissions for the plugin
 - `allow-fulfill-end-call`
 - `allow-report-system-call-connected`
 - `allow-set-native-call-encryption-key`
+- `allow-reconcile-native-call-backends`
 - `allow-get-native-call-state`
 - `allow-get-audio-routes`
 - `allow-set-audio-route`
@@ -351,6 +352,32 @@ Enables the get_voip_token command without any pre-configured scope.
 <td>
 
 Denies the get_voip_token command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:allow-reconcile-native-call-backends`
+
+</td>
+<td>
+
+Enables the reconcile_native_call_backends command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`livekit-mobile:deny-reconcile-native-call-backends`
+
+</td>
+<td>
+
+Denies the reconcile_native_call_backends command without any pre-configured scope.
 
 </td>
 </tr>

@@ -68,6 +68,8 @@ export type NativeCallSnapshot = {
   remoteParticipants?: NativeCallRemoteParticipant[];
   lastError?: { code: NativeCallFailureCode; message: string };
   localConnectionQuality?: string;
+  /** Ids of the subscribe-only backends that are currently connected. */
+  subscriberBackends?: string[];
 };
 
 /** Microphone processing the native capturer applies. Every field defaults to
@@ -277,6 +279,32 @@ export const setNativeCallEncryptionKey = (
   request: SetNativeCallEncryptionKeyRequest
 ): Promise<NativeCallSnapshot> =>
   invoke<NativeCallSnapshot>('plugin:livekit-mobile|set_native_call_encryption_key', {
+    payload: request,
+  });
+
+export type NativeCallBackend = {
+  id: string;
+  url: string;
+  token: string;
+};
+
+export type ReconcileNativeCallBackendsRequest = {
+  callId: string;
+  publisherId: string;
+  backends: NativeCallBackend[];
+};
+
+/**
+ * Sets the LiveKit servers of a multi-server call. The room connected by
+ * `connectNativeCall` publishes on `publisherId`; every other backend is joined
+ * subscribe-only and its participants are merged into the snapshot. A backend
+ * that fails to connect or drops is left out of `subscriberBackends`; call this
+ * again to retry it.
+ */
+export const reconcileNativeCallBackends = (
+  request: ReconcileNativeCallBackendsRequest
+): Promise<NativeCallSnapshot> =>
+  invoke<NativeCallSnapshot>('plugin:livekit-mobile|reconcile_native_call_backends', {
     payload: request,
   });
 

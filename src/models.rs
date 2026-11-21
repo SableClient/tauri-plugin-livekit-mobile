@@ -306,6 +306,9 @@ pub struct NativeCallSnapshot {
     pub last_error: Option<NativeCallError>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local_connection_quality: Option<String>,
+    /// Ids of the subscribe-only backends that are currently connected.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subscriber_backends: Vec<String>,
 }
 
 impl NativeCallSnapshot {
@@ -448,6 +451,37 @@ pub struct SetNativeCallParticipantVolumeRequest {
     pub volume: f64,
     #[serde(default)]
     pub screen_share: bool,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeCallBackend {
+    pub id: String,
+    pub url: String,
+    pub token: String,
+}
+
+// Token must never land in logs: redact it in `Debug`.
+impl std::fmt::Debug for NativeCallBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NativeCallBackend")
+            .field("id", &self.id)
+            .field("url", &self.url)
+            .field("token", &"[redacted]")
+            .finish()
+    }
+}
+
+/// The servers the call should be connected to: the room connected by
+/// `connect_native_call` publishes on `publisher_id`, every other backend is
+/// joined subscribe-only. A publisher whose URL differs from the connected one
+/// moves the publishing room there.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReconcileNativeCallBackendsRequest {
+    pub call_id: String,
+    pub publisher_id: String,
+    pub backends: Vec<NativeCallBackend>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -896,6 +930,7 @@ mod tests {
             remote_participants: Vec::new(),
             last_error: None,
             local_connection_quality: None,
+            subscriber_backends: Vec::new(),
         })
         .unwrap();
         assert_eq!(
@@ -925,6 +960,7 @@ mod tests {
                 NativeCallFailureCode::Disconnected,
             )),
             local_connection_quality: None,
+            subscriber_backends: Vec::new(),
         })
         .unwrap();
         assert_eq!(

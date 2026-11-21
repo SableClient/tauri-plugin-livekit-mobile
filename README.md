@@ -103,7 +103,8 @@ This grants `getNativeCallCapabilities`, `connectNativeCall`,
 `setNativeCallAudioProcessing`, `setNativeCallParticipantVolume`,
 `setNativeCallCameraEnabled`, `switchNativeCallCamera`, and
 `setNativeCallRemoteVideoOverlay`, `clearNativeCallRemoteVideoOverlay`,
-`setNativeCallEncryptionKey`, and `getNativeCallState`.
+`setNativeCallEncryptionKey`, `reconcileNativeCallBackends`, and
+`getNativeCallState`.
 
 ## Host app setup
 
@@ -301,6 +302,27 @@ await unlisten();
   snapshot (or `timeout` if the native side cannot be reached at all). The
   channel is never merely abandoned, so a room that survives cancellation is
   never orphaned from its events.
+
+### Multi-server calls
+
+A MatrixRTC call can span several LiveKit servers: each member publishes on
+its own and subscribes on the others.
+
+- `connectNativeCall` connects the room that publishes.
+- `reconcileNativeCallBackends({ callId, publisherId, backends })`, with
+  `backends` a list of `{ id, url, token }`, sets every server of the call.
+  Each backend other than `publisherId` is joined subscribe-only, and its
+  participants are merged into `remoteParticipants` by identity. A backend
+  missing from a later list is left.
+- The snapshot's `subscriberBackends` lists the subscribe-only backends that
+  are connected. One that fails to connect or drops is left out of it; call
+  `reconcileNativeCallBackends` again to retry.
+- When the publisher backend's `url` differs from the connected one, the
+  publishing room moves there without ending the system call. The snapshot
+  reports `reconnecting` meanwhile.
+
+A blank `id`, `url` or `token`, a repeated `id`, or a `publisherId` that is
+not in `backends` rejects with `invalid_request`.
 
 ### Shared E2EE keys
 
