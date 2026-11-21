@@ -752,6 +752,44 @@ final class WireContractTests: XCTestCase {
       microphoneEnabled: false, cameraEnabled: false, participantCount: 0)
   }
 
+  func testReconcileBackendsArgsDecode() throws {
+    let (invoke, _) = makeInvoke(
+      data: #"{"callId": "call-1", "publisherId": "a", "backends": [{"id": "a", "url": "wss://a", "token": "t"}]}"#)
+    let args = try invoke.parseArgs(ReconcileBackendsArgs.self)
+    XCTAssertEqual(args.callId, "call-1")
+    XCTAssertEqual(args.publisherId, "a")
+    XCTAssertEqual(args.backends.map(\.id), ["a"])
+    XCTAssertEqual(args.backends.first?.url, "wss://a")
+  }
+
+  func testStaleReconcileBackendsIsNoOpResolve() async throws {
+    let plugin = LivekitMobilePlugin()
+    let (invoke, recording) = makeInvoke(
+      data: #"{"callId": "unknown", "publisherId": "a", "backends": [{"id": "a", "url": "wss://a", "token": "t"}]}"#)
+    try plugin.reconcileBackends(invoke)
+    let response = await recording.wait()
+    XCTAssertEqual(response.id, Self.resolveId)
+    let payload = try jsonObject(try XCTUnwrap(response.payload))
+    XCTAssertEqual(payload["connectionState"] as? String, "idle")
+    XCTAssertNil(payload["subscriberBackends"])
+  }
+
+  func testReconcileBackendsRejectsAPublisherOutsideTheBackends() async throws {
+    let plugin = LivekitMobilePlugin()
+    let (invoke, recording) = makeInvoke(
+      data: #"{"callId": "call-1", "publisherId": "b", "backends": [{"id": "a", "url": "wss://a", "token": "t"}]}"#)
+    try plugin.reconcileBackends(invoke)
+    let response = await recording.wait()
+    XCTAssertEqual(response.id, Self.rejectId)
+  }
+
+  func testSnapshotListsConnectedSubscriberBackends() throws {
+    var snapshot = Self.idleSnapshot()
+    snapshot.subscriberBackends = ["b", "c"]
+    let state = try jsonObject(snapshot)
+    XCTAssertEqual(state["subscriberBackends"] as? [String], ["b", "c"])
+  }
+
   func testStaleSetMicrophoneIsNoOpResolve() async throws {
     let plugin = LivekitMobilePlugin()
     let (invoke, recording) = makeInvoke(

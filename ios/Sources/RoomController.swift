@@ -57,6 +57,10 @@ final class RoomController: NSObject {
   }
 
   private var room: Room?
+  private var subscriberRooms: [String: Room] = [:]
+  private var connectingBackends: Set<String> = []
+  private var publisherUrl: String?
+  private var connectOptions: ConnectOptions?
   private var channel: Channel?
   private var callId: String?
   /// Per-call E2EE key provider. Non-nil only while the current attempt is
@@ -160,7 +164,8 @@ final class RoomController: NSObject {
       participantCount: participantCount,
       remoteParticipants: remoteParticipants,
       lastError: lastError,
-      localConnectionQuality: localConnectionQuality)
+      localConnectionQuality: localConnectionQuality,
+      subscriberBackends: subscriberRooms.keys.sorted())
   }
 
   /// Publishes the current snapshot on the active call's channel and bumps
@@ -205,6 +210,7 @@ final class RoomController: NSObject {
       keyProvider = nil
       removeOverlayViews()
       removeLocalOverlayView()
+      await Self.disconnect(takeSubscriberRooms())
       await staleRoom.disconnect()
       guard attemptId == attempt else {
         rejectCancelled(invoke)
@@ -282,7 +288,7 @@ final class RoomController: NSObject {
         e2eeOptions: e2eeOptions, audioProcessing: audioProcessing))
     room = newRoom
 
-    let connectOptions = Self.buildConnectOptions(from: args)
+    connectOptions = Self.buildConnectOptions(from: args)
 
     do {
       try await newRoom.connect(url: args.url, token: args.token,
@@ -309,6 +315,7 @@ final class RoomController: NSObject {
       return
     }
 
+    publisherUrl = args.url
     // The delegate hop for the connected transition may still be queued; sync
     // from the room so the resolved snapshot is exact (the hop deduplicates).
     applyConnectionState(.connected, from: newRoom)
@@ -453,15 +460,16 @@ final class RoomController: NSObject {
   }
 
   private func applyParticipantVolumes() {
-    guard let room else { return }
-    for (identity, participant) in room.remoteParticipants {
-      for publication in participant.trackPublications.values
-      where publication.source == .microphone || publication.source == .screenShareAudio {
-        let screen = publication.source == .screenShareAudio
-        let volume = screen
-          ? (screenShareVolumes[identity.stringValue] ?? 0)
-          : (participantVolumes[identity.stringValue] ?? 1)
-        (publication.track as? RemoteAudioTrack)?.volume = volume
+    for room in callRooms {
+      for (identity, participant) in room.remoteParticipants {
+        for publication in participant.trackPublications.values
+        where publication.source == .microphone || publication.source == .screenShareAudio {
+          let screen = publication.source == .screenShareAudio
+          let volume = screen
+            ? (screenShareVolumes[identity.stringValue] ?? 0)
+            : (participantVolumes[identity.stringValue] ?? 1)
+          (publication.track as? RemoteAudioTrack)?.volume = volume
+        }
       }
     }
   }
@@ -740,6 +748,144 @@ final class RoomController: NSObject {
     return ConnectOptions(iceServers: ice ?? [])
   }
 
+  // MARK: - Multi-server calls
+
+  private var callRooms: [Room] {
+    (room.map { [$0] } ?? []) + subscriberRooms.values
+  }
+
+  private func takeSubscriberRooms() -> [Room] {
+    let rooms = Array(subscriberRooms.values)
+    subscriberRooms = [:]
+    connectingBackends = []
+    publisherUrl = nil
+    return rooms
+  }
+
+  private nonisolated static func disconnect(_ rooms: [Room]) async {
+    for room in rooms {
+      await room.disconnect()
+    }
+  }
+
+  func reconcileBackends(
+    callId requestedCallId: String, publisherId: String, backends: [BackendArgs],
+    invoke: Invoke
+  ) async {
+    guard callId == requestedCallId, room != nil else {
+      invoke.resolve(snapshot())
+      return
+    }
+    guard connectionState == .connected,
+      let publisher = backends.first(where: { $0.id == publisherId })
+    else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+
+    let wanted = Set(backends.map(\.id)).subtracting([publisherId])
+    let dropped = subscriberRooms.filter { !wanted.contains($0.key) }
+    for backendId in dropped.keys {
+      subscriberRooms.removeValue(forKey: backendId)
+    }
+    connectingBackends.formIntersection(wanted)
+    Task { await Self.disconnect(Array(dropped.values)) }
+
+    if publisherUrl != publisher.url {
+      guard await movePublisher(to: publisher, invoke: invoke) else { return }
+    }
+
+    for backend in backends
+    where wanted.contains(backend.id) && subscriberRooms[backend.id] == nil
+      && !connectingBackends.contains(backend.id)
+    {
+      connectSubscriber(backend, callId: requestedCallId)
+    }
+    refreshCallParticipants(force: !dropped.isEmpty)
+    invoke.resolve(snapshot())
+  }
+
+  private func connectSubscriber(_ backend: BackendArgs, callId startedCallId: String) {
+    connectingBackends.insert(backend.id)
+    let newRoom = Room(
+      delegate: self,
+      roomOptions: Self.makeRoomOptions(
+        e2eeOptions: keyProvider.map { E2EEOptions(keyProvider: $0) },
+        audioProcessing: audioProcessing))
+    let options = connectOptions
+    Task {
+      let connected: Bool
+      do {
+        try await newRoom.connect(
+          url: backend.url, token: backend.token, connectOptions: options)
+        connected = true
+      } catch {
+        connected = false
+      }
+      guard callId == startedCallId, connectingBackends.remove(backend.id) != nil, connected
+      else {
+        await newRoom.disconnect()
+        return
+      }
+      subscriberRooms[backend.id] = newRoom
+      applyParticipantVolumes()
+      refreshCallParticipants(force: true)
+    }
+  }
+
+  private func movePublisher(to backend: BackendArgs, invoke: Invoke) async -> Bool {
+    guard let oldRoom = room else { return false }
+    attempt &+= 1
+    let attemptId = attempt
+    let microphoneWasEnabled = microphoneEnabled
+    let cameraWasEnabled = cameraEnabled
+
+    let newRoom = Room(
+      delegate: self,
+      roomOptions: Self.makeRoomOptions(
+        e2eeOptions: keyProvider.map { E2EEOptions(keyProvider: $0) },
+        audioProcessing: audioProcessing))
+    room = newRoom
+    applyConnectionState(.reconnecting)
+    await oldRoom.disconnect()
+
+    do {
+      try await newRoom.connect(
+        url: backend.url, token: backend.token, connectOptions: connectOptions)
+    } catch {
+      guard attemptId == attempt else {
+        rejectCancelled(invoke)
+        return false
+      }
+      failCall(from: newRoom)
+      reject(invoke, .connectFailed)
+      return false
+    }
+    guard attemptId == attempt, room === newRoom else {
+      await newRoom.disconnect()
+      rejectCancelled(invoke)
+      return false
+    }
+    publisherUrl = backend.url
+    applyConnectionState(.connected, from: newRoom)
+
+    if microphoneWasEnabled {
+      _ = try? await newRoom.localParticipant.setMicrophone(enabled: true)
+    }
+    if cameraWasEnabled {
+      _ = try? await newRoom.localParticipant.setCamera(enabled: true)
+    }
+    guard attemptId == attempt, room === newRoom else {
+      rejectCancelled(invoke)
+      return false
+    }
+    microphoneEnabled = newRoom.localParticipant.isMicrophoneEnabled()
+    cameraEnabled = newRoom.localParticipant.isCameraEnabled()
+    screenShareEnabled = false
+    emitSnapshotChanged()
+    return true
+  }
+
   // MARK: - Remote video overlay
 
   /// Attaches the track's non-interactive `VideoView` to the resolved remote
@@ -762,7 +908,7 @@ final class RoomController: NSObject {
     devicePixelRatio: Double,
     invoke: Invoke
   ) {
-    guard callId == requestedCallId, let room else {
+    guard callId == requestedCallId, room != nil else {
       invoke.resolve(snapshot())
       return
     }
@@ -796,8 +942,8 @@ final class RoomController: NSObject {
       above: webView, in: container)
 
     guard
-      let track = Self.remoteVideoTrack(
-        participantIdentity: participantIdentity, trackSid: trackSid, in: room)
+      let track = remoteVideoTrack(
+        participantIdentity: participantIdentity, trackSid: trackSid)
     else {
       // Clears safely: detach without failing the command.
       detachOverlay(from: view)
@@ -899,14 +1045,14 @@ final class RoomController: NSObject {
   /// lifecycle events: rebinds to the (possibly replaced) live track, or
   /// clears the attachment when the track is gone (unpublish, unsubscribe, or
   /// the participant left). Never recreates a removed view.
-  private func reconcileOverlay(in room: Room) {
+  private func reconcileOverlay() {
     guard !remoteOverlays.isEmpty else { return }
     for overlay in remoteOverlays {
       let view = overlay.view
       guard
-        let track = Self.remoteVideoTrack(
+        let track = remoteVideoTrack(
           participantIdentity: overlay.selection.participantIdentity,
-          trackSid: overlay.selection.trackSid, in: room)
+          trackSid: overlay.selection.trackSid)
       else {
         detachOverlay(from: view)
         continue
@@ -948,6 +1094,17 @@ final class RoomController: NSObject {
     // `isEmpty` covers null/infinite rects and non-positive dimensions.
     guard !clipped.isNull, !clipped.isEmpty else { return nil }
     return clipped
+  }
+
+  private func remoteVideoTrack(participantIdentity: String, trackSid: String) -> VideoTrack? {
+    for room in callRooms {
+      if let track = Self.remoteVideoTrack(
+        participantIdentity: participantIdentity, trackSid: trackSid, in: room)
+      {
+        return track
+      }
+    }
+    return nil
   }
 
   /// Resolves one remote participant's video track by identity plus track
@@ -1093,6 +1250,7 @@ final class RoomController: NSObject {
     attempt &+= 1
     pipEnabled = false
     let roomToClose = room
+    let subscribers = takeSubscriberRooms()
     room = nil
     channel = nil
     if let callId { callKitController?.endCall(callId: callId, remoteEnded: true) }
@@ -1111,6 +1269,7 @@ final class RoomController: NSObject {
     removeOverlayViews()
     removeLocalOverlayView()
     if #available(iOS 15.0, *) { stopPiP() }
+    await Self.disconnect(subscribers)
     if let roomToClose {
       await roomToClose.disconnect()
     }
@@ -1264,6 +1423,7 @@ final class RoomController: NSObject {
     pipEnabled = false
 
     let roomToClose = room
+    let subscribers = takeSubscriberRooms()
     room = nil
     connectionState = .idle
     microphoneEnabled = false
@@ -1286,6 +1446,7 @@ final class RoomController: NSObject {
     emitSnapshotChanged()
     channel = nil
 
+    await Self.disconnect(subscribers)
     if let roomToClose {
       await roomToClose.disconnect()
     }
@@ -1301,13 +1462,15 @@ final class RoomController: NSObject {
       microphoneEnabled = room.localParticipant.isMicrophoneEnabled()
       cameraEnabled = room.localParticipant.isCameraEnabled()
       screenShareEnabled = room.localParticipant.isScreenShareEnabled()
-      remoteParticipants = Self.projectRemoteParticipants(in: room)
+      remoteParticipants = projectCallParticipants()
       participantCount = remoteParticipants.count
     }
     emitSnapshotChanged()
   }
 
   private func failConnect(_ invoke: Invoke, error: BridgeError) {
+    let subscribers = takeSubscriberRooms()
+    Task { await Self.disconnect(subscribers) }
     connectionState = .failed
     microphoneEnabled = false
     cameraEnabled = false
@@ -1671,8 +1834,7 @@ extension RoomController: RoomDelegate {
   ) {
     Task { @MainActor [weak self] in
       if let identity = participant.identity?.stringValue {
-        self?.participantVolumes.removeValue(forKey: identity)
-        self?.screenShareVolumes.removeValue(forKey: identity)
+        self?.forgetVolumesIfGone(identity)
       }
       self?.updateRemoteParticipants(from: room)
     }
@@ -1752,6 +1914,11 @@ extension RoomController: RoomDelegate {
   }
 
   private func handleDisconnect(from room: Room) {
+    if let backendId = subscriberRooms.first(where: { $0.value === room })?.key {
+      subscriberRooms.removeValue(forKey: backendId)
+      refreshCallParticipants(force: true)
+      return
+    }
     guard room === self.room else { return }
     guard connectionState != .idle, connectionState != .failed else { return }
 
@@ -1778,6 +1945,8 @@ extension RoomController: RoomDelegate {
     // from the lock screen.
     if let callId { callKitController?.endCall(callId: callId, remoteEnded: true, reason: .failed) }
     self.room = nil
+    let subscribers = takeSubscriberRooms()
+    Task { await Self.disconnect(subscribers) }
     pipEnabled = false
     keyProvider = nil
     microphoneEnabled = false
@@ -1836,11 +2005,12 @@ extension RoomController: RoomDelegate {
   private func handleConnectionQuality(
     _ quality: ConnectionQuality, participant: Participant, from room: Room
   ) {
-    guard room === self.room else { return }
+    guard callRooms.contains(where: { $0 === room }) else { return }
     guard connectionState == .connected || connectionState == .reconnecting
     else { return }
 
     if participant is LocalParticipant {
+      guard room === self.room else { return }
       let wire = Self.connectionQualityWire(quality)
       guard localConnectionQuality != wire else { return }
       localConnectionQuality = wire
@@ -1858,16 +2028,44 @@ extension RoomController: RoomDelegate {
   /// overlay against the room's current truth, even when the snapshot
   /// projection itself is unchanged.
   private func updateRemoteParticipants(from room: Room) {
-    guard room === self.room else { return }
-    guard connectionState == .connected || connectionState == .reconnecting
+    guard callRooms.contains(where: { $0 === room }) else { return }
+    refreshCallParticipants(force: false)
+  }
+
+  private func refreshCallParticipants(force: Bool) {
+    guard let room, connectionState == .connected || connectionState == .reconnecting
     else { return }
-    reconcileOverlay(in: room)
+    reconcileOverlay()
     reconcileLocalOverlay(in: room)
-    let projection = Self.projectRemoteParticipants(in: room)
-    guard projection != remoteParticipants else { return }
+    let projection = projectCallParticipants()
+    guard force || projection != remoteParticipants else { return }
     remoteParticipants = projection
     participantCount = projection.count
     emitSnapshotChanged()
+  }
+
+  /// A participant can be in several rooms of the call and publishes in one,
+  /// so the entry with publications wins.
+  private func projectCallParticipants() -> [BridgeRemoteParticipant] {
+    var merged: [String: BridgeRemoteParticipant] = [:]
+    for room in callRooms {
+      for participant in Self.projectRemoteParticipants(in: room) {
+        if let seen = merged[participant.identity], seen.publishes || !participant.publishes {
+          continue
+        }
+        merged[participant.identity] = participant
+      }
+    }
+    return merged.values.sorted { $0.identity < $1.identity }
+  }
+
+  private func forgetVolumesIfGone(_ identity: String) {
+    let present = callRooms.contains { room in
+      room.remoteParticipants.keys.contains { $0.stringValue == identity }
+    }
+    guard !present else { return }
+    participantVolumes.removeValue(forKey: identity)
+    screenShareVolumes.removeValue(forKey: identity)
   }
 }
 

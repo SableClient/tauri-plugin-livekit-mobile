@@ -7,7 +7,8 @@ import WebKit
 // Wire contract summary (the shared Rust bridge owns the full schema):
 // - Commands: capabilities, connect, disconnect, cancelConnect,
 //   setMicrophoneEnabled, setCameraEnabled, switchCamera, getState,
-//   setRemoteVideoOverlay, clearRemoteVideoOverlay, setEncryptionKey.
+//   setRemoteVideoOverlay, clearRemoteVideoOverlay, setEncryptionKey,
+//   reconcileBackends.
 // - Every response is the authoritative snapshot
 //   { revision, callId|null, connectionState, microphoneEnabled,
 //     cameraEnabled, participantCount, lastError?: {code, message} }.
@@ -99,6 +100,18 @@ struct SetEncryptionKeyArgs: Decodable {
 
 struct DisconnectArgs: Decodable {
   let callId: String
+}
+
+struct BackendArgs: Decodable {
+  let id: String
+  let url: String
+  let token: String
+}
+
+struct ReconcileBackendsArgs: Decodable {
+  let callId: String
+  let publisherId: String
+  let backends: [BackendArgs]
 }
 
 struct SetMicrophoneEnabledArgs: Decodable {
@@ -290,6 +303,10 @@ struct BridgeRemoteParticipant: Encodable, Equatable {
   let microphone: BridgeRemoteMicrophone?
   /// Omitted when the SDK reports `.unknown`.
   let connectionQuality: BridgeConnectionQuality?
+
+  var publishes: Bool {
+    camera != nil || screenShare != nil || screenShareAudio != nil || microphone != nil
+  }
 }
 
 /// One selectable audio output route. `id` round-trips unchanged to
@@ -333,6 +350,7 @@ struct BridgeStateResponse: Encodable {
   /// Omitted when empty (e.g. before the first quality event or when the SDK
   /// reports `.unknown`).
   let localConnectionQuality: BridgeConnectionQuality?
+  var subscriberBackends: [String] = []
 
   // Custom encoding: `callId` must be an explicit JSON null when idle, while
   // the optional `lastError` key is omitted when absent.
@@ -347,6 +365,7 @@ struct BridgeStateResponse: Encodable {
     case remoteParticipants
     case lastError
     case localConnectionQuality
+    case subscriberBackends
   }
 
   func encode(to encoder: Encoder) throws {
@@ -361,6 +380,9 @@ struct BridgeStateResponse: Encodable {
     try container.encode(remoteParticipants, forKey: .remoteParticipants)
     try container.encodeIfPresent(lastError, forKey: .lastError)
     try container.encodeIfPresent(localConnectionQuality, forKey: .localConnectionQuality)
+    if !subscriberBackends.isEmpty {
+      try container.encode(subscriberBackends, forKey: .subscriberBackends)
+    }
   }
 }
 
@@ -598,6 +620,30 @@ final class LivekitMobilePlugin: Plugin {
         keyIndex: args.keyIndex,
         key: args.key,
         invoke: invoke)
+    }
+  }
+
+  @objc public func reconcileBackends(_ invoke: Invoke) throws {
+    guard let args = try? invoke.parseArgs(ReconcileBackendsArgs.self),
+      args.backends.allSatisfy({
+        !$0.id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+          && !$0.url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+          && !$0.token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      }),
+      Set(args.backends.map(\.id)).count == args.backends.count,
+      args.backends.contains(where: { $0.id == args.publisherId })
+    else {
+      reject(invoke, .invalidRequest)
+      return
+    }
+    Task { @MainActor [weak controller] in
+      guard let controller else {
+        reject(invoke, .unavailable)
+        return
+      }
+      await controller.reconcileBackends(
+        callId: args.callId, publisherId: args.publisherId,
+        backends: args.backends, invoke: invoke)
     }
   }
 
